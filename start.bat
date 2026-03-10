@@ -33,6 +33,9 @@ if exist ".git" (
             if exist "packages\shared\dist" rmdir /s /q "packages\shared\dist"
             if exist "packages\server\dist" rmdir /s /q "packages\server\dist"
             if exist "packages\client\dist" rmdir /s /q "packages\client\dist"
+            del /q "packages\shared\tsconfig.tsbuildinfo" 2>nul
+            del /q "packages\server\tsconfig.tsbuildinfo" 2>nul
+            del /q "packages\client\tsconfig.tsbuildinfo" 2>nul
         ) else (
             echo  [OK] Already up to date
         )
@@ -102,15 +105,18 @@ set NODE_ENV=production
 if not defined PORT set PORT=7860
 if not defined HOST set HOST=0.0.0.0
 
+set PROTOCOL=http
+if defined SSL_CERT if defined SSL_KEY set PROTOCOL=https
+
 echo.
 echo  ══════════════════════════════════════════
-echo    Starting Marinara Engine on http://localhost:%PORT%
+echo    Starting Marinara Engine on %PROTOCOL%://localhost:%PORT%
 echo    Press Ctrl+C to stop
 echo  ══════════════════════════════════════════
 echo.
 
 :: Open browser after a short delay (use explorer.exe as fallback)
-start "" cmd /c "timeout /t 4 /nobreak >nul && start http://localhost:%PORT% || explorer http://localhost:%PORT%"
+start "" cmd /c "timeout /t 4 /nobreak >nul && start %PROTOCOL%://localhost:%PORT% || explorer %PROTOCOL%://localhost:%PORT%"
 
 :: Start server
 cd packages\server

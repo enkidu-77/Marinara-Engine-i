@@ -80,7 +80,11 @@ export async function importSTChat(jsonlContent: string, db: DB, opts?: ImportST
   if (!chat) return { error: "Failed to create chat" };
 
   // Import messages in batch
-  const msgInputs: { role: "system" | "user" | "assistant" | "narrator"; characterId: string | null; content: string }[] = [];
+  const msgInputs: {
+    role: "system" | "user" | "assistant" | "narrator";
+    characterId: string | null;
+    content: string;
+  }[] = [];
   for (let i = 1; i < lines.length; i++) {
     try {
       const stMsg = JSON.parse(lines[i]!) as STChatMessage;

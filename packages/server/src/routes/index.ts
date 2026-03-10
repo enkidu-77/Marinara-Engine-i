@@ -22,6 +22,7 @@ import { regexScriptsRoutes } from "./regex-scripts.routes.js";
 import { encounterRoutes } from "./encounter.routes.js";
 import { fontsRoutes } from "./fonts.routes.js";
 import { galleryRoutes } from "./gallery.routes.js";
+import { spotifyAuthRoutes } from "./spotify-auth.routes.js";
 
 export async function registerRoutes(app: FastifyInstance) {
   await app.register(chatsRoutes, { prefix: "/api/chats" });
@@ -44,4 +45,5 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(encounterRoutes, { prefix: "/api/encounter" });
   await app.register(fontsRoutes, { prefix: "/api/fonts" });
   await app.register(galleryRoutes, { prefix: "/api/gallery" });
+  await app.register(spotifyAuthRoutes, { prefix: "/api/spotify" });
 }

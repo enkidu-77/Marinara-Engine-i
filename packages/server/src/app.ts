@@ -13,7 +13,7 @@ import { seedDefaultPreset } from "./db/seed.js";
 import { existsSync } from "fs";
 import { join, resolve } from "path";
 
-export async function buildApp() {
+export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   const app = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? "warn",
@@ -21,6 +21,7 @@ export async function buildApp() {
         process.env.NODE_ENV !== "production" ? { target: "pino-pretty", options: { colorize: true } } : undefined,
     },
     bodyLimit: 50 * 1024 * 1024, // 50 MB — needed for PNG character cards with embedded avatar
+    ...(https && { https }),
   });
 
   // ── Plugins ──

@@ -2,7 +2,7 @@
 // Full-Page Agent Editor
 // Click an agent → opens this editor
 // ──────────────────────────────────────────────
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useUIStore } from "../../stores/ui.store";
 import { useAgentConfigs, useUpdateAgent, useCreateAgent, type AgentConfigRow } from "../../hooks/use-agents";
 import { useConnections } from "../../hooks/use-connections";
@@ -103,7 +103,15 @@ export function AgentEditor() {
   const [localPrompt, setLocalPrompt] = useState("");
   const [localInjectAsSection, setLocalInjectAsSection] = useState(false);
   const [localEnabledTools, setLocalEnabledTools] = useState<string[]>([]);
-  const [localSpotifyToken, setLocalSpotifyToken] = useState("");
+  const [localSpotifyClientId, setLocalSpotifyClientId] = useState("");
+  const [spotifyStatus, setSpotifyStatus] = useState<{
+    connected: boolean;
+    expired: boolean;
+    redirectUri: string | null;
+  } | null>(null);
+  const [spotifyConnecting, setSpotifyConnecting] = useState(false);
+  const spotifyPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const spotifyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [dirty, setDirty] = useState(false);
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -125,7 +133,7 @@ export function AgentEditor() {
       setLocalContextSize(settings.contextSize ?? "");
       setLocalInjectAsSection(settings.injectAsSection ?? false);
       setLocalEnabledTools(settings.enabledTools ?? DEFAULT_AGENT_TOOLS[dbConfig.type] ?? []);
-      setLocalSpotifyToken(settings.spotifyAccessToken ?? "");
+      setLocalSpotifyClientId(settings.spotifyClientId ?? "");
       setLocalPrompt(dbConfig.promptTemplate || "");
     } else if (builtIn) {
       setLocalName(builtIn.name);
@@ -135,7 +143,7 @@ export function AgentEditor() {
       setLocalContextSize("");
       setLocalInjectAsSection(builtIn.defaultInjectAsSection ?? false);
       setLocalEnabledTools(DEFAULT_AGENT_TOOLS[builtIn.id] ?? []);
-      setLocalSpotifyToken("");
+      setLocalSpotifyClientId("");
       setLocalPrompt("");
     } else {
       // Brand new custom agent — start empty
@@ -146,12 +154,42 @@ export function AgentEditor() {
       setLocalContextSize("");
       setLocalInjectAsSection(false);
       setLocalEnabledTools([]);
-      setLocalSpotifyToken("");
+      setLocalSpotifyClientId("");
       setLocalPrompt("");
     }
     setDirty(false);
     setSaveError(null);
   }, [agentDetailId, dbConfig, builtIn]);
+
+  // Fetch Spotify connection status when viewing a Spotify agent
+  const isSpotifyAgent = agentDetailId === "spotify" || dbConfig?.type === "spotify";
+  useEffect(() => {
+    if (!isSpotifyAgent || !dbConfig?.id) {
+      setSpotifyStatus(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/spotify/status?agentId=${encodeURIComponent(dbConfig.id)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled)
+          setSpotifyStatus({ connected: data.connected, expired: data.expired, redirectUri: data.redirectUri ?? null });
+      })
+      .catch(() => {
+        if (!cancelled) setSpotifyStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSpotifyAgent, dbConfig?.id]);
+
+  // Clean up Spotify polling timers on unmount
+  useEffect(() => {
+    return () => {
+      if (spotifyPollRef.current) clearInterval(spotifyPollRef.current);
+      if (spotifyTimeoutRef.current) clearTimeout(spotifyTimeoutRef.current);
+    };
+  }, []);
 
   // Whether the prompt textarea shows the default or a custom override
   const isUsingDefaultPrompt = !localPrompt.trim();
@@ -181,7 +219,7 @@ export function AgentEditor() {
         ...(localContextSize !== "" ? { contextSize: Number(localContextSize) } : {}),
         ...(localInjectAsSection ? { injectAsSection: true } : {}),
         enabledTools: localEnabledTools,
-        ...(localSpotifyToken ? { spotifyAccessToken: localSpotifyToken } : {}),
+        ...(localSpotifyClientId ? { spotifyClientId: localSpotifyClientId } : {}),
       },
     };
 
@@ -222,7 +260,7 @@ export function AgentEditor() {
     localContextSize,
     localInjectAsSection,
     localEnabledTools,
-    localSpotifyToken,
+    localSpotifyClientId,
     dbConfig,
     builtIn,
     updateAgent,
@@ -497,21 +535,136 @@ export function AgentEditor() {
               help="Connect your Spotify account to let this agent control playback."
             >
               <div className="space-y-3">
+                {/* Client ID input */}
                 <div>
-                  <label className="block text-[11px] font-medium text-white/60 mb-1">Access Token</label>
+                  <label className="block text-[11px] font-medium text-white/60 mb-1">Spotify Client ID</label>
                   <input
-                    type="password"
-                    value={localSpotifyToken}
+                    type="text"
+                    value={localSpotifyClientId}
                     onChange={(e) => {
-                      setLocalSpotifyToken(e.target.value);
+                      setLocalSpotifyClientId(e.target.value);
                       setDirty(true);
                     }}
-                    placeholder="Paste your Spotify access token..."
-                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder-white/30 outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/20"
+                    placeholder="Paste your Spotify app Client ID..."
+                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder-white/30 outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/20 font-mono"
                   />
                 </div>
+
+                {/* Connection status & buttons */}
+                {spotifyStatus?.connected ? (
+                  <div className="flex items-center gap-3">
+                    <span className="flex items-center gap-1.5 rounded-lg bg-green-500/10 px-3 py-2 text-xs font-medium text-green-400">
+                      <Check size={12} />
+                      {spotifyStatus.expired ? "Connected (token expired — will auto-refresh)" : "Connected to Spotify"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!dbConfig?.id) return;
+                        await fetch("/api/spotify/disconnect", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ agentId: dbConfig.id }),
+                        });
+                        setSpotifyStatus({
+                          connected: false,
+                          expired: false,
+                          redirectUri: spotifyStatus?.redirectUri ?? null,
+                        });
+                      }}
+                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/50 transition-colors hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!localSpotifyClientId.trim() || !dbConfig?.id || spotifyConnecting}
+                    onClick={async () => {
+                      if (!localSpotifyClientId.trim() || !dbConfig?.id) return;
+                      setSpotifyConnecting(true);
+                      try {
+                        // Save clientId first if dirty
+                        if (dirty) {
+                          await updateAgent.mutateAsync({
+                            id: dbConfig.id,
+                            settings: {
+                              ...(dbConfig.settings
+                                ? typeof dbConfig.settings === "string"
+                                  ? JSON.parse(dbConfig.settings as string)
+                                  : dbConfig.settings
+                                : {}),
+                              spotifyClientId: localSpotifyClientId,
+                            },
+                          });
+                        }
+                        const res = await fetch(
+                          `/api/spotify/authorize?${new URLSearchParams({
+                            clientId: localSpotifyClientId,
+                            agentId: dbConfig.id,
+                          })}`,
+                        );
+                        const data = await res.json();
+                        if (data.authUrl) {
+                          window.open(data.authUrl, "_blank", "width=500,height=700");
+                          // Clear any existing poll before starting a new one
+                          if (spotifyPollRef.current) clearInterval(spotifyPollRef.current);
+                          if (spotifyTimeoutRef.current) clearTimeout(spotifyTimeoutRef.current);
+                          // Poll for connection status
+                          spotifyPollRef.current = setInterval(async () => {
+                            try {
+                              const statusRes = await fetch(
+                                `/api/spotify/status?agentId=${encodeURIComponent(dbConfig.id)}`,
+                              );
+                              const status = await statusRes.json();
+                              if (status.connected) {
+                                clearInterval(spotifyPollRef.current!);
+                                spotifyPollRef.current = null;
+                                if (spotifyTimeoutRef.current) {
+                                  clearTimeout(spotifyTimeoutRef.current);
+                                  spotifyTimeoutRef.current = null;
+                                }
+                                setSpotifyStatus({
+                                  connected: true,
+                                  expired: false,
+                                  redirectUri: status.redirectUri ?? null,
+                                });
+                                setSpotifyConnecting(false);
+                              }
+                            } catch {
+                              // keep polling
+                            }
+                          }, 2000);
+                          // Stop polling after 5 minutes
+                          spotifyTimeoutRef.current = setTimeout(() => {
+                            if (spotifyPollRef.current) {
+                              clearInterval(spotifyPollRef.current);
+                              spotifyPollRef.current = null;
+                            }
+                            spotifyTimeoutRef.current = null;
+                            setSpotifyConnecting(false);
+                          }, 5 * 60_000);
+                        }
+                      } catch {
+                        setSpotifyConnecting(false);
+                      }
+                    }}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-medium transition-all",
+                      localSpotifyClientId.trim() && dbConfig?.id
+                        ? "bg-[#1DB954] text-white hover:bg-[#1ed760] active:scale-95"
+                        : "bg-white/5 text-white/30 cursor-not-allowed",
+                    )}
+                  >
+                    <Music size={14} />
+                    {spotifyConnecting ? "Waiting for authorization..." : "Connect Spotify Account"}
+                  </button>
+                )}
+
+                {/* Setup instructions */}
                 <div className="rounded-lg border border-green-500/10 bg-green-500/5 p-3 text-[11px] text-white/50 space-y-2">
-                  <p className="font-medium text-green-400/80">How to get a Spotify access token:</p>
+                  <p className="font-medium text-green-400/80">Setup:</p>
                   <ol className="list-decimal list-inside space-y-1 text-white/40">
                     <li>
                       Go to the{" "}
@@ -524,32 +677,22 @@ export function AgentEditor() {
                         Spotify Developer Dashboard <ExternalLink size={9} />
                       </a>
                     </li>
+                    <li>Create a new app — select &quot;Web API&quot;</li>
                     <li>
-                      Create an app (set redirect URI to{" "}
-                      <code className="text-white/50">http://localhost:3000/callback</code>)
-                    </li>
-                    <li>
-                      Note your <strong>Client ID</strong> and <strong>Client Secret</strong>
-                    </li>
-                    <li>
-                      Use the{" "}
-                      <a
-                        href="https://developer.spotify.com/documentation/web-api/tutorials/getting-started"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-green-400 hover:underline inline-flex items-center gap-0.5"
-                      >
-                        Authorization Guide <ExternalLink size={9} />
-                      </a>{" "}
-                      to get an access token with scopes:{" "}
-                      <code className="text-white/50">
-                        user-modify-playback-state user-read-playback-state playlist-read-private user-library-read
+                      In Redirect URIs, add:{" "}
+                      <code className="text-white/50 select-all">
+                        {spotifyStatus?.redirectUri ?? `http://127.0.0.1:7860/api/spotify/callback`}
                       </code>
                     </li>
-                    <li>Paste the access token above</li>
+                    <li>
+                      Copy the <strong>Client ID</strong> and paste it above
+                    </li>
+                    <li>
+                      Save the agent, then click <strong>Connect Spotify Account</strong>
+                    </li>
                   </ol>
                   <p className="text-[10px] text-white/30 mt-1">
-                    Requires Spotify Premium. Token expires after ~1 hour — re-paste as needed.
+                    Requires Spotify Premium. Tokens refresh automatically — no need to reconnect.
                   </p>
                 </div>
               </div>

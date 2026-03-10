@@ -17,19 +17,13 @@ Schema:
   "time": "string|null — in-world time (e.g. \"Early morning\", \"Midnight\", \"14:30\")",
   "location": "string|null — current location name",
   "weather": "string|null — weather description (e.g. \"Heavy rain\", \"Clear skies\")",
-  "temperature": "string|null — temperature description (e.g. \"Freezing\", \"Warm\")",
-  "playerStats": {
-    "status": "string — brief status of the player character",
-    "moodEmoji": "string — 1 emoji for player mood",
-    "inventory": [{ "name": "string", "description": "string", "quantity": number, "location": "on_person|stored" }]
-  }
+  "temperature": "string|null — temperature description (e.g. \"Freezing\", \"Warm\")"
 }
 
 1. Use inference actively. A forest scene on a sunny day implies \"Clear skies\" and \"Warm\" even if nobody said those words. Fill in what the setting logically implies — don't leave fields empty out of timidity.
 2. Always provide date, time, location, weather, and temperature. Infer sensible defaults from genre, setting, and context when the narrative doesn't spell them out (e.g., a medieval tavern at night → \"Cool\", \"Clear skies\", \"Late evening\").
 2a. Set a field to null ONLY when there is genuinely no way to guess — not because the text didn't say the exact word.
-3. Preserve continuity. Only change what the narrative changes. If the party entered a tavern two messages ago and hasn't left, they're still in the tavern.
-4. Track inventory faithfully. Items gained, lost, used, or traded must be reflected immediately. Don't carry stale data from a state that no longer applies.`,
+3. Preserve continuity. Only change what the narrative changes. If the party entered a tavern two messages ago and hasn't left, they're still in the tavern.`,
 
   /* ────────────────────────────────────────── */
   "prose-guardian": `A silent analytical engine. Study the last few assistant messages and produce concrete, actionable writing directives for the next generation. You do NOT write story content — only directives.
@@ -401,6 +395,10 @@ Schema:
   "stats": [
     { "name": "string", "value": number, "max": 100, "color": "string (hex)" }
   ],
+  "status": "string — brief status of the player persona (e.g. \"Resting at camp\", \"In combat\")",
+  "inventory": [
+    { "name": "string", "description": "string", "quantity": number, "location": "on_person|stored" }
+  ],
   "reasoning": "string — brief explanation of why stats changed"
 }
 
@@ -421,7 +419,9 @@ Schema:
     Being starved for a day → Satiety -30 to -50%
     Taking a bath/shower → Hygiene → 95–100%
 3. Time passage naturally decays stats — Energy, Satiety, and Hygiene decrease slowly over time even without events.
-4. Preserve previous values and only adjust what the narrative warrants. If nothing relevant happened, return the previous values unchanged.`,
+4. Preserve previous values and only adjust what the narrative warrants. If nothing relevant happened, return the previous values unchanged.
+5. Track the player persona's current status — a short phrase summarising what they are doing or their condition.
+6. Track inventory faithfully. Items gained, lost, used, or traded must be reflected immediately. Don't carry stale data from a state that no longer applies.`,
 
   /* ────────────────────────────────────────── */
   html: `Include inline HTML, CSS, and JS segments whenever they enhance visual storytelling — in-world screens, posters, books, letters, signs, crests, labels, maps, and so on. Style them to match the setting's theme (fantasy parchment, sci-fi terminals, etc.), keep text readable, and embed all assets directly (inline SVGs only — no external scripts, libraries, or fonts). Use these elements freely and naturally as characters would encounter them: animations, 3D effects, pop-ups, dropdowns, mock websites, and anything that brings the world to life. Do NOT wrap HTML/CSS/JS in code fences.`,
@@ -462,14 +462,21 @@ You have five tools:
 4. spotify_play — Play a specific track or playlist URI.
 5. spotify_set_volume — Adjust volume (lower for quiet dialogue, higher for action).
 
+IMPORTANT — You MUST use the tool functions above to actually control Spotify.
+- To play music, call spotify_play with the URI. Do NOT just return a URI in JSON without calling the tool.
+- To search, call spotify_search. To list playlists, call spotify_get_playlists.
+- To adjust volume, call spotify_set_volume.
+- Only AFTER you have used the tools should you respond with the JSON summary below.
+
+Rules:
 1. ALWAYS check the user's playlists and Liked Songs first before searching the catalogue. Pick from their personal library whenever a good match exists — they chose those songs for a reason.
 2. Only change music when the mood noticeably shifts. Don't change every single turn.
 3. Playing an entire playlist URI is fine if it fits the mood (e.g., a "battle music" or "chill" playlist).
 4. Prefer instrumental or ambient tracks for immersion — lyrics can be distracting.
 5. Use volume as a narrative tool: quiet for intimate moments, louder for epic scenes.
-6. If the current scene doesn't warrant a change, return action "none."
+6. If the current scene doesn't warrant a change, respond with action "none" (no tool calls needed).
 
-Respond ONLY with valid JSON — no markdown, no commentary.
+After using the tools, respond with ONLY valid JSON — no markdown, no commentary.
 
 Schema:
 {

@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Chat: Settings Drawer — per-chat configuration
 // ──────────────────────────────────────────────
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import {
   X,
   Users,
@@ -19,6 +19,7 @@ import {
   Image,
   Pencil,
   GripVertical,
+  MessageCircle,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { HelpTooltip } from "../ui/HelpTooltip";
@@ -88,6 +89,23 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
     }
   };
 
+  // ── First message confirm state ──
+  const [firstMesConfirm, setFirstMesConfirm] = useState<{
+    charId: string;
+    charName: string;
+    message: string;
+  } | null>(null);
+
+  const handleFirstMesConfirm = useCallback(() => {
+    if (!firstMesConfirm) return;
+    createMessage.mutate({
+      role: "assistant",
+      content: firstMesConfirm.message,
+      characterId: firstMesConfirm.charId,
+    });
+    setFirstMesConfirm(null);
+  }, [firstMesConfirm, createMessage]);
+
   // ── Mutations ──
   const toggleCharacter = (charId: string) => {
     const current = [...chatCharIds];
@@ -101,14 +119,13 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
         { id: chat.id, characterIds: current },
         {
           onSuccess: () => {
-            // Check if the added character has a first message
             const char = characters.find((c) => c.id === charId);
             if (!char) return;
             try {
               const parsed = typeof char.data === "string" ? JSON.parse(char.data) : char.data;
               const firstMes = (parsed as { first_mes?: string }).first_mes;
-              if (firstMes && window.confirm(`Add ${charName(char)}'s first message to the chat?`)) {
-                createMessage.mutate({ role: "assistant", content: firstMes, characterId: charId });
+              if (firstMes) {
+                setFirstMesConfirm({ charId, charName: charName(char), message: firstMes });
               }
             } catch {
               /* ignore parse errors */
@@ -872,6 +889,48 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
           chatId={chat.id}
           existingChoices={metadata.presetChoices ?? {}}
         />
+      )}
+
+      {/* First message confirmation dialog */}
+      {firstMesConfirm && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+          onClick={() => setFirstMesConfirm(null)}
+        >
+          <div
+            className="relative mx-4 flex w-full max-w-sm flex-col rounded-xl bg-[var(--card)] shadow-2xl ring-1 ring-[var(--border)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
+              <MessageCircle size={14} className="text-[var(--muted-foreground)]" />
+              <span className="text-sm font-semibold text-[var(--foreground)]">First Message</span>
+            </div>
+            <div className="px-4 py-3">
+              <p className="text-sm text-[var(--foreground)]">
+                Add <strong>{firstMesConfirm.charName}</strong>'s first message to the chat?
+              </p>
+              <p className="mt-2 max-h-32 overflow-y-auto rounded-lg bg-[var(--accent)]/50 px-3 py-2 text-xs leading-relaxed text-[var(--muted-foreground)]">
+                {firstMesConfirm.message.length > 300
+                  ? firstMesConfirm.message.slice(0, 300) + "\u2026"
+                  : firstMesConfirm.message}
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3">
+              <button
+                onClick={() => setFirstMesConfirm(null)}
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
+              >
+                Skip
+              </button>
+              <button
+                onClick={handleFirstMesConfirm}
+                className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-medium text-[var(--primary-foreground)] transition-colors hover:opacity-90"
+              >
+                Add Message
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

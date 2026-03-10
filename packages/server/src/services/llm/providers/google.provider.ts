@@ -16,10 +16,22 @@ export class GoogleProvider extends BaseLLMProvider {
     const systemMessages = messages.filter((m) => m.role === "system");
     const chatMessages = messages.filter((m) => m.role !== "system");
 
-    const contents = chatMessages.map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
+    const contents = chatMessages.map((m) => {
+      const parts: Array<Record<string, unknown>> = [];
+      if (m.images?.length) {
+        for (const img of m.images) {
+          const match = img.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            parts.push({ inline_data: { mime_type: match[1], data: match[2] } });
+          }
+        }
+      }
+      parts.push({ text: m.content });
+      return {
+        role: m.role === "assistant" ? "model" : "user",
+        parts,
+      };
+    });
 
     const body: Record<string, unknown> = {
       contents,

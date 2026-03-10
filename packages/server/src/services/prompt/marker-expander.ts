@@ -295,6 +295,9 @@ async function expandAgentData(config: MarkerConfig, ctx: MarkerContext): Promis
 
   // Special case: world-state uses game_state_snapshots for richer structured data
   if (agentType === "world-state") {
+    const wsStorage = createAgentsStorage(ctx.db);
+    const wsConfig = await wsStorage.getByType("world-state");
+    if (wsConfig && wsConfig.enabled !== "true") return { content: "" };
     return expandWorldStateAgent(ctx);
   }
 
@@ -302,6 +305,7 @@ async function expandAgentData(config: MarkerConfig, ctx: MarkerContext): Promis
   const agentsStorage = createAgentsStorage(ctx.db);
   const agentConfig = await agentsStorage.getByType(agentType);
   if (!agentConfig) return { content: "" };
+  if (agentConfig.enabled !== "true") return { content: "" };
 
   const latestRuns = await ctx.db
     .select()

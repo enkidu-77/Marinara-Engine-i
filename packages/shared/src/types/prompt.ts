@@ -210,4 +210,6 @@ export interface ChatMLMessage {
   content: string;
   /** Optional: name of the speaker for multi-character */
   name?: string;
+  /** Base64 data URLs for multimodal image inputs */
+  images?: string[];
 }

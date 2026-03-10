@@ -32,6 +32,15 @@ export class OpenAIProvider extends BaseLLMProvider {
           tool_calls: m.tool_calls,
         };
       }
+      // Multimodal: if message has images, use content array format
+      if (m.images?.length) {
+        const parts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+        if (m.content) parts.push({ type: "text", text: m.content });
+        for (const img of m.images) {
+          parts.push({ type: "image_url", image_url: { url: img } });
+        }
+        return { role: m.role, content: parts };
+      }
       return { role: m.role, content: m.content };
     });
   }

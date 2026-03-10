@@ -238,7 +238,9 @@ function CharacterSprite({
   const variant = TRANSITION_VARIANTS[activeTransition];
 
   return (
-    <div className={`absolute bottom-0 ${side === "left" ? "left-0" : "right-0"}`}>
+    <div
+      className={`absolute bottom-0 ${side === "left" ? "left-0 max-md:-left-[15%]" : "right-0 max-md:-right-[15%]"}`}
+    >
       <AnimatePresence mode="wait">
         <motion.img
           key={`${characterId}-${expression}`}

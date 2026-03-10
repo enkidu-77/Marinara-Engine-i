@@ -43,11 +43,24 @@ export class AnthropicProvider extends BaseLLMProvider {
       max_tokens: options.maxTokens ?? 4096,
       ...(systemField !== undefined && { system: systemField }),
       messages: mergedMessages.map((m, i) => {
-        if (i === lastUserIdx) {
-          return {
-            role: m.role,
-            content: [{ type: "text", text: m.content, cache_control: { type: "ephemeral" } }],
-          };
+        // Build content parts (text + optional images)
+        const parts: Array<Record<string, unknown>> = [];
+        if (m.images?.length) {
+          for (const img of m.images) {
+            const match = img.match(/^data:(image\/[^;]+);base64,(.+)$/);
+            if (match) {
+              parts.push({ type: "image", source: { type: "base64", media_type: match[1], data: match[2] } });
+            }
+          }
+        }
+        if (m.content) {
+          const textBlock: Record<string, unknown> = { type: "text", text: m.content };
+          if (i === lastUserIdx) textBlock.cache_control = { type: "ephemeral" };
+          parts.push(textBlock);
+        }
+        // Use content array if we have images or cache control, otherwise string
+        if (m.images?.length || i === lastUserIdx) {
+          return { role: m.role, content: parts };
         }
         return { role: m.role, content: m.content };
       }),

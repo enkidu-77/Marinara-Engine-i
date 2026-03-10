@@ -72,7 +72,7 @@ export function SummaryPopover({ chatId, summary, onClose }: SummaryPopoverProps
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-full z-[100] mt-1 w-80 rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl shadow-black/40"
+      className="absolute right-0 top-full z-[100] mt-1 w-80 max-md:fixed max-md:top-12 max-md:left-1/2 max-md:right-auto max-md:-translate-x-1/2 max-md:translate-y-0 max-md:mt-0 max-md:w-[calc(100vw-2rem)] max-md:max-h-[calc(100vh-4rem)] rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl shadow-black/40"
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">

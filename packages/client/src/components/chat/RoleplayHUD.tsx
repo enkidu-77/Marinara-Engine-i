@@ -4,7 +4,8 @@
 // a compact preview and expandable editable popover.
 // Supports top (horizontal) and left/right (vertical) layout.
 // ──────────────────────────────────────────────
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   Clock,
   MapPin,
@@ -24,6 +25,7 @@ import {
   X,
   Plus,
   MessageCircle,
+  Swords,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { api } from "../../lib/api-client";
@@ -78,12 +80,15 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
   // Debounced API patch — batches rapid field changes into a single call
   const patchQueueRef = useRef<Record<string, unknown>>({});
   const patchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gameStateRef = useRef(gameState);
+  gameStateRef.current = gameState;
 
   const patchField = useCallback(
     (field: string, value: unknown) => {
       // Optimistic local update
-      if (gameState) {
-        setGameState({ ...gameState, [field]: value });
+      const prev = gameStateRef.current;
+      if (prev) {
+        setGameState({ ...prev, [field]: value });
       } else {
         setGameState({
           id: "",
@@ -107,29 +112,28 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
       patchQueueRef.current[field] = value;
       if (patchTimerRef.current) clearTimeout(patchTimerRef.current);
       patchTimerRef.current = setTimeout(() => {
-        const payload = { ...patchQueueRef.current };
+        const payload = { ...patchQueueRef.current, manual: true };
         patchQueueRef.current = {};
         api.patch(`/chats/${chatId}/game-state`, payload).catch(() => {});
       }, 500);
     },
-    [chatId, gameState, setGameState],
+    [chatId, setGameState],
   );
 
   const patchPlayerStats = useCallback(
     (field: string, value: unknown) => {
-      const current = gameState?.playerStats ?? {
+      const current = gameStateRef.current?.playerStats ?? {
         stats: [],
         attributes: null,
         skills: {},
         inventory: [],
         activeQuests: [],
         status: "",
-        moodEmoji: "",
       };
       const next = { ...current, [field]: value };
       patchField("playerStats", next);
     },
-    [gameState, patchField],
+    [patchField],
   );
 
   const clearGameState = useCallback(() => {
@@ -148,12 +152,12 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
         inventory: [],
         activeQuests: [],
         status: "",
-        moodEmoji: "",
       },
       personaStats: [],
     };
-    if (gameState) {
-      setGameState({ ...gameState, ...cleared } as GameState);
+    const prev = gameStateRef.current;
+    if (prev) {
+      setGameState({ ...prev, ...cleared } as GameState);
     } else {
       setGameState({
         id: "",
@@ -165,7 +169,7 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
       } as GameState);
     }
     api.patch(`/chats/${chatId}/game-state`, cleared).catch(() => {});
-  }, [chatId, gameState, setGameState]);
+  }, [chatId, setGameState]);
 
   const date = gameState?.date ?? null;
   const time = gameState?.time ?? null;
@@ -181,138 +185,96 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
   const isVertical = layout === "left" || layout === "right";
 
   return (
-    <div className={cn("rpg-hud pointer-events-none relative z-30", isVertical && "h-full")}>
-      <div
-        className={cn(
-          "pointer-events-auto",
-          isVertical
-            ? cn(
-                "flex h-full flex-col flex-wrap gap-1.5 px-1.5 py-3",
-                layout === "right" ? "content-end items-end" : "content-start items-start",
-              )
-            : "flex items-start gap-1.5 px-3 py-1.5",
-        )}
-      >
-        {/* ── Widgets ── */}
-        {/* In top mode, these are inside a flex-wrap row container.
-            In vertical mode, they're direct children so flex-col flex-wrap on the parent handles column reflow. */}
-        {!isVertical && (
-          <div className="rpg-hud flex flex-wrap items-center gap-1.5">
-            {/* World State */}
-            {enabledAgentTypes.has("world-state") && (
-              <>
-                <LocationWidget value={location ?? ""} onSave={(v) => patchField("location", v)} />
-                <CalendarWidget value={date ?? ""} onSave={(v) => patchField("date", v)} />
-                <ClockWidget value={time ?? ""} onSave={(v) => patchField("time", v)} />
-                <WeatherWidget value={weather ?? ""} onSave={(v) => patchField("weather", v)} />
-                <TemperatureWidget value={temperature ?? ""} onSave={(v) => patchField("temperature", v)} />
-              </>
-            )}
-            {enabledAgentTypes.has("persona-stats") && (
-              <PersonaStatsWidget bars={personaStatBars} onUpdate={(bars) => patchField("personaStats", bars)} />
-            )}
-            {enabledAgentTypes.has("character-tracker") && (
-              <CharactersWidget
-                characters={presentCharacters}
-                onUpdate={(chars) => {
-                  if (gameState) {
-                    setGameState({ ...gameState, presentCharacters: chars });
-                  }
-                  api.patch(`/chats/${chatId}/game-state`, { presentCharacters: chars }).catch(() => {});
-                }}
-              />
-            )}
-            {enabledAgentTypes.has("world-state") && (
-              <InventoryWidget items={inventory} onUpdate={(items) => patchPlayerStats("inventory", items)} />
-            )}
-            {enabledAgentTypes.has("quest") && (
-              <QuestsWidget quests={activeQuests} onUpdate={(q) => patchPlayerStats("activeQuests", q)} />
-            )}
-          </div>
-        )}
+    <div className={cn("rpg-hud", isVertical ? "flex flex-col items-center gap-1.5" : "flex items-center gap-1.5")}>
+      {/* Actions (Agents + Clear) */}
+      <ActionsGroup
+        isVertical={isVertical}
+        agentsOpen={agentsOpen}
+        setAgentsOpen={setAgentsOpen}
+        isAgentProcessing={isAgentProcessing}
+        thoughtBubbles={thoughtBubbles}
+        clearThoughtBubbles={clearThoughtBubbles}
+        dismissThoughtBubble={dismissThoughtBubble}
+        enabledAgentTypes={enabledAgentTypes}
+        clearGameState={clearGameState}
+      />
 
-        {/* Actions — top mode: pushed to the right edge */}
-        {!isVertical && (
-          <div className="ml-auto">
-            <ActionsGroup
-              isVertical={false}
-              agentsOpen={agentsOpen}
-              setAgentsOpen={setAgentsOpen}
-              isAgentProcessing={isAgentProcessing}
-              thoughtBubbles={thoughtBubbles}
-              clearThoughtBubbles={clearThoughtBubbles}
-              dismissThoughtBubble={dismissThoughtBubble}
-              enabledAgentTypes={enabledAgentTypes}
-              clearGameState={clearGameState}
-            />
-          </div>
-        )}
+      {/* World State */}
+      {enabledAgentTypes.has("world-state") && (
+        <>
+          <LocationWidget value={location ?? ""} onSave={(v) => patchField("location", v)} />
+          <CalendarWidget value={date ?? ""} onSave={(v) => patchField("date", v)} />
+          <ClockWidget value={time ?? ""} onSave={(v) => patchField("time", v)} />
+          <WeatherWidget value={weather ?? ""} onSave={(v) => patchField("weather", v)} />
+          <TemperatureWidget value={temperature ?? ""} onSave={(v) => patchField("temperature", v)} />
+        </>
+      )}
 
-        {/* ── Actions before widgets when right-aligned (so they land in the overflow column toward screen center) ── */}
-        {isVertical && layout === "right" && (
-          <ActionsGroup
-            isVertical
-            agentsOpen={agentsOpen}
-            setAgentsOpen={setAgentsOpen}
-            isAgentProcessing={isAgentProcessing}
-            thoughtBubbles={thoughtBubbles}
-            clearThoughtBubbles={clearThoughtBubbles}
-            dismissThoughtBubble={dismissThoughtBubble}
-            enabledAgentTypes={enabledAgentTypes}
-            clearGameState={clearGameState}
+      {/* Mobile: combined Tracker widget */}
+      {(enabledAgentTypes.has("persona-stats") ||
+        enabledAgentTypes.has("character-tracker") ||
+        enabledAgentTypes.has("quest")) && (
+        <div className="md:hidden">
+          <CombinedPlayerWidget
+            layout={layout}
+            showPersona={enabledAgentTypes.has("persona-stats")}
+            showCharacters={enabledAgentTypes.has("character-tracker")}
+            showQuests={enabledAgentTypes.has("quest")}
+            personaStats={personaStatBars}
+            onUpdatePersonaStats={(bars) => patchField("personaStats", bars)}
+            characters={presentCharacters}
+            onUpdateCharacters={(chars) => {
+              if (gameState) {
+                setGameState({ ...gameState, presentCharacters: chars });
+              }
+              api.patch(`/chats/${chatId}/game-state`, { presentCharacters: chars }).catch(() => {});
+            }}
+            inventory={inventory}
+            onUpdateInventory={(items) => patchPlayerStats("inventory", items)}
+            quests={activeQuests}
+            onUpdateQuests={(q) => patchPlayerStats("activeQuests", q)}
           />
-        )}
+        </div>
+      )}
 
-        {isVertical && (
-          <>
-            {/* World State */}
-            {enabledAgentTypes.has("world-state") && (
-              <>
-                <LocationWidget value={location ?? ""} onSave={(v) => patchField("location", v)} />
-                <CalendarWidget value={date ?? ""} onSave={(v) => patchField("date", v)} />
-                <ClockWidget value={time ?? ""} onSave={(v) => patchField("time", v)} />
-                <WeatherWidget value={weather ?? ""} onSave={(v) => patchField("weather", v)} />
-                <TemperatureWidget value={temperature ?? ""} onSave={(v) => patchField("temperature", v)} />
-              </>
-            )}
-            {enabledAgentTypes.has("persona-stats") && (
-              <PersonaStatsWidget bars={personaStatBars} onUpdate={(bars) => patchField("personaStats", bars)} />
-            )}
-            {enabledAgentTypes.has("character-tracker") && (
-              <CharactersWidget
-                characters={presentCharacters}
-                onUpdate={(chars) => {
-                  if (gameState) {
-                    setGameState({ ...gameState, presentCharacters: chars });
-                  }
-                  api.patch(`/chats/${chatId}/game-state`, { presentCharacters: chars }).catch(() => {});
-                }}
-              />
-            )}
-            {enabledAgentTypes.has("world-state") && (
-              <InventoryWidget items={inventory} onUpdate={(items) => patchPlayerStats("inventory", items)} />
-            )}
-            {enabledAgentTypes.has("quest") && (
-              <QuestsWidget quests={activeQuests} onUpdate={(q) => patchPlayerStats("activeQuests", q)} />
-            )}
-          </>
-        )}
-
-        {/* ── Actions after widgets when left-aligned ── */}
-        {isVertical && layout === "left" && (
-          <ActionsGroup
-            isVertical
-            agentsOpen={agentsOpen}
-            setAgentsOpen={setAgentsOpen}
-            isAgentProcessing={isAgentProcessing}
-            thoughtBubbles={thoughtBubbles}
-            clearThoughtBubbles={clearThoughtBubbles}
-            dismissThoughtBubble={dismissThoughtBubble}
-            enabledAgentTypes={enabledAgentTypes}
-            clearGameState={clearGameState}
+      {/* Desktop: separate widgets */}
+      {enabledAgentTypes.has("persona-stats") && (
+        <div className="hidden md:block">
+          <PersonaStatsWidget
+            bars={personaStatBars}
+            onUpdate={(bars) => patchField("personaStats", bars)}
+            layout={layout}
           />
-        )}
-      </div>
+        </div>
+      )}
+      {enabledAgentTypes.has("character-tracker") && (
+        <div className="hidden md:block">
+          <CharactersWidget
+            characters={presentCharacters}
+            layout={layout}
+            onUpdate={(chars) => {
+              if (gameState) {
+                setGameState({ ...gameState, presentCharacters: chars });
+              }
+              api.patch(`/chats/${chatId}/game-state`, { presentCharacters: chars }).catch(() => {});
+            }}
+          />
+        </div>
+      )}
+      {enabledAgentTypes.has("persona-stats") && (
+        <div className="hidden md:block">
+          <InventoryWidget
+            items={inventory}
+            onUpdate={(items) => patchPlayerStats("inventory", items)}
+            layout={layout}
+          />
+        </div>
+      )}
+      {enabledAgentTypes.has("quest") && (
+        <div className="hidden md:block">
+          <QuestsWidget quests={activeQuests} onUpdate={(q) => patchPlayerStats("activeQuests", q)} layout={layout} />
+        </div>
+      )}
     </div>
   );
 }
@@ -344,19 +306,55 @@ function ActionsGroup({
   enabledAgentTypes,
   clearGameState,
 }: ActionsGroupProps) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Position with fixed layout to avoid overflow clipping
+  useLayoutEffect(() => {
+    if (!agentsOpen || !btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    const maxH = 256; // max-h-64 = 16rem = 256px
+    const top = rect.bottom + 4 + maxH > window.innerHeight ? rect.top - maxH - 4 : rect.bottom + 4;
+    const left = Math.min(rect.left, window.innerWidth - 288 - 8); // w-72 = 288px
+    setPos({ top, left });
+  }, [agentsOpen]);
+
+  // Close on outside click or Escape
+  useEffect(() => {
+    if (!agentsOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node) || dropdownRef.current?.contains(e.target as Node)) return;
+      setAgentsOpen(false);
+    };
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAgentsOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("keydown", keyHandler);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", keyHandler);
+    };
+  }, [agentsOpen, setAgentsOpen]);
+
   return (
-    <div className={cn("flex gap-1.5", isVertical ? "flex-col items-center" : "items-center")}>
+    <div className={cn("flex gap-1.5", isVertical ? "flex-col items-center" : "items-center max-md:flex-col")}>
       {/* Agents */}
       <div className="relative">
         <button
+          ref={btnRef}
           onClick={() => setAgentsOpen(!agentsOpen)}
           className={cn(
-            "flex items-center gap-1 rounded-full bg-white/5 border border-white/10 px-2 py-1 text-[10px] text-white/60 backdrop-blur-md transition-all hover:bg-white/10 hover:text-white",
+            "flex items-center gap-1 rounded-full bg-white/5 border border-white/10 px-2 py-1 text-[10px] text-white/60 backdrop-blur-md transition-all hover:bg-white/10 hover:text-white max-md:px-1.5 max-md:py-0.5 max-md:text-[9px]",
             agentsOpen && "bg-white/10 text-white",
           )}
           title="Agent activity"
         >
-          <Sparkles size={10} className={cn("text-purple-400/70", isAgentProcessing && "animate-pulse")} />
+          <Sparkles
+            size={10}
+            className={cn("text-purple-400/70 max-md:h-2.5 max-md:w-2.5", isAgentProcessing && "animate-pulse")}
+          />
           <span>Agents</span>
           {thoughtBubbles.length > 0 && (
             <span className="flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full bg-purple-500/80 px-1 text-[8px] font-bold text-white">
@@ -366,63 +364,70 @@ function ActionsGroup({
           {agentsOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
         </button>
 
-        {agentsOpen && (
-          <div className="absolute right-0 top-full mt-1 w-72 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-black/80 backdrop-blur-xl shadow-xl z-50 animate-message-in">
-            {isAgentProcessing && (
-              <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
-                <Sparkles size={12} className="text-purple-400 animate-pulse" />
-                <span className="text-[10px] text-purple-300/80">Agents thinking…</span>
-              </div>
-            )}
-            {thoughtBubbles.length === 0 && !isAgentProcessing && (
-              <div className="px-3 py-4 text-center text-[10px] text-white/30">No agent activity yet</div>
-            )}
-            {thoughtBubbles.length > 0 && (
-              <>
-                <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
-                  <span className="text-[10px] text-white/40">
-                    {thoughtBubbles.length} result{thoughtBubbles.length !== 1 ? "s" : ""}
-                  </span>
-                  <button
-                    onClick={clearThoughtBubbles}
-                    className="text-[10px] text-white/30 hover:text-white/60 transition-colors"
-                  >
-                    Clear all
-                  </button>
+        {agentsOpen &&
+          pos &&
+          createPortal(
+            <div
+              ref={dropdownRef}
+              className="fixed w-72 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-black/80 backdrop-blur-xl shadow-xl z-[9999] animate-message-in"
+              style={{ top: pos.top, left: pos.left }}
+            >
+              {isAgentProcessing && (
+                <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
+                  <Sparkles size={12} className="text-purple-400 animate-pulse" />
+                  <span className="text-[10px] text-purple-300/80">Agents thinking…</span>
                 </div>
-                <div className="flex flex-col gap-1 p-2">
-                  {thoughtBubbles.map((bubble, i) => (
-                    <div
-                      key={`${bubble.agentId}-${bubble.timestamp}`}
-                      className="relative rounded-lg bg-white/5 p-2 text-[10px]"
+              )}
+              {thoughtBubbles.length === 0 && !isAgentProcessing && (
+                <div className="px-3 py-4 text-center text-[10px] text-white/30">No agent activity yet</div>
+              )}
+              {thoughtBubbles.length > 0 && (
+                <>
+                  <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
+                    <span className="text-[10px] text-white/40">
+                      {thoughtBubbles.length} result{thoughtBubbles.length !== 1 ? "s" : ""}
+                    </span>
+                    <button
+                      onClick={clearThoughtBubbles}
+                      className="text-[10px] text-white/30 hover:text-white/60 transition-colors"
                     >
-                      <button
-                        onClick={() => dismissThoughtBubble(i)}
-                        className="absolute right-1.5 top-1.5 text-white/20 hover:text-white/60 transition-colors"
+                      Clear all
+                    </button>
+                  </div>
+                  <div className="flex flex-col gap-1 p-2">
+                    {thoughtBubbles.map((bubble, i) => (
+                      <div
+                        key={`${bubble.agentId}-${bubble.timestamp}`}
+                        className="relative rounded-lg bg-white/5 p-2 text-[10px]"
                       >
-                        <X size={10} />
-                      </button>
-                      <div className="pr-4">
-                        <span className="font-semibold text-purple-300">{bubble.agentName}</span>
-                        <p className="mt-0.5 whitespace-pre-wrap text-white/50 leading-relaxed">{bubble.content}</p>
+                        <button
+                          onClick={() => dismissThoughtBubble(i)}
+                          className="absolute right-1.5 top-1.5 text-white/20 hover:text-white/60 transition-colors"
+                        >
+                          <X size={10} />
+                        </button>
+                        <div className="pr-4">
+                          <span className="font-semibold text-purple-300">{bubble.agentName}</span>
+                          <p className="mt-0.5 whitespace-pre-wrap text-white/50 leading-relaxed">{bubble.content}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>,
+            document.body,
+          )}
       </div>
 
       {enabledAgentTypes.has("echo-chamber") && <EchoChamberToggle />}
 
       <button
         onClick={clearGameState}
-        className="flex items-center gap-1 rounded-full bg-white/5 border border-white/10 px-2 py-1 text-[10px] text-white/60 backdrop-blur-md transition-all hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/30"
+        className="flex items-center gap-1 rounded-full bg-white/5 border border-white/10 px-2 py-1 text-[10px] text-white/60 backdrop-blur-md transition-all hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/30 max-md:px-1.5 max-md:py-0.5 max-md:text-[9px]"
         title="Clear trackers"
       >
-        <Trash2 size={12} />
+        <Trash2 size={12} className="max-md:h-2.5 max-md:w-2.5" />
         <span>Clear</span>
       </button>
     </div>
@@ -459,44 +464,428 @@ function EchoChamberToggle() {
 }
 
 // ═══════════════════════════════════════════════
+// Combined Player Widget — merges Persona, Chars,
+// Inventory, and Quests into a single expandable panel
+// ═══════════════════════════════════════════════
+
+function CombinedPlayerWidget({
+  layout = "top",
+  showPersona,
+  showCharacters,
+  showQuests,
+  personaStats,
+  onUpdatePersonaStats,
+  characters,
+  onUpdateCharacters,
+  inventory,
+  onUpdateInventory,
+  quests,
+  onUpdateQuests,
+}: {
+  layout?: HudPosition;
+  showPersona: boolean;
+  showCharacters: boolean;
+  showQuests: boolean;
+  personaStats: CharacterStat[];
+  onUpdatePersonaStats: (bars: CharacterStat[]) => void;
+  characters: PresentCharacter[];
+  onUpdateCharacters: (chars: PresentCharacter[]) => void;
+  inventory: InventoryItem[];
+  onUpdateInventory: (items: InventoryItem[]) => void;
+  quests: QuestProgress[];
+  onUpdateQuests: (quests: QuestProgress[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  // --- Persona Stats helpers ---
+  const updateBar = (idx: number, field: "value" | "max" | "name", val: number | string) => {
+    const next = [...personaStats];
+    next[idx] = { ...next[idx]!, [field]: val };
+    onUpdatePersonaStats(next);
+  };
+
+  // --- Characters helpers ---
+  const addCharacter = () => {
+    onUpdateCharacters([
+      ...characters,
+      {
+        characterId: `manual-${Date.now()}`,
+        name: "New Character",
+        emoji: "👤",
+        mood: "",
+        appearance: null,
+        outfit: null,
+        customFields: {},
+        stats: [],
+        thoughts: null,
+      },
+    ]);
+  };
+  const removeCharacter = (idx: number) => onUpdateCharacters(characters.filter((_, i) => i !== idx));
+  const updateCharacter = (idx: number, updated: PresentCharacter) => {
+    const next = [...characters];
+    next[idx] = updated;
+    onUpdateCharacters(next);
+  };
+
+  // --- Inventory helpers ---
+  const addItem = () => {
+    onUpdateInventory([...inventory, { name: "New Item", description: "", quantity: 1, location: "on_person" }]);
+  };
+  const removeItem = (idx: number) => onUpdateInventory(inventory.filter((_, i) => i !== idx));
+  const updateItem = (idx: number, updated: InventoryItem) => {
+    const next = [...inventory];
+    next[idx] = updated;
+    onUpdateInventory(next);
+  };
+
+  // --- Quests helpers ---
+  const addQuest = () => {
+    onUpdateQuests([
+      ...quests,
+      {
+        questEntryId: `manual-${Date.now()}`,
+        name: "New Quest",
+        currentStage: 0,
+        objectives: [{ text: "Objective 1", completed: false }],
+        completed: false,
+      },
+    ]);
+  };
+  const removeQuest = (idx: number) => onUpdateQuests(quests.filter((_, i) => i !== idx));
+  const updateQuest = (idx: number, updated: QuestProgress) => {
+    const next = [...quests];
+    next[idx] = updated;
+    onUpdateQuests(next);
+  };
+
+  // Count total tracked items for badge
+  const totalItems = characters.length + inventory.length + quests.length + (personaStats.length > 0 ? 1 : 0);
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        onClick={() => setOpen(!open)}
+        className={cn(WIDGET, "border-purple-500/20 text-purple-300")}
+        title="Player & Tracker"
+      >
+        <div className="flex h-7 max-md:h-4 items-center justify-center shrink-0">
+          <Swords size={14} className="text-purple-400/60 max-md:h-3 max-md:w-3" />
+        </div>
+        <span className="max-w-full truncate text-[9px] max-md:text-[7px] font-semibold leading-tight shrink-0">
+          Tracker
+        </span>
+      </button>
+
+      <WidgetPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={buttonRef}
+        placement={layout === "left" ? "right" : layout === "right" ? "left" : "bottom"}
+        className="w-80 max-h-[min(75vh,32rem)]"
+      >
+        <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
+          <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
+            <Swords size={10} /> Player Tracker
+          </span>
+          <button onClick={() => setOpen(false)} className="text-white/30 hover:text-white/60 transition-colors">
+            <X size={12} />
+          </button>
+        </div>
+        <div className="overflow-y-auto max-h-[min(calc(75vh-2rem),30rem)] divide-y divide-white/5">
+          {/* ── Persona Stats section ── */}
+          {showPersona && (
+            <div className="p-2">
+              <div className="px-1 pb-1">
+                <span className="text-[10px] font-semibold text-violet-300/70 uppercase tracking-wider">
+                  Persona Stats
+                </span>
+              </div>
+              <div className="space-y-2">
+                {personaStats.length === 0 && (
+                  <div className="text-[10px] text-white/30 text-center py-1">No stats tracked</div>
+                )}
+                {personaStats.map((bar, idx) => (
+                  <StatBarEditable
+                    key={bar.name}
+                    stat={bar}
+                    onUpdateName={(n) => updateBar(idx, "name", n)}
+                    onUpdateValue={(v) => updateBar(idx, "value", v)}
+                    onUpdateMax={(v) => updateBar(idx, "max", v)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Characters section ── */}
+          {showCharacters && (
+            <div className="p-2">
+              <div className="flex items-center justify-between px-1 pb-1">
+                <span className="text-[10px] font-semibold text-purple-300/70 uppercase tracking-wider flex items-center gap-1">
+                  <Users size={9} /> Characters ({characters.length})
+                </span>
+                <button
+                  onClick={addCharacter}
+                  className="flex items-center gap-0.5 text-[10px] text-purple-400 hover:text-purple-300 transition-colors"
+                >
+                  <Plus size={10} /> Add
+                </button>
+              </div>
+              <div className="space-y-2">
+                {characters.length === 0 && (
+                  <div className="text-[10px] text-white/30 text-center py-1">No characters in scene</div>
+                )}
+                {characters.map((char, idx) => (
+                  <div key={char.characterId ?? idx} className="rounded-lg bg-white/5 p-2 space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <InlineEdit
+                        value={char.emoji || "👤"}
+                        onSave={(v) => updateCharacter(idx, { ...char, emoji: v })}
+                        className="w-8 text-center !text-sm"
+                      />
+                      <InlineEdit
+                        value={char.name}
+                        onSave={(v) => updateCharacter(idx, { ...char, name: v })}
+                        className="flex-1 !font-medium"
+                        placeholder="Name"
+                      />
+                      <button
+                        onClick={() => removeCharacter(idx)}
+                        className="text-white/20 hover:text-red-400 transition-colors shrink-0"
+                        title="Remove character"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 pl-1">
+                      <LabeledEdit
+                        label="Mood"
+                        value={char.mood}
+                        onSave={(v) => updateCharacter(idx, { ...char, mood: v })}
+                      />
+                      <LabeledEdit
+                        label="Look"
+                        value={char.appearance ?? ""}
+                        onSave={(v) => updateCharacter(idx, { ...char, appearance: v || null })}
+                      />
+                      <LabeledEdit
+                        label="Outfit"
+                        value={char.outfit ?? ""}
+                        onSave={(v) => updateCharacter(idx, { ...char, outfit: v || null })}
+                      />
+                      <LabeledEdit
+                        label="Thinks"
+                        value={char.thoughts ?? ""}
+                        onSave={(v) => updateCharacter(idx, { ...char, thoughts: v || null })}
+                      />
+                    </div>
+                    {char.stats.length > 0 && (
+                      <div className="space-y-1 pt-1 border-t border-white/5">
+                        {char.stats.map((stat, si) => (
+                          <StatBarEditable
+                            key={stat.name}
+                            stat={stat}
+                            onUpdateValue={(v) => {
+                              const next = [...char.stats];
+                              next[si] = { ...next[si]!, value: v };
+                              updateCharacter(idx, { ...char, stats: next });
+                            }}
+                            onUpdateMax={(v) => {
+                              const next = [...char.stats];
+                              next[si] = { ...next[si]!, max: v };
+                              updateCharacter(idx, { ...char, stats: next });
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Inventory section ── */}
+          {showPersona && (
+            <div className="p-2">
+              <div className="flex items-center justify-between px-1 pb-1">
+                <span className="text-[10px] font-semibold text-amber-300/70 uppercase tracking-wider flex items-center gap-1">
+                  <Package size={9} /> Inventory ({inventory.length})
+                </span>
+                <button
+                  onClick={addItem}
+                  className="flex items-center gap-0.5 text-[10px] text-amber-400 hover:text-amber-300 transition-colors"
+                >
+                  <Plus size={10} /> Add
+                </button>
+              </div>
+              <div className="space-y-1">
+                {inventory.length === 0 && (
+                  <div className="text-[10px] text-white/30 text-center py-1">Inventory empty</div>
+                )}
+                {inventory.map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5 rounded-lg bg-white/5 px-2 py-1.5">
+                    <Package size={10} className="shrink-0 text-amber-400/60" />
+                    <InlineEdit
+                      value={item.name}
+                      onSave={(v) => updateItem(idx, { ...item, name: v })}
+                      className="flex-1"
+                      placeholder="Item name"
+                    />
+                    <input
+                      type="number"
+                      value={item.quantity}
+                      onChange={(e) => updateItem(idx, { ...item, quantity: Math.max(0, Number(e.target.value)) })}
+                      className="w-8 bg-transparent text-center text-[9px] text-white/40 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      title="Quantity"
+                    />
+                    <button
+                      onClick={() => removeItem(idx)}
+                      className="text-white/20 hover:text-red-400 transition-colors shrink-0"
+                      title="Remove item"
+                    >
+                      <X size={9} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Quests section ── */}
+          {showQuests && (
+            <div className="p-2">
+              <div className="flex items-center justify-between px-1 pb-1">
+                <span className="text-[10px] font-semibold text-emerald-300/70 uppercase tracking-wider flex items-center gap-1">
+                  <Scroll size={9} /> Quests ({quests.length})
+                </span>
+                <button
+                  onClick={addQuest}
+                  className="flex items-center gap-0.5 text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors"
+                >
+                  <Plus size={10} /> Add
+                </button>
+              </div>
+              <div className="space-y-2">
+                {quests.length === 0 && (
+                  <div className="text-[10px] text-white/30 text-center py-1">No active quests</div>
+                )}
+                {quests.map((quest, idx) => (
+                  <QuestCardEditable
+                    key={quest.questEntryId || idx}
+                    quest={quest}
+                    onUpdate={(q) => updateQuest(idx, q)}
+                    onRemove={() => removeQuest(idx)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </WidgetPopover>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
 // Tracker Mini Widgets — each has a compact preview
 // and an expandable popover for full editable view
 // ═══════════════════════════════════════════════
 
-/** Shared popover wrapper used by tracker widgets */
+/** Shared popover wrapper used by tracker widgets — renders via portal to escape overflow clipping */
 function WidgetPopover({
   open,
   onClose,
+  anchorRef,
+  placement = "bottom",
   children,
   className,
 }: {
   open: boolean;
   onClose: () => void;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  placement?: "bottom" | "right" | "left";
   children: React.ReactNode;
   className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  const computePosition = useCallback(() => {
+    if (!anchorRef.current) return null;
+    const rect = anchorRef.current.getBoundingClientRect();
+    const popoverWidth = ref.current?.offsetWidth ?? 288;
+    const popoverHeight = ref.current?.offsetHeight ?? 200;
+    let top: number;
+    let left: number;
+
+    if (placement === "right") {
+      left = rect.right + 4;
+      top = rect.top;
+      if (top + popoverHeight > window.innerHeight - 8) {
+        top = Math.max(8, window.innerHeight - popoverHeight - 8);
+      }
+    } else if (placement === "left") {
+      left = rect.left - popoverWidth - 4;
+      top = rect.top;
+      if (left < 8) left = 8;
+      if (top + popoverHeight > window.innerHeight - 8) {
+        top = Math.max(8, window.innerHeight - popoverHeight - 8);
+      }
+    } else {
+      left = rect.left;
+      top = rect.bottom + 4;
+      if (left + popoverWidth > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - popoverWidth - 8);
+      }
+    }
+    return { top, left };
+  }, [anchorRef, placement]);
+
+  // Position the popover relative to the anchor element
+  useLayoutEffect(() => {
+    if (!open) return;
+    setPos(computePosition());
+  }, [open, computePosition]);
+
+  // Reposition on scroll/resize
+  useEffect(() => {
+    if (!open) return;
+    const update = () => setPos(computePosition());
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open, computePosition]);
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      if (ref.current && !ref.current.contains(target) && !anchorRef.current?.contains(target)) onClose();
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [open, onClose]);
+  }, [open, onClose, anchorRef]);
 
   if (!open) return null;
-  return (
+  return createPortal(
     <div
       ref={ref}
+      style={pos ? { position: "fixed", top: pos.top, left: pos.left } : { position: "fixed", top: -9999, left: -9999 }}
       className={cn(
-        "absolute top-full mt-1 z-50 animate-message-in rounded-xl border border-white/10 bg-black/80 backdrop-blur-xl shadow-xl",
+        "z-[9999] animate-message-in rounded-xl border border-white/10 bg-black/80 backdrop-blur-xl shadow-xl",
         className,
       )}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -570,11 +959,14 @@ function InlineEdit({
 function CharactersWidget({
   characters,
   onUpdate,
+  layout = "top",
 }: {
   characters: PresentCharacter[];
   onUpdate: (chars: PresentCharacter[]) => void;
+  layout?: HudPosition;
 }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const addCharacter = () => {
     onUpdate([
@@ -606,15 +998,16 @@ function CharactersWidget({
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className={cn(WIDGET, "border-purple-500/20 text-purple-300")}
         title="Present Characters"
       >
-        <div className="flex h-7 items-center justify-center shrink-0">
+        <div className="flex h-7 max-md:h-4 items-center justify-center shrink-0">
           {characters.length > 0 ? (
             <div className="flex items-center -space-x-0.5">
               {characters.slice(0, 5).map((c, i) => (
-                <span key={i} className="text-sm leading-none">
+                <span key={i} className="text-sm max-md:text-[9px] leading-none">
                   {c.emoji || "👤"}
                 </span>
               ))}
@@ -623,15 +1016,21 @@ function CharactersWidget({
               )}
             </div>
           ) : (
-            <Users size={14} className="text-purple-400/50" />
+            <Users size={14} className="text-purple-400/50 max-md:h-3 max-md:w-3" />
           )}
         </div>
-        <span className="text-[9px] font-semibold leading-tight shrink-0">
+        <span className="max-w-full truncate text-[9px] max-md:text-[7px] font-semibold leading-tight shrink-0">
           {characters.length > 0 ? `${characters.length} char${characters.length !== 1 ? "s" : ""}` : "Chars"}
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} className="w-72 max-h-80 overflow-y-auto left-0">
+      <WidgetPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={buttonRef}
+        placement={layout === "left" ? "right" : layout === "right" ? "left" : "bottom"}
+        className="w-72 max-h-80 overflow-y-auto"
+      >
         <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
             <Users size={10} /> Present Characters
@@ -775,8 +1174,17 @@ function StatBarEditable({
 
 // ── Persona Stats Widget ─────────────────────
 
-function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdate: (bars: CharacterStat[]) => void }) {
+function PersonaStatsWidget({
+  bars,
+  onUpdate,
+  layout = "top",
+}: {
+  bars: CharacterStat[];
+  onUpdate: (bars: CharacterStat[]) => void;
+  layout?: HudPosition;
+}) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const updateBar = (idx: number, field: "value" | "max" | "name", val: number | string) => {
     const next = [...bars];
@@ -787,15 +1195,16 @@ function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdat
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className={cn(WIDGET, "border-violet-500/20 text-violet-300")}
         title="Persona Stats"
       >
-        <div className="flex h-7 w-14 flex-col justify-center gap-0.5 shrink-0 px-1">
+        <div className="flex h-7 max-md:h-4 w-14 max-md:w-8 flex-col justify-center gap-0.5 max-md:gap-px shrink-0 px-1 max-md:px-0.5">
           {bars.slice(0, 3).map((bar) => {
             const pct = bar.max > 0 ? Math.min(100, (bar.value / bar.max) * 100) : 0;
             return (
-              <div key={bar.name} className="h-1 w-full rounded-full bg-white/10 overflow-hidden">
+              <div key={bar.name} className="h-1 max-md:h-px w-full rounded-full bg-white/10 overflow-hidden">
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{ width: `${pct}%`, backgroundColor: bar.color || "#8b5cf6" }}
@@ -805,10 +1214,18 @@ function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdat
           })}
           {bars.length > 3 && <div className="text-[7px] text-white/30 text-center">+{bars.length - 3}</div>}
         </div>
-        <span className="text-[9px] font-semibold leading-tight shrink-0">Persona</span>
+        <span className="max-w-full truncate text-[9px] max-md:text-[7px] font-semibold leading-tight shrink-0">
+          Persona
+        </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} className="w-60 max-h-80 overflow-y-auto left-0">
+      <WidgetPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={buttonRef}
+        placement={layout === "left" ? "right" : layout === "right" ? "left" : "bottom"}
+        className="w-60 max-h-80 overflow-y-auto"
+      >
         <div className="border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider">Persona Stats</span>
         </div>
@@ -830,8 +1247,17 @@ function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdat
 
 // ── Inventory Widget ─────────────────────────
 
-function InventoryWidget({ items, onUpdate }: { items: InventoryItem[]; onUpdate: (items: InventoryItem[]) => void }) {
+function InventoryWidget({
+  items,
+  onUpdate,
+  layout = "top",
+}: {
+  items: InventoryItem[];
+  onUpdate: (items: InventoryItem[]) => void;
+  layout?: HudPosition;
+}) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const addItem = () => {
     onUpdate([...items, { name: "New Item", description: "", quantity: 1, location: "on_person" }]);
@@ -850,20 +1276,29 @@ function InventoryWidget({ items, onUpdate }: { items: InventoryItem[]; onUpdate
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className={cn(WIDGET, "border-amber-500/20 text-amber-300")}
         title="Inventory"
       >
-        <div className="flex h-7 items-center justify-center shrink-0">
-          <Package size={14} className="text-amber-400/60" />
-          {items.length > 0 && <span className="ml-0.5 text-sm font-bold text-amber-300/80">{items.length}</span>}
+        <div className="flex h-7 max-md:h-4 items-center justify-center shrink-0">
+          <Package size={14} className="text-amber-400/60 max-md:h-3 max-md:w-3" />
+          {items.length > 0 && (
+            <span className="ml-0.5 text-sm max-md:text-[8px] font-bold text-amber-300/80">{items.length}</span>
+          )}
         </div>
-        <span className="text-[9px] font-semibold leading-tight shrink-0">
+        <span className="max-w-full truncate text-[9px] max-md:text-[7px] font-semibold leading-tight shrink-0">
           {items.length > 0 ? `${items.length} item${items.length !== 1 ? "s" : ""}` : "Inventory"}
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} className="w-64 max-h-80 overflow-y-auto left-0">
+      <WidgetPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={buttonRef}
+        placement={layout === "left" ? "right" : layout === "right" ? "left" : "bottom"}
+        className="w-64 max-h-80 overflow-y-auto"
+      >
         <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
             <Package size={10} /> Inventory ({items.length})
@@ -910,8 +1345,17 @@ function InventoryWidget({ items, onUpdate }: { items: InventoryItem[]; onUpdate
 
 // ── Quests Widget ────────────────────────────
 
-function QuestsWidget({ quests, onUpdate }: { quests: QuestProgress[]; onUpdate: (quests: QuestProgress[]) => void }) {
+function QuestsWidget({
+  quests,
+  onUpdate,
+  layout = "top",
+}: {
+  quests: QuestProgress[];
+  onUpdate: (quests: QuestProgress[]) => void;
+  layout?: HudPosition;
+}) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const addQuest = () => {
     onUpdate([
@@ -941,19 +1385,26 @@ function QuestsWidget({ quests, onUpdate }: { quests: QuestProgress[]; onUpdate:
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className={cn(WIDGET, "border-emerald-500/20 text-emerald-300")}
         title="Active Quests"
       >
-        <div className="flex h-7 items-center justify-center shrink-0">
-          <Scroll size={14} className="text-emerald-400/60" />
+        <div className="flex h-7 max-md:h-4 items-center justify-center shrink-0">
+          <Scroll size={14} className="text-emerald-400/60 max-md:h-3 max-md:w-3" />
         </div>
-        <span className="max-w-[4.5rem] truncate text-[9px] font-semibold leading-tight shrink-0">
+        <span className="max-w-[4.5rem] max-md:max-w-[2rem] truncate text-[9px] max-md:text-[7px] font-semibold leading-tight shrink-0">
           {mainQuest ? mainQuest.name : `${quests.length} quest${quests.length !== 1 ? "s" : ""}`}
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} className="w-72 max-h-96 overflow-y-auto left-0">
+      <WidgetPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={buttonRef}
+        placement={layout === "left" ? "right" : layout === "right" ? "left" : "bottom"}
+        className="w-72 max-h-96 overflow-y-auto"
+      >
         <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
             <Scroll size={10} /> Quests ({quests.length})
@@ -1092,9 +1543,73 @@ function LabeledEdit({ label, value, onSave }: { label: string; value: string; o
 // ═══════════════════════════════════════════════
 
 const WIDGET =
-  "group flex w-20 h-[3.75rem] flex-col items-center justify-center gap-0.5 rounded-xl border bg-black/40 backdrop-blur-md transition-all hover:bg-black/60 cursor-pointer overflow-hidden";
+  "group flex w-20 h-[3.75rem] max-md:w-11 max-md:h-8 flex-col items-center justify-center gap-0.5 max-md:gap-0 rounded-xl max-md:rounded-lg border bg-black/40 backdrop-blur-md transition-all hover:bg-black/60 cursor-pointer select-none";
 const WIDGET_EDIT =
-  "flex w-20 h-[3.75rem] flex-col items-center justify-center gap-0.5 rounded-xl border bg-black/60 backdrop-blur-md overflow-hidden";
+  "flex w-20 h-[3.75rem] max-md:w-11 max-md:h-8 flex-col items-center justify-center gap-0.5 max-md:gap-0 rounded-xl max-md:rounded-lg border bg-black/60 backdrop-blur-md";
+
+/** Hook: mobile single-tap = tooltip, double-tap = edit; desktop click = edit */
+function useWidgetTap(onEdit: () => void) {
+  const [showTip, setShowTip] = useState(false);
+  const lastTapRef = useRef(0);
+  const tipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTouchRef = useRef(false);
+
+  const handleTouchStart = useCallback(() => {
+    isTouchRef.current = true;
+  }, []);
+
+  const handleClick = useCallback(() => {
+    if (!isTouchRef.current) {
+      onEdit();
+      return;
+    }
+    isTouchRef.current = false;
+    const now = Date.now();
+    if (now - lastTapRef.current < 350) {
+      setShowTip(false);
+      if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+      onEdit();
+    } else {
+      setShowTip(true);
+      if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+      tipTimerRef.current = setTimeout(() => setShowTip(false), 2000);
+    }
+    lastTapRef.current = now;
+  }, [onEdit]);
+
+  return { showTip, handleClick, handleTouchStart };
+}
+
+/** Truncated label with optional tooltip */
+function WidgetLabel({
+  value,
+  fallback,
+  showTip,
+  className,
+}: {
+  value: string;
+  fallback: string;
+  showTip?: boolean;
+  className?: string;
+}) {
+  return (
+    <span className={cn("relative w-full max-md:px-0.5", className)}>
+      <span
+        className={cn(
+          "block max-w-[4.5rem] max-md:max-w-full truncate text-center text-[9px] max-md:text-[7px] font-semibold leading-tight",
+          !value && "italic opacity-40",
+        )}
+      >
+        {value || fallback}
+      </span>
+      {showTip && value && (
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 whitespace-nowrap rounded bg-black/90 border border-white/10 px-1.5 py-0.5 text-[9px] text-white/80 z-[9999] pointer-events-none animate-message-in">
+          {value}
+        </span>
+      )}
+    </span>
+  );
+}
 
 function WidgetInput({
   value,
@@ -1128,7 +1643,7 @@ function WidgetInput({
       }}
       onBlur={commit}
       className={cn(
-        "w-[4.5rem] bg-transparent text-center text-[9px] font-medium outline-none placeholder:text-white/20",
+        "w-[4.5rem] max-md:w-full max-md:px-0.5 bg-transparent text-center text-[9px] max-md:text-[10px] font-medium outline-none placeholder:text-white/20",
         accent,
       )}
     />
@@ -1139,11 +1654,12 @@ function WidgetInput({
 
 function LocationWidget({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const [editing, setEditing] = useState(false);
+  const { showTip, handleClick, handleTouchStart } = useWidgetTap(() => setEditing(true));
 
   if (editing) {
     return (
       <div className={cn(WIDGET_EDIT, "border-emerald-500/25 text-emerald-300")}>
-        <MapPin size={14} className="text-emerald-400/60 mb-0.5" />
+        <MapPin size={14} className="text-emerald-400/60 mb-0.5 max-md:h-3 max-md:w-3 max-md:mb-0" />
         <WidgetInput value={value} onSave={onSave} onCancel={() => setEditing(false)} accent="text-emerald-300" />
       </div>
     );
@@ -1151,11 +1667,12 @@ function LocationWidget({ value, onSave }: { value: string; onSave: (v: string) 
 
   return (
     <button
-      onClick={() => setEditing(true)}
-      className={cn(WIDGET, "border-emerald-500/20 text-emerald-300")}
-      title="Click to edit location"
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      className={cn(WIDGET, "border-emerald-500/20 text-emerald-300", showTip && "z-50")}
+      title={value || "Click to edit location"}
     >
-      <div className="relative flex h-7 w-14 items-center justify-center shrink-0">
+      <div className="relative flex h-7 max-md:h-4 w-14 max-md:w-8 items-center justify-center shrink-0">
         <div className="absolute inset-0 rounded-md overflow-hidden opacity-40">
           <div className="absolute inset-0 bg-gradient-to-br from-emerald-900/60 via-emerald-800/40 to-emerald-950/60" />
           <svg className="absolute inset-0 w-full h-full" viewBox="0 0 56 28">
@@ -1215,16 +1732,12 @@ function LocationWidget({ value, onSave }: { value: string; onSave: (v: string) 
             />
           </svg>
         </div>
-        <MapPin size={14} className="relative text-emerald-400 drop-shadow-[0_0_4px_rgba(52,211,153,0.5)]" />
+        <MapPin
+          size={14}
+          className="relative text-emerald-400 drop-shadow-[0_0_4px_rgba(52,211,153,0.5)] max-md:h-3 max-md:w-3"
+        />
       </div>
-      <span
-        className={cn(
-          "max-w-[4.5rem] truncate text-[9px] font-semibold leading-tight shrink-0",
-          !value && "italic opacity-40",
-        )}
-      >
-        {value || "Location"}
-      </span>
+      <WidgetLabel value={value} fallback="Location" showTip={showTip} />
     </button>
   );
 }
@@ -1233,12 +1746,13 @@ function LocationWidget({ value, onSave }: { value: string; onSave: (v: string) 
 
 function CalendarWidget({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const [editing, setEditing] = useState(false);
+  const { showTip, handleClick, handleTouchStart } = useWidgetTap(() => setEditing(true));
   const { day, month } = value ? parseDateLabel(value) : { day: null, month: null };
 
   if (editing) {
     return (
       <div className={cn(WIDGET_EDIT, "border-violet-500/25 text-violet-300")}>
-        <CalendarDays size={14} className="text-violet-400/60 mb-0.5" />
+        <CalendarDays size={14} className="text-violet-400/60 mb-0.5 max-md:h-3 max-md:w-3 max-md:mb-0" />
         <WidgetInput value={value} onSave={onSave} onCancel={() => setEditing(false)} accent="text-violet-300" />
       </div>
     );
@@ -1246,26 +1760,22 @@ function CalendarWidget({ value, onSave }: { value: string; onSave: (v: string) 
 
   return (
     <button
-      onClick={() => setEditing(true)}
-      className={cn(WIDGET, "border-violet-500/20 text-violet-300")}
-      title="Click to edit date"
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      className={cn(WIDGET, "border-violet-500/20 text-violet-300", showTip && "z-50")}
+      title={value || "Click to edit date"}
     >
-      <div className="flex h-7 w-8 flex-col rounded-sm border border-violet-400/30 overflow-hidden bg-violet-950/30 shrink-0">
-        <div className="flex h-2.5 items-center justify-center bg-violet-500/25">
-          <span className="text-[5px] font-bold uppercase tracking-wider text-violet-300/80">{month || "———"}</span>
+      <div className="flex h-7 max-md:h-4 w-8 max-md:w-5 flex-col rounded-sm border border-violet-400/30 overflow-hidden bg-violet-950/30 shrink-0">
+        <div className="flex h-2.5 max-md:h-1.5 items-center justify-center bg-violet-500/25">
+          <span className="text-[5px] max-md:text-[3px] font-bold uppercase tracking-wider text-violet-300/80">
+            {month || "———"}
+          </span>
         </div>
         <div className="flex flex-1 items-center justify-center">
-          <span className="text-[12px] font-bold leading-none text-violet-200/80">{day || "?"}</span>
+          <span className="text-[12px] max-md:text-[8px] font-bold leading-none text-violet-200/80">{day || "?"}</span>
         </div>
       </div>
-      <span
-        className={cn(
-          "max-w-[4.5rem] truncate text-[9px] font-semibold leading-tight shrink-0",
-          !value && "italic opacity-40",
-        )}
-      >
-        {value || "Date"}
-      </span>
+      <WidgetLabel value={value} fallback="Date" showTip={showTip} />
     </button>
   );
 }
@@ -1274,6 +1784,7 @@ function CalendarWidget({ value, onSave }: { value: string; onSave: (v: string) 
 
 function ClockWidget({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const [editing, setEditing] = useState(false);
+  const { showTip, handleClick, handleTouchStart } = useWidgetTap(() => setEditing(true));
   const hour = value ? extractHourFromTime(value) : -1;
   const hourAngle = hour >= 0 ? ((hour % 12) / 12) * 360 - 90 : -90;
   const minuteAngle = hour >= 0 ? (parseMinutes(value) / 60) * 360 - 90 : 90;
@@ -1281,7 +1792,7 @@ function ClockWidget({ value, onSave }: { value: string; onSave: (v: string) => 
   if (editing) {
     return (
       <div className={cn(WIDGET_EDIT, "border-amber-500/25 text-amber-300")}>
-        <Clock size={14} className="text-amber-400/60 mb-0.5" />
+        <Clock size={14} className="text-amber-400/60 mb-0.5 max-md:h-3 max-md:w-3 max-md:mb-0" />
         <WidgetInput value={value} onSave={onSave} onCancel={() => setEditing(false)} accent="text-amber-300" />
       </div>
     );
@@ -1291,11 +1802,12 @@ function ClockWidget({ value, onSave }: { value: string; onSave: (v: string) => 
 
   return (
     <button
-      onClick={() => setEditing(true)}
-      className={cn(WIDGET, "border-amber-500/20 text-amber-300")}
-      title="Click to edit time"
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      className={cn(WIDGET, "border-amber-500/20 text-amber-300", showTip && "z-50")}
+      title={value || "Click to edit time"}
     >
-      <div className="relative flex h-7 w-7 items-center justify-center shrink-0">
+      <div className="relative flex h-7 max-md:h-4 w-7 max-md:w-4 items-center justify-center shrink-0">
         <svg viewBox="0 0 32 32" className="h-full w-full">
           <circle
             cx="16"
@@ -1349,14 +1861,7 @@ function ClockWidget({ value, onSave }: { value: string; onSave: (v: string) => 
           <circle cx="16" cy="16" r="1" fill="currentColor" className="text-amber-400/70" />
         </svg>
       </div>
-      <span
-        className={cn(
-          "max-w-[4.5rem] truncate text-[9px] font-semibold leading-tight shrink-0",
-          !value && "italic opacity-40",
-        )}
-      >
-        {value || period || "Time"}
-      </span>
+      <WidgetLabel value={value || period || ""} fallback="Time" showTip={showTip} />
     </button>
   );
 }
@@ -1365,12 +1870,13 @@ function ClockWidget({ value, onSave }: { value: string; onSave: (v: string) => 
 
 function WeatherWidget({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const [editing, setEditing] = useState(false);
+  const { showTip, handleClick, handleTouchStart } = useWidgetTap(() => setEditing(true));
   const emoji = value ? getWeatherEmoji(value) : "🌤️";
 
   if (editing) {
     return (
       <div className={cn(WIDGET_EDIT, "border-sky-500/25 text-sky-300")}>
-        <span className="text-base mb-0.5">{emoji}</span>
+        <span className="text-base max-md:text-xs mb-0.5">{emoji}</span>
         <WidgetInput value={value} onSave={onSave} onCancel={() => setEditing(false)} accent="text-sky-300" />
       </div>
     );
@@ -1378,21 +1884,15 @@ function WeatherWidget({ value, onSave }: { value: string; onSave: (v: string) =
 
   return (
     <button
-      onClick={() => setEditing(true)}
-      className={cn(WIDGET, "border-sky-500/20 text-sky-300")}
-      title="Click to edit weather"
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      className={cn(WIDGET, "border-sky-500/20 text-sky-300", showTip && "z-50")}
+      title={value || "Click to edit weather"}
     >
-      <div className="flex h-7 items-center justify-center shrink-0">
-        <span className="text-xl leading-none drop-shadow-[0_0_6px_rgba(56,189,248,0.3)]">{emoji}</span>
+      <div className="flex h-7 max-md:h-4 items-center justify-center shrink-0">
+        <span className="text-xl max-md:text-xs leading-none drop-shadow-[0_0_6px_rgba(56,189,248,0.3)]">{emoji}</span>
       </div>
-      <span
-        className={cn(
-          "max-w-[4.5rem] truncate text-[9px] font-semibold leading-tight shrink-0",
-          !value && "italic opacity-40",
-        )}
-      >
-        {value || "Weather"}
-      </span>
+      <WidgetLabel value={value} fallback="Weather" showTip={showTip} />
     </button>
   );
 }
@@ -1401,6 +1901,7 @@ function WeatherWidget({ value, onSave }: { value: string; onSave: (v: string) =
 
 function TemperatureWidget({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const [editing, setEditing] = useState(false);
+  const { showTip, handleClick, handleTouchStart } = useWidgetTap(() => setEditing(true));
   const temp = value ? parseTemperature(value) : null;
   const fillPct = temp !== null ? Math.max(5, Math.min(100, ((temp + 20) / 65) * 100)) : 40;
   const fillColor =
@@ -1417,7 +1918,7 @@ function TemperatureWidget({ value, onSave }: { value: string; onSave: (v: strin
   if (editing) {
     return (
       <div className={cn(WIDGET_EDIT, "border-rose-500/25 text-rose-300")}>
-        <Thermometer size={14} className="text-rose-400/60 mb-0.5" />
+        <Thermometer size={14} className="text-rose-400/60 mb-0.5 max-md:h-3 max-md:w-3 max-md:mb-0" />
         <WidgetInput value={value} onSave={onSave} onCancel={() => setEditing(false)} accent="text-rose-300" />
       </div>
     );
@@ -1425,11 +1926,12 @@ function TemperatureWidget({ value, onSave }: { value: string; onSave: (v: strin
 
   return (
     <button
-      onClick={() => setEditing(true)}
-      className={cn(WIDGET, "border-rose-500/20 text-rose-300")}
-      title="Click to edit temperature"
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      className={cn(WIDGET, "border-rose-500/20 text-rose-300", showTip && "z-50")}
+      title={value || "Click to edit temperature"}
     >
-      <div className="relative flex h-7 items-center justify-center shrink-0">
+      <div className="relative flex h-7 max-md:h-4 items-center justify-center shrink-0">
         <svg viewBox="0 0 16 32" className="h-full" style={{ width: "auto" }}>
           <rect
             x="5.5"
@@ -1475,14 +1977,7 @@ function TemperatureWidget({ value, onSave }: { value: string; onSave: (v: strin
           ))}
         </svg>
       </div>
-      <span
-        className={cn(
-          "max-w-[4.5rem] truncate text-[9px] font-semibold leading-tight shrink-0",
-          !value && "italic opacity-40",
-        )}
-      >
-        {value || "Temp"}
-      </span>
+      <WidgetLabel value={value} fallback="Temp" showTip={showTip} />
     </button>
   );
 }

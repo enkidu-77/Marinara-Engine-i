@@ -18,12 +18,22 @@ import { EchoChamberPanel } from "../chat/EchoChamberPanel";
 import { useUIStore } from "../../stores/ui.store";
 import { cn } from "../../lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
+import { useState, useEffect } from "react";
 
 export function AppShell() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
   const closeRightPanel = useUIStore((s) => s.closeRightPanel);
+
+  // Track mobile breakpoint for right-panel animation strategy
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
   const sidebarWidth = useUIStore((s) => s.sidebarWidth);
   const characterDetailId = useUIStore((s) => s.characterDetailId);
   const lorebookDetailId = useUIStore((s) => s.lorebookDetailId);
@@ -55,14 +65,15 @@ export function AppShell() {
       <aside
         data-tour="sidebar"
         className={cn(
-          "flex-shrink-0 overflow-hidden border-r border-[var(--sidebar-border)]/30 bg-[var(--background)]/80 backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "flex-shrink-0 overflow-hidden bg-[var(--background)]/80 backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          sidebarOpen && "border-r border-[var(--sidebar-border)]/30",
           // Mobile: fixed overlay
           "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:shadow-2xl",
           !sidebarOpen && "max-md:!w-0",
         )}
-        style={{ width: sidebarOpen ? sidebarWidth : 0 }}
+        style={{ width: sidebarOpen ? (isMobile ? "100vw" : sidebarWidth) : 0 }}
       >
-        <div className="h-full" style={{ width: sidebarWidth }}>
+        <div className="h-full" style={{ width: isMobile ? "100vw" : sidebarWidth }}>
           <ChatSidebar />
         </div>
       </aside>
@@ -100,17 +111,18 @@ export function AppShell() {
       <AnimatePresence mode="wait">
         {rightPanelOpen && (
           <motion.aside
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 320, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
+            key={isMobile ? "mobile" : "desktop"}
+            initial={isMobile ? { x: "100%" } : { width: 0, opacity: 0 }}
+            animate={isMobile ? { x: 0 } : { width: 320, opacity: 1 }}
+            exit={isMobile ? { x: "100%" } : { width: 0, opacity: 0 }}
             transition={{ type: "spring", damping: 28, stiffness: 350 }}
             className={cn(
               "flex-shrink-0 overflow-hidden border-l border-[var(--sidebar-border)]/30 bg-[var(--background)]/80 backdrop-blur-xl",
-              // Mobile: fixed full-width overlay
-              "max-md:!fixed max-md:inset-y-0 max-md:right-0 max-md:z-50 max-md:!w-full max-md:max-w-[100vw] max-md:shadow-2xl",
+              // Mobile: fixed full-width overlay from the right
+              isMobile && "!fixed inset-y-0 right-0 z-50 !w-full shadow-2xl !border-l-0",
             )}
           >
-            <div className="h-full max-md:w-full" style={{ width: 320 }}>
+            <div className="h-full" style={isMobile ? undefined : { width: 320 }}>
               <RightPanel />
             </div>
           </motion.aside>

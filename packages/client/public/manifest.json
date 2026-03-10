@@ -1,0 +1,22 @@
+{
+  "name": "Marinara Engine",
+  "short_name": "Marinara",
+  "description": "AI Chat & Roleplay Frontend — Conversation, Roleplay, Visual Novel",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "64x64",
+      "type": "image/png"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "1655x1322",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

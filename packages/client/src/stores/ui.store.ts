@@ -237,6 +237,7 @@ export const useUIStore = create<UIState>()(
           agentDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
+          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
         }),
       closeCharacterDetail: () => set({ characterDetailId: null }),
       openLorebookDetail: (id) =>
@@ -248,6 +249,7 @@ export const useUIStore = create<UIState>()(
           agentDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
+          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
         }),
       closeLorebookDetail: () => set({ lorebookDetailId: null }),
       openPresetDetail: (id) =>
@@ -259,6 +261,7 @@ export const useUIStore = create<UIState>()(
           agentDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
+          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
         }),
       closePresetDetail: () => set({ presetDetailId: null }),
       openConnectionDetail: (id) =>
@@ -270,6 +273,7 @@ export const useUIStore = create<UIState>()(
           agentDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
+          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
         }),
       closeConnectionDetail: () => set({ connectionDetailId: null }),
       openAgentDetail: (agentType) =>
@@ -282,6 +286,7 @@ export const useUIStore = create<UIState>()(
           toolDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
+          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
         }),
       closeAgentDetail: () => set({ agentDetailId: null }),
       openToolDetail: (id) =>
@@ -294,6 +299,7 @@ export const useUIStore = create<UIState>()(
           connectionDetailId: null,
           personaDetailId: null,
           regexDetailId: null,
+          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
         }),
       closeToolDetail: () => set({ toolDetailId: null }),
       openPersonaDetail: (id) =>
@@ -306,6 +312,7 @@ export const useUIStore = create<UIState>()(
           agentDetailId: null,
           toolDetailId: null,
           regexDetailId: null,
+          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
         }),
       closePersonaDetail: () => set({ personaDetailId: null }),
       openRegexDetail: (id) =>
@@ -318,6 +325,7 @@ export const useUIStore = create<UIState>()(
           connectionDetailId: null,
           agentDetailId: null,
           toolDetailId: null,
+          ...(window.innerWidth < 768 && { rightPanelOpen: false }),
         }),
       closeRegexDetail: () => set({ regexDetailId: null }),
 

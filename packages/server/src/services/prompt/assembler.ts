@@ -525,6 +525,9 @@ function enforceStrictRoles(messages: ChatMLMessage[], chatHistoryEndIdx: number
       if (prev && prev.role === effectiveRole) {
         // Merge into previous (same role back-to-back)
         prev.content += "\n\n" + msg.content;
+        if (msg.images?.length) {
+          prev.images = [...(prev.images ?? []), ...msg.images];
+        }
       } else {
         // Force to expected role to maintain alternation
         result.push({ ...msg, role: expectedRole });

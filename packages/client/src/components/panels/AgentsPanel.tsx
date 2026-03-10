@@ -17,7 +17,6 @@ import {
   Radar,
   Puzzle,
 } from "lucide-react";
-import { useAgentStore } from "../../stores/agent.store";
 import { useUIStore } from "../../stores/ui.store";
 import { useAgentConfigs, useToggleAgent, useDeleteAgent, type AgentConfigRow } from "../../hooks/use-agents";
 import { useCustomTools, useDeleteCustomTool, type CustomToolRow } from "../../hooks/use-custom-tools";
@@ -36,9 +35,6 @@ export function AgentsPanel() {
   const openAgentDetail = useUIStore((s) => s.openAgentDetail);
   const openToolDetail = useUIStore((s) => s.openToolDetail);
   const openRegexDetail = useUIStore((s) => s.openRegexDetail);
-
-  const thoughtBubbles = useAgentStore((s) => s.thoughtBubbles);
-  const dismissThoughtBubble = useAgentStore((s) => s.dismissThoughtBubble);
 
   // Custom agents = DB entries whose type doesn't match any built-in
   const customAgents = ((agentConfigs ?? []) as AgentConfigRow[]).filter(
@@ -60,25 +56,6 @@ export function AgentsPanel() {
 
   return (
     <div className="flex flex-col gap-1 p-3">
-      {/* Thought bubbles */}
-      {thoughtBubbles.length > 0 && (
-        <div className="mb-2 flex flex-col gap-1.5">
-          <div className="text-xs font-medium text-[var(--primary)]">Agent Thoughts</div>
-          {thoughtBubbles.map((bubble, i) => (
-            <div key={i} className="relative rounded-md bg-[var(--primary)]/10 p-2 text-xs">
-              <button
-                onClick={() => dismissThoughtBubble(i)}
-                className="absolute right-1 top-1 text-[var(--muted-foreground)]"
-              >
-                ×
-              </button>
-              <span className="font-medium text-[var(--primary)]">{bubble.agentName}: </span>
-              {bubble.content}
-            </div>
-          ))}
-        </div>
-      )}
-
       {isLoading && <div className="py-4 text-center text-xs text-[var(--muted-foreground)]">Loading...</div>}
 
       {/* ── Built-in Agents ── */}

@@ -129,6 +129,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       recentEvents: JSON.parse((row.recentEvents as string) ?? "[]"),
       playerStats: row.playerStats ? JSON.parse(row.playerStats as string) : null,
       personaStats: row.personaStats ? JSON.parse(row.personaStats as string) : null,
+      manualOverrides: row.manualOverrides ? JSON.parse(row.manualOverrides as string) : null,
       createdAt: row.createdAt,
     };
   });
@@ -137,15 +138,19 @@ export async function chatsRoutes(app: FastifyInstance) {
   app.patch<{ Params: { id: string } }>("/:id/game-state", async (req, reply) => {
     const { createGameStateStorage } = await import("../services/storage/game-state.storage.js");
     const gameStateStore = createGameStateStorage(app.db);
-    const fields = req.body as Partial<{
+    const body = req.body as Record<string, unknown>;
+    const manual = body.manual === true;
+    const fields = body as Partial<{
       date: string;
       time: string;
       location: string;
       weather: string;
       temperature: string;
       presentCharacters: any[];
+      playerStats: any;
+      personaStats: any[];
     }>;
-    const updated = await gameStateStore.updateLatest(req.params.id, fields);
+    const updated = await gameStateStore.updateLatest(req.params.id, fields, manual);
     if (!updated) return reply.status(404).send({ error: "No game state found" });
     return updated;
   });
@@ -172,8 +177,9 @@ export async function chatsRoutes(app: FastifyInstance) {
     for (let i = chatMessages.length - 1; i >= 0; i--) {
       const m = chatMessages[i]! as any;
       if (m.role === "assistant") {
-        const extra = typeof m.extra === "string" ? JSON.parse(m.extra) : (m.extra ?? {});
+        let extra = typeof m.extra === "string" ? JSON.parse(m.extra) : (m.extra ?? {});
         let cachedPrompt = extra.cachedPrompt as Array<{ role: string; content: string }> | undefined;
+        let generationInfo = extra.generationInfo as Record<string, unknown> | undefined;
 
         // If message-level extra doesn't have it (swipe overwrite), check swipes
         if (!cachedPrompt && m.id) {
@@ -184,12 +190,14 @@ export async function chatsRoutes(app: FastifyInstance) {
             const swExtra =
               typeof activeSwipe.extra === "string" ? JSON.parse(activeSwipe.extra) : (activeSwipe.extra ?? {});
             cachedPrompt = swExtra.cachedPrompt;
+            if (swExtra.generationInfo) generationInfo = swExtra.generationInfo;
           }
           if (!cachedPrompt) {
             for (const sw of swipes) {
               const swExtra = typeof sw.extra === "string" ? JSON.parse(sw.extra) : (sw.extra ?? {});
               if (swExtra.cachedPrompt) {
                 cachedPrompt = swExtra.cachedPrompt;
+                if (swExtra.generationInfo) generationInfo = swExtra.generationInfo;
                 break;
               }
             }
@@ -197,7 +205,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         }
 
         if (cachedPrompt) {
-          return { messages: cachedPrompt, parameters: null, cached: true };
+          return { messages: cachedPrompt, parameters: null, generationInfo: generationInfo ?? null, cached: true };
         }
         break;
       }
@@ -295,14 +303,14 @@ export async function chatsRoutes(app: FastifyInstance) {
             chatMessages: mappedMessages,
           });
 
-          return { messages: assembled.messages, parameters: assembled.parameters };
+          return { messages: assembled.messages, parameters: assembled.parameters, generationInfo: null };
         }
       } catch (e) {
         console.error("[peek-prompt] Assembler failed, falling through to raw messages:", e);
       }
     }
 
-    return { messages: mappedMessages, parameters: null };
+    return { messages: mappedMessages, parameters: null, generationInfo: null };
   });
 
   // ── Swipes ──

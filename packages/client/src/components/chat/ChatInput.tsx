@@ -17,6 +17,12 @@ import {
 } from "../../lib/slash-commands";
 import { cn } from "../../lib/utils";
 
+interface Attachment {
+  type: string; // MIME type
+  data: string; // base64 data URL
+  name: string;
+}
+
 interface ChatInputProps {
   mode?: "conversation" | "roleplay";
   characterNames?: string[];
@@ -27,6 +33,7 @@ export function ChatInput({ mode = "conversation", characterNames = [] }: ChatIn
   const [completions, setCompletions] = useState<SlashCommand[]>([]);
   const [selectedCompletion, setSelectedCompletion] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeChatId = useChatStore((s) => s.activeChatId);
   const isStreaming = useChatStore((s) => s.isStreaming);
@@ -34,6 +41,31 @@ export function ChatInput({ mode = "conversation", characterNames = [] }: ChatIn
   const { applyToUserInput } = useApplyRegex();
   const enterToSend = useUIStore((s) => s.enterToSend);
   const createMessage = useCreateMessage(activeChatId);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length || !activeChatId) return;
+
+    for (const file of Array.from(files)) {
+      if (file.size > 20 * 1024 * 1024) {
+        toast.error(`${file.name} is too large (max 20 MB)`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        setAttachments((prev) => [...prev, { type: file.type, data: dataUrl, name: file.name }]);
+      };
+      reader.onerror = () => toast.error(`Failed to read ${file.name}`);
+      reader.readAsDataURL(file);
+    }
+    e.target.value = "";
+  };
+
+  const removeAttachment = (idx: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  };
 
   // Normalize curly/smart quotes to straight quotes
   const normalizeQuotes = (s: string) => s.replace(/[“”„‟]/g, '"').replace(/[‘’]/g, "'");
@@ -54,7 +86,7 @@ export function ChatInput({ mode = "conversation", characterNames = [] }: ChatIn
 
   const handleSend = useCallback(async () => {
     const raw = getValue();
-    if (!raw.trim() || !activeChatId || isStreaming) return;
+    if ((!raw.trim() && !attachments.length) || !activeChatId || isStreaming) return;
 
     const normalized = normalizeQuotes(raw.trim());
 
@@ -70,6 +102,7 @@ export function ChatInput({ mode = "conversation", characterNames = [] }: ChatIn
       }
       setHasInput(false);
       setCompletions([]);
+      setAttachments([]);
 
       const result = await match.command.execute(match.args, ctx);
       if (result.feedback) {
@@ -95,12 +128,15 @@ export function ChatInput({ mode = "conversation", characterNames = [] }: ChatIn
     }
     setHasInput(false);
     setCompletions([]);
+    const pendingAttachments = attachments.map((a) => ({ type: a.type, data: a.data }));
+    setAttachments([]);
 
     try {
       await generate({
         chatId: activeChatId,
         connectionId: null,
         userMessage: message,
+        ...(pendingAttachments.length ? { attachments: pendingAttachments } : {}),
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Generation failed";
@@ -240,29 +276,76 @@ export function ChatInput({ mode = "conversation", characterNames = [] }: ChatIn
         </div>
       )}
 
+      {/* Attachment previews */}
+      {attachments.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {attachments.map((att, i) => (
+            <div
+              key={i}
+              className={cn(
+                "group relative flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs",
+                isRP ? "bg-white/10 text-white/70" : "bg-[var(--accent)] text-[var(--foreground)]",
+              )}
+            >
+              {att.type.startsWith("image/") ? (
+                <img src={att.data} alt={att.name} className="h-8 w-8 rounded object-cover" />
+              ) : null}
+              <span className="max-w-[120px] truncate">{att.name}</span>
+              <button
+                onClick={() => removeAttachment(i)}
+                className="ml-0.5 rounded-full p-0.5 opacity-60 transition-opacity hover:opacity-100"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Main input container */}
       <div
         className={cn(
-          "relative flex items-center gap-2 rounded-2xl border-2 px-4 py-3 transition-all duration-200",
+          "relative flex items-center gap-2 rounded-2xl border-2 px-4 py-2.5 transition-all duration-200",
           isRP
-            ? cn("bg-black/40", hasInput ? "border-blue-400/30 shadow-md shadow-blue-500/5" : "border-white/10")
+            ? cn(
+                "bg-black/40",
+                hasInput || attachments.length ? "border-blue-400/30 shadow-md shadow-blue-500/5" : "border-white/25",
+              )
             : cn(
                 "bg-[var(--secondary)]",
-                hasInput
+                hasInput || attachments.length
                   ? "border-[var(--primary)]/40 shadow-md shadow-[var(--primary)]/5"
                   : "border-[var(--border)]/40",
               ),
         )}
       >
         {/* Attachment button */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv"
+          multiple
+          className="hidden"
+          onChange={handleFileUpload}
+        />
         <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!activeChatId}
           className={cn(
             "rounded-lg p-1.5 transition-all active:scale-90",
             isRP
-              ? "text-white/40 hover:bg-white/10 hover:text-white/70"
-              : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+              ? cn(
+                  attachments.length
+                    ? "text-blue-400 hover:bg-white/10"
+                    : "text-white/40 hover:bg-white/10 hover:text-white/70",
+                )
+              : cn(
+                  attachments.length
+                    ? "text-[var(--primary)] hover:bg-[var(--accent)]"
+                    : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                ),
           )}
-          title="Attach file"
+          title="Attach files"
         >
           <Paperclip size={16} />
         </button>
@@ -284,7 +367,7 @@ export function ChatInput({ mode = "conversation", characterNames = [] }: ChatIn
           spellCheck={false}
           autoCorrect="off"
           className={cn(
-            "max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none disabled:cursor-not-allowed disabled:opacity-40",
+            "max-h-[200px] flex-1 resize-none bg-transparent py-0 text-sm leading-normal outline-none disabled:cursor-not-allowed disabled:opacity-40",
             isRP
               ? "text-white/90 placeholder:text-white/30"
               : "text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]",
@@ -294,12 +377,12 @@ export function ChatInput({ mode = "conversation", characterNames = [] }: ChatIn
         {/* Send / Stop button */}
         <button
           onClick={isStreaming ? () => useChatStore.getState().stopGeneration() : handleSend}
-          disabled={(!hasInput && !isStreaming) || !activeChatId}
+          disabled={(!hasInput && !attachments.length && !isStreaming) || !activeChatId}
           className={cn(
             "flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-200",
             isStreaming
               ? "bg-[var(--destructive)] text-white hover:opacity-80"
-              : hasInput && activeChatId
+              : (hasInput || attachments.length) && activeChatId
                 ? isRP
                   ? "bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/20 hover:shadow-lg active:scale-90"
                   : "bg-gradient-to-br from-[var(--primary)] to-blue-600 text-white shadow-md shadow-[var(--primary)]/20 hover:shadow-lg active:scale-90"

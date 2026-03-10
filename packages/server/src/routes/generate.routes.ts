@@ -2,8 +2,15 @@
 // Routes: Generation (SSE Streaming with Tool Use + Agent Pipeline)
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
-import { generateRequestSchema, BUILT_IN_TOOLS, BUILT_IN_AGENTS, findKnownModel } from "@marinara-engine/shared";
-import type { AgentContext, AgentResult, AgentPhase, APIProvider, GameState } from "@marinara-engine/shared";
+import {
+  generateRequestSchema,
+  BUILT_IN_TOOLS,
+  BUILT_IN_AGENTS,
+  findKnownModel,
+  nameToXmlTag,
+  DEFAULT_AGENT_TOOLS,
+} from "@marinara-engine/shared";
+import type { AgentContext, AgentResult, AgentPhase, APIProvider, CharacterStat, GameState, PlayerStats } from "@marinara-engine/shared";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 import { createPromptsStorage } from "../services/storage/prompts.storage.js";
@@ -122,8 +129,8 @@ export async function generateRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: "Chat not found" });
     }
 
-    // Save user message (if provided)
-    if (input.userMessage) {
+    // Save user message — skip for impersonate (no real user message to save)
+    if (!input.impersonate && (input.userMessage || input.attachments?.length)) {
       // ── Commit game state: lock in the game state the user was seeing ──
       // Find the last assistant message's active swipe and commit its game state.
       // This ensures swipes/regens always use the state from the user's accepted turn.
@@ -137,12 +144,17 @@ export async function generateRoutes(app: FastifyInstance) {
         }
       }
 
-      await chats.createMessage({
+      const userMsg = await chats.createMessage({
         chatId: input.chatId,
         role: "user",
         characterId: null,
-        content: input.userMessage,
+        content: input.userMessage ?? "",
       });
+
+      // Store attachments in message extra if present
+      if (input.attachments?.length && userMsg?.id) {
+        await chats.updateMessageExtra(userMsg.id, { attachments: input.attachments });
+      }
     }
 
     // Resolve connection
@@ -180,6 +192,11 @@ export async function generateRoutes(app: FastifyInstance) {
       "X-Accel-Buffering": "no",
     });
 
+    // ── Abort controller: cancel agents when client disconnects ──
+    const abortController = new AbortController();
+    const onClose = () => abortController.abort();
+    req.raw.on("close", onClose);
+
     try {
       // Get chat messages
       const allChatMessages = await chats.listMessages(input.chatId);
@@ -207,10 +224,31 @@ export async function generateRoutes(app: FastifyInstance) {
         chatMessages = chatMessages.slice(-contextMessageLimit);
       }
 
-      const mappedMessages = chatMessages.map((m: any) => ({
-        role: m.role === "narrator" ? ("system" as const) : (m.role as "user" | "assistant" | "system"),
-        content: m.content as string,
-      }));
+      const mappedMessages = chatMessages.map((m: any) => {
+        const extra = parseExtra(m.extra);
+        const attachments = extra.attachments as Array<{ type: string; data: string }> | undefined;
+        const images = attachments?.filter((a) => a.type.startsWith("image/")).map((a) => a.data);
+        return {
+          role: m.role === "narrator" ? ("system" as const) : (m.role as "user" | "assistant" | "system"),
+          content: m.content as string,
+          ...(images?.length ? { images } : {}),
+        };
+      });
+
+      // Attach current request's images to the last user message (they're already saved in extra,
+      // but the message was just created and may be the last in mappedMessages)
+      if (input.attachments?.length && !input.impersonate) {
+        const imageAttachments = input.attachments.filter((a) => a.type.startsWith("image/")).map((a) => a.data);
+        if (imageAttachments.length) {
+          // Find the last user message and attach images
+          for (let i = mappedMessages.length - 1; i >= 0; i--) {
+            if (mappedMessages[i]!.role === "user") {
+              mappedMessages[i] = { ...mappedMessages[i]!, images: imageAttachments };
+              break;
+            }
+          }
+        }
+      }
 
       const characterIds: string[] = JSON.parse(chat.characterIds as string);
 
@@ -400,11 +438,13 @@ export async function generateRoutes(app: FastifyInstance) {
       // ── Fallback: inject character & persona info if the preset didn't include them ──
       const allContent = finalMessages.map((m) => m.content).join("\n");
       for (const ci of charInfo) {
-        // Check if this character already appears by description snippet OR by name tag
+        // Check if this character already appears by description snippet, XML tag, or markdown heading
+        const xmlTag = nameToXmlTag(ci.name);
         const hasCharInfo =
-          (ci.description && allContent.includes(ci.description.slice(0, 80))) ||
+          (ci.description && allContent.includes(ci.description.split("\n")[0]!.trim().slice(0, 80))) ||
+          allContent.includes(`<${xmlTag}>`) ||
           allContent.includes(`<${ci.name}>`) ||
-          allContent.includes(`## ${ci.name}`);
+          new RegExp(`^#{1,6} ${ci.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m").test(allContent);
         if (!hasCharInfo && ci.description) {
           const fieldParts = wrapFields(
             {
@@ -424,10 +464,12 @@ export async function generateRoutes(app: FastifyInstance) {
         }
       }
       if (personaDescription) {
+        const personaXmlTag = nameToXmlTag(personaName);
         const hasPersonaInfo =
-          allContent.includes(personaDescription.slice(0, 80)) ||
+          allContent.includes(personaDescription.split("\n")[0]!.trim().slice(0, 80)) ||
+          allContent.includes(`<${personaXmlTag}>`) ||
           allContent.includes(`<${personaName}>`) ||
-          allContent.includes(`## ${personaName}`);
+          new RegExp(`^#{1,6} ${personaName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m").test(allContent);
         if (!hasPersonaInfo) {
           const fieldParts = wrapFields(
             {
@@ -595,7 +637,8 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // If the chat-summary agent is enabled, provide the previous summary
-      if (resolvedAgents.some((a) => a.type === "chat-summary") && chatMeta.summary) {
+      const chatSummaryEnabled = enabledConfigs.some((c: any) => c.type === "chat-summary");
+      if (chatSummaryEnabled && chatMeta.summary) {
         agentContext.memory._previousSummary = chatMeta.summary;
       }
 
@@ -739,7 +782,42 @@ export async function generateRoutes(app: FastifyInstance) {
                 (wrapFormat === "xml" ? `<immersive_html>\n${htmlPrompt}\n</immersive_html>` : htmlBlock),
             };
           }
+
+          // Notify the UI that this static agent was injected
+          reply.raw.write(
+            `data: ${JSON.stringify({
+              type: "agent_result",
+              data: {
+                agentType: "html",
+                agentName: htmlAgent.name || "Immersive HTML",
+                resultType: "context_injection",
+                data: { text: "HTML formatting instructions injected into prompt" },
+                success: true,
+                error: null,
+                durationMs: 0,
+              },
+            })}\n\n`,
+          );
         }
+      }
+
+      // Notify UI if the chat-summary agent is enabled and was injected into the prompt
+      if (chatSummaryEnabled && chatMeta.summary) {
+        const chatSummaryCfg = enabledConfigs.find((c: any) => c.type === "chat-summary");
+        reply.raw.write(
+          `data: ${JSON.stringify({
+            type: "agent_result",
+            data: {
+              agentType: "chat-summary",
+              agentName: (chatSummaryCfg as any)?.name || "Chat Summary",
+              resultType: "context_injection",
+              data: { text: "Chat summary injected into prompt" },
+              success: true,
+              error: null,
+              durationMs: 0,
+            },
+          })}\n\n`,
+        );
       }
 
       // Check if tool-use is requested (from chat metadata or input).
@@ -794,6 +872,21 @@ export async function generateRoutes(app: FastifyInstance) {
         }
       }
 
+      // ── Impersonate: inject instruction to respond as the user's character ──
+      if (input.impersonate) {
+        const impersonateInstruction = [
+          `<instruction>`,
+          `You are now writing as ${personaName}, the user's character.`,
+          `Study ${personaName}'s previous messages in the conversation and replicate their voice, mannerisms, speech patterns, and style as closely as possible.`,
+          personaDescription ? `Character description: ${personaDescription}` : "",
+          `Write a single in-character response from ${personaName}'s perspective. Do NOT break character or add meta-commentary. Respond exactly as ${personaName} would.`,
+          `</instruction>`,
+        ]
+          .filter(Boolean)
+          .join("\n");
+        finalMessages.push({ role: "user", content: impersonateInstruction });
+      }
+
       let fullResponse = "";
       let fullThinking = "";
       let allResponses: string[] = [];
@@ -832,7 +925,7 @@ export async function generateRoutes(app: FastifyInstance) {
       /** Generate a single response for a given character and save it. */
       const generateForCharacter = async (
         targetCharId: string | null,
-        messagesForGen: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+        messagesForGen: Array<{ role: "system" | "user" | "assistant"; content: string; images?: string[] }>,
       ) => {
         // Reset per-character accumulators
         fullResponse = "";
@@ -881,12 +974,89 @@ export async function generateRoutes(app: FastifyInstance) {
           let loopMessages: ChatMessage[] = messagesForGen.map((m) => ({
             role: m.role as "system" | "user" | "assistant",
             content: m.content,
+            ...(m.images?.length ? { images: m.images } : {}),
           }));
 
           // Extract Spotify credentials from the Spotify agent settings (if configured)
           const spotifyAgent = resolvedAgents.find((a) => a.type === "spotify");
-          const spotifyAccessToken = (spotifyAgent?.settings?.spotifyAccessToken as string) || null;
+          const spotifySettings = spotifyAgent?.settings
+            ? typeof spotifyAgent.settings === "string"
+              ? JSON.parse(spotifyAgent.settings)
+              : spotifyAgent.settings
+            : {};
+          let spotifyAccessToken = (spotifySettings.spotifyAccessToken as string) || null;
+
+          // Auto-refresh if token is expired and we have a refresh token
+          const spotifyExpiresAt = (spotifySettings.spotifyExpiresAt as number) ?? 0;
+          const spotifyRefreshToken = (spotifySettings.spotifyRefreshToken as string) || null;
+          const spotifyClientId = (spotifySettings.spotifyClientId as string) || null;
+          if (
+            spotifyAccessToken &&
+            spotifyRefreshToken &&
+            spotifyClientId &&
+            spotifyExpiresAt > 0 &&
+            Date.now() > spotifyExpiresAt - 60_000 // Refresh 1 min before expiry
+          ) {
+            try {
+              const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                  grant_type: "refresh_token",
+                  refresh_token: spotifyRefreshToken,
+                  client_id: spotifyClientId,
+                }),
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (tokenRes.ok) {
+                const tokens = (await tokenRes.json()) as {
+                  access_token: string;
+                  refresh_token?: string;
+                  expires_in: number;
+                };
+                spotifyAccessToken = tokens.access_token;
+                // Persist refreshed tokens in background (don't await)
+                const agentsStore = createAgentsStorage(app.db);
+                agentsStore
+                  .update(spotifyAgent!.id, {
+                    settings: {
+                      ...spotifySettings,
+                      spotifyAccessToken: tokens.access_token,
+                      spotifyRefreshToken: tokens.refresh_token ?? spotifyRefreshToken,
+                      spotifyExpiresAt: Date.now() + tokens.expires_in * 1000,
+                    },
+                  })
+                  .catch(() => {});
+              }
+            } catch {
+              // Use the existing token as fallback
+            }
+          }
+
           const spotifyCreds = spotifyAccessToken ? { accessToken: spotifyAccessToken } : undefined;
+
+          // Attach tool context to the Spotify agent for function calling
+          if (spotifyCreds && spotifyAgent) {
+            const resolvedSpotify = resolvedAgents.find((a) => a.type === "spotify");
+            if (resolvedSpotify) {
+              const spotifyToolNames = DEFAULT_AGENT_TOOLS["spotify"] ?? [];
+              const spotifyToolDefs = BUILT_IN_TOOLS.filter((t) => spotifyToolNames.includes(t.name)).map((t) => ({
+                type: "function" as const,
+                function: {
+                  name: t.name,
+                  description: t.description,
+                  parameters: t.parameters as unknown as Record<string, unknown>,
+                },
+              }));
+              resolvedSpotify.toolContext = {
+                tools: spotifyToolDefs,
+                executeToolCall: async (call) => {
+                  const results = await executeToolCalls([call], { spotify: spotifyCreds });
+                  return results[0]?.result ?? "Tool execution failed";
+                },
+              };
+            }
+          }
 
           // Stream tokens in real-time via onToken callback
           const onToken = (chunk: string) => {
@@ -895,6 +1065,7 @@ export async function generateRoutes(app: FastifyInstance) {
           };
 
           for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+            if (abortController.signal.aborted) break;
             const result = await provider.chatComplete(loopMessages, {
               model: conn.model,
               temperature,
@@ -1062,7 +1233,7 @@ export async function generateRoutes(app: FastifyInstance) {
           );
         }
 
-        // Save assistant message
+        // Save assistant message (or user message for impersonate)
         let savedMsg: any;
         if (input.regenerateMessageId) {
           savedMsg = await chats.addSwipe(input.regenerateMessageId, fullResponse);
@@ -1070,8 +1241,8 @@ export async function generateRoutes(app: FastifyInstance) {
         } else {
           savedMsg = await chats.createMessage({
             chatId: input.chatId,
-            role: "assistant",
-            characterId: targetCharId,
+            role: input.impersonate ? "user" : "assistant",
+            characterId: input.impersonate ? null : targetCharId,
             content: fullResponse,
           });
         }
@@ -1083,6 +1254,10 @@ export async function generateRoutes(app: FastifyInstance) {
               model: conn.model,
               provider: conn.provider,
               temperature: temperature ?? null,
+              maxTokens: maxTokens ?? null,
+              showThoughts: showThoughts ?? null,
+              reasoningEffort: resolvedEffort ?? reasoningEffort ?? null,
+              verbosity: verbosity ?? null,
               tokensPrompt: usage?.promptTokens ?? null,
               tokensCompletion: usage?.completionTokens ?? null,
               durationMs,
@@ -1116,6 +1291,7 @@ export async function generateRoutes(app: FastifyInstance) {
         let runningMessages = [...finalMessages];
 
         for (let ci = 0; ci < respondingCharIds.length; ci++) {
+          if (abortController.signal.aborted) break;
           const charId = respondingCharIds[ci]!;
           const charName = charInfo.find((c) => c.id === charId)?.name ?? "Character";
 
@@ -1150,14 +1326,14 @@ export async function generateRoutes(app: FastifyInstance) {
       // ────────────────────────────────────────
       const hasPostAgents = resolvedAgents.some((a) => a.phase === "post_processing" || a.phase === "parallel");
       const combinedResponse = allResponses.join("\n\n");
-      if (hasPostAgents && combinedResponse) {
+      if (hasPostAgents && combinedResponse && !abortController.signal.aborted) {
         reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "post_generation" } })}\n\n`);
 
         let postResults = await pipeline.postGenerate(combinedResponse);
 
         // ── Auto-retry failed agents once ──
         const failedResults = postResults.filter((r) => !r.success);
-        if (failedResults.length > 0) {
+        if (failedResults.length > 0 && !abortController.signal.aborted) {
           const retryResults: AgentResult[] = [];
           for (const failed of failedResults) {
             const agentCfg = pipelineAgents.find((a) => a.type === failed.agentType);
@@ -1215,22 +1391,48 @@ export async function generateRoutes(app: FastifyInstance) {
                 const refreshed = await chats.getMessage(messageId);
                 if (refreshed) gsSwipeIndex = refreshed.activeSwipeIndex ?? 0;
               }
-              await gameStateStore.create({
-                chatId: input.chatId,
-                messageId,
-                swipeIndex: gsSwipeIndex,
-                date: (gs.date as string) ?? null,
-                time: (gs.time as string) ?? null,
-                location: (gs.location as string) ?? null,
-                weather: (gs.weather as string) ?? null,
-                temperature: (gs.temperature as string) ?? null,
-                presentCharacters: (gs.presentCharacters as any[]) ?? [],
-                recentEvents: (gs.recentEvents as string[]) ?? [],
-                playerStats: (gs.playerStats as any) ?? null,
-                personaStats: (gs.personaStats as any[]) ?? null,
-              });
+
+              // ── Preserve manual overrides from previous snapshot ──
+              const prevSnap = await gameStateStore.getLatest(input.chatId);
+              let manualOverrides: Record<string, string> | null = null;
+              if (prevSnap?.manualOverrides) {
+                manualOverrides = JSON.parse(prevSnap.manualOverrides as string);
+              }
+
+              // Build the new snapshot, letting manual overrides win
+              const newDate = manualOverrides?.date ?? (gs.date as string) ?? null;
+              const newTime = manualOverrides?.time ?? (gs.time as string) ?? null;
+              const newLocation = manualOverrides?.location ?? (gs.location as string) ?? null;
+              const newWeather = manualOverrides?.weather ?? (gs.weather as string) ?? null;
+              const newTemperature = manualOverrides?.temperature ?? (gs.temperature as string) ?? null;
+
+              await gameStateStore.create(
+                {
+                  chatId: input.chatId,
+                  messageId,
+                  swipeIndex: gsSwipeIndex,
+                  date: newDate,
+                  time: newTime,
+                  location: newLocation,
+                  weather: newWeather,
+                  temperature: newTemperature,
+                  presentCharacters: (gs.presentCharacters as any[]) ?? [],
+                  recentEvents: (gs.recentEvents as string[]) ?? [],
+                  playerStats: (gs.playerStats as PlayerStats | null) ?? (prevSnap?.playerStats ? (typeof prevSnap.playerStats === "string" ? JSON.parse(prevSnap.playerStats) : prevSnap.playerStats) : null),
+                  personaStats: (gs.personaStats as CharacterStat[] | null) ?? null,
+                },
+                manualOverrides,
+              );
               // Send game state to client so HUD updates live
-              reply.raw.write(`data: ${JSON.stringify({ type: "game_state", data: gs })}\n\n`);
+              const mergedGs = {
+                ...gs,
+                date: newDate,
+                time: newTime,
+                location: newLocation,
+                weather: newWeather,
+                temperature: newTemperature,
+              };
+              reply.raw.write(`data: ${JSON.stringify({ type: "game_state", data: mergedGs })}\n\n`);
             } catch {
               // Non-critical
             }
@@ -1268,18 +1470,36 @@ export async function generateRoutes(app: FastifyInstance) {
             try {
               const psData = result.data as Record<string, unknown>;
               const bars = (psData.stats as any[]) ?? [];
-              if (bars.length > 0) {
-                const latest = await gameStateStore.getLatest(input.chatId);
-                if (latest) {
-                  await app.db
-                    .update(gameStateSnapshotsTable)
-                    .set({ personaStats: JSON.stringify(bars) })
-                    .where(eq(gameStateSnapshotsTable.id, latest.id));
-                }
-                reply.raw.write(
-                  `data: ${JSON.stringify({ type: "game_state_patch", data: { personaStats: bars } })}\n\n`,
-                );
+              const status = (psData.status as string) ?? "";
+              const inventory = (psData.inventory as any[]) ?? [];
+              const latest = await gameStateStore.getLatest(input.chatId);
+              if (latest) {
+                const updates: Record<string, unknown> = {};
+                if (bars.length > 0) updates.personaStats = JSON.stringify(bars);
+                // Merge status + inventory into playerStats
+                const existingPS = latest.playerStats
+                  ? typeof latest.playerStats === "string"
+                    ? JSON.parse(latest.playerStats)
+                    : latest.playerStats
+                  : { stats: [], attributes: null, skills: {}, inventory: [], activeQuests: [], status: "" };
+                const mergedPS = { ...existingPS };
+                if (status) mergedPS.status = status;
+                if (inventory.length > 0) mergedPS.inventory = inventory;
+                updates.playerStats = JSON.stringify(mergedPS);
+                await app.db
+                  .update(gameStateSnapshotsTable)
+                  .set(updates)
+                  .where(eq(gameStateSnapshotsTable.id, latest.id));
               }
+              const patchData: Record<string, unknown> = {};
+              if (bars.length > 0) patchData.personaStats = bars;
+              if (status || inventory.length > 0) {
+                patchData.playerStats = {
+                  status: status || undefined,
+                  inventory: inventory.length > 0 ? inventory : undefined,
+                };
+              }
+              reply.raw.write(`data: ${JSON.stringify({ type: "game_state_patch", data: patchData })}\n\n`);
             } catch {
               // Non-critical
             }
@@ -1305,7 +1525,7 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         // ── Consistency Editor: runs after ALL other agents ──
-        if (editorAgent && messageId) {
+        if (editorAgent && messageId && !abortController.signal.aborted) {
           try {
             // Collect all successful agent outputs as a summary for the editor
             const agentSummary: Record<string, unknown> = {};
@@ -1366,6 +1586,7 @@ export async function generateRoutes(app: FastifyInstance) {
       const message = err instanceof Error ? err.message : "Generation failed";
       reply.raw.write(`data: ${JSON.stringify({ type: "error", data: message })}\n\n`);
     } finally {
+      req.raw.off("close", onClose);
       reply.raw.end();
     }
   });

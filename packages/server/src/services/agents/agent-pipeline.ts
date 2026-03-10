@@ -12,12 +12,14 @@
 // ──────────────────────────────────────────────
 import type { AgentResult, AgentContext, AgentPhase } from "@marinara-engine/shared";
 import type { BaseLLMProvider } from "../llm/base-provider.js";
-import { executeAgent, executeAgentBatch, type AgentExecConfig } from "./agent-executor.js";
+import { executeAgent, executeAgentBatch, type AgentExecConfig, type AgentToolContext } from "./agent-executor.js";
 
 /** A fully resolved agent ready for execution. */
 export interface ResolvedAgent extends AgentExecConfig {
   provider: BaseLLMProvider;
   model: string;
+  /** Optional tool context for agents that need function calling (e.g., Spotify). */
+  toolContext?: AgentToolContext;
 }
 
 /** Callback fired whenever an agent produces a result. */
@@ -69,6 +71,7 @@ function providerKey(provider: BaseLLMProvider): number {
 
 /**
  * Execute a group of agents — batch if >1, single if 1.
+ * Tool-using agents are extracted from batches and run individually.
  * Returns results and fires the onResult callback per agent.
  */
 async function executeGroup(
@@ -76,13 +79,29 @@ async function executeGroup(
   context: AgentContext,
   onResult?: AgentResultCallback,
 ): Promise<AgentResult[]> {
-  const results = await executeAgentBatch(group.agents, context, group.provider, group.model);
+  // Separate tool-using agents (can't be batched) from regular agents
+  const toolAgents = group.agents.filter((a) => a.toolContext?.tools.length);
+  const batchAgents = group.agents.filter((a) => !a.toolContext?.tools.length);
 
-  for (const result of results) {
-    onResult?.(result);
+  const allResults: AgentResult[] = [];
+
+  // Run regular agents as a batch
+  if (batchAgents.length > 0) {
+    const batchResults = await executeAgentBatch(batchAgents, context, group.provider, group.model);
+    for (const result of batchResults) {
+      onResult?.(result);
+    }
+    allResults.push(...batchResults);
   }
 
-  return results;
+  // Run tool-using agents individually (they need the tool loop)
+  for (const agent of toolAgents) {
+    const result = await executeAgent(agent, context, agent.provider, agent.model, agent.toolContext);
+    onResult?.(result);
+    allResults.push(result);
+  }
+
+  return allResults;
 }
 
 /**

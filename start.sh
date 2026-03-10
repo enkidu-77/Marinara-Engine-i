@@ -25,6 +25,7 @@ if [ -d ".git" ]; then
             pnpm install
             # Force rebuild
             rm -rf packages/shared/dist packages/server/dist packages/client/dist
+            rm -f packages/shared/tsconfig.tsbuildinfo packages/server/tsconfig.tsbuildinfo packages/client/tsconfig.tsbuildinfo
         else
             echo "  [OK] Already up to date"
         fi
@@ -95,15 +96,21 @@ export NODE_ENV=production
 export PORT=${PORT:-7860}
 export HOST=${HOST:-0.0.0.0}
 
+if [ -n "$SSL_CERT" ] && [ -n "$SSL_KEY" ]; then
+  PROTOCOL=https
+else
+  PROTOCOL=http
+fi
+
 echo ""
 echo "  ══════════════════════════════════════════"
-echo "    Starting Marinara Engine on http://localhost:$PORT"
+echo "    Starting Marinara Engine on ${PROTOCOL}://localhost:$PORT"
 echo "    Press Ctrl+C to stop"
 echo "  ══════════════════════════════════════════"
 echo ""
 
 # Open browser after a short delay
-(sleep 3 && open "http://localhost:$PORT" 2>/dev/null || xdg-open "http://localhost:$PORT" 2>/dev/null) &
+(sleep 3 && open "${PROTOCOL}://localhost:$PORT" 2>/dev/null || xdg-open "${PROTOCOL}://localhost:$PORT" 2>/dev/null) &
 
 # Start server
 cd packages/server

@@ -27,10 +27,13 @@ export function mergeAdjacentMessages(messages: ChatMLMessage[]): ChatMLMessage[
 
     if (current && current.role === msg.role) {
       // Same role — merge
+      const mergedImages: string[] | undefined =
+        current.images || msg.images ? [...(current.images ?? []), ...(msg.images ?? [])] : undefined;
       current = {
         role: current.role,
         content: current.content + "\n\n" + msg.content,
         name: current.name,
+        ...(mergedImages ? { images: mergedImages } : {}),
       };
     } else {
       // Different role — push current and start new accumulator

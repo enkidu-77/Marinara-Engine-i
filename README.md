@@ -1,43 +1,102 @@
 # 🍝 Marinara Engine
 
-### Release 1.2.1
+### Release 1.3.0
 
 **An AI-powered chat & roleplay engine** — with conversation, roleplay, and visual novel modes, a full character & sprite system, 18 built-in AI agents, turn-based combat, lorebooks, and more.
 
-Everything runs locally. No accounts, no cloud, no telemetry. Connect to any OpenAI-compatible API (OpenAI, Anthropic, Google, OpenRouter, Mistral, Cohere, or any custom endpoint).
+Everything runs locally. No accounts, no cloud, no telemetry. Connect to any OpenAI-compatible API (OpenAI, Anthropic, Google, OpenRouter, Mistral, Cohere, or any custom endpoint, local included).
 
 > **⚠️ Alpha Software** — This is an early release. Expect rough edges, missing features, and breaking changes between versions. Bug reports and feedback are very welcome!
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/chat-desktop.png" width="90%" alt="Roleplay Chat — Desktop" />
+  <br/>
+  <em>Roleplay Mode — Character sprites, custom backgrounds, weather effects, and AI agents</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/home-desktop.png" width="45%" alt="Home" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/character-editor.png" width="45%" alt="Character Editor" />
+</p>
+<p align="center">
+  <em>Home screen &nbsp;&nbsp;·&nbsp;&nbsp; Character editor with tags, metadata, and version history</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/presets-editor.png" width="45%" alt="Presets Editor" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/persona-colors.png" width="45%" alt="Persona Colors" />
+</p>
+<p align="center">
+  <em>Drag-and-drop prompt sections &nbsp;&nbsp;·&nbsp;&nbsp; Persona color customization with live preview</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/tutorial.png" width="45%" alt="Onboarding Tutorial" />
+</p>
+<p align="center">
+  <em>Guided onboarding with SillyTavern migration</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/home-mobile.png" width="30%" alt="Home — Mobile" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/screenshots/chat-mobile.png" width="30%" alt="Chat — Mobile" />
+</p>
+<p align="center">
+  <em>Fully responsive — works on phones and tablets via PWA</em>
+</p>
+
+---
+
 ## Changelog
 
-### v1.2.1
+### v1.3.0
+
+**Added:**
+- Character tags.
+- Peek Prompt now shows parameters sent to the model.
+- Images from the gallery can be displayed in the chat area.
+- `/impersonate` command with multimodal file attachments.
+- TLS/SSL support via `SSL_CERT` and `SSL_KEY` environment variables.
+- Manual edits to world state widgets now persist across AI generations.
+- Combined Tracker widget on mobile (Persona, Characters, Inventory, Quests).
+- Single-tap tooltips and double-tap editing for mobile world state widgets.
+- Direction-aware widget popover placement for left/right layouts.
+- Tap-to-toggle message action toolbar on mobile (edit, delete, peek prompt, etc.).
+
+**Changes:**
+- The app is now fully browser-based with PWA support. No desktop wrapper needed. Should work on Termux.
+- HUD widgets are now compacted and bubble-styled for mobile.
+- Toolbar icons have transparent backgrounds with floating layout.
 
 **Fixes:**
-- **ST Preset Import Order** — Imported SillyTavern presets now preserve the exact section ordering from `prompt_order` instead of using the definition order.
-- **ST Preset Name Import** — Preset names are now correctly extracted from Read-Me comments (e.g. "Marinara's Spaghetti Recipe") and from the filename, instead of defaulting to "SillyTavern Preset."
-- **Custom Provider Model Selector** — The search input now receives focus immediately when the dropdown opens, so you can click and type instead of needing Shift+Tab.
+- Various agent fixes, especially to Spotify DJ one.
+- Reworked prompts for agents.
+- Stop generation now properly aborts running agents and in-flight requests.
+- Installers fixed — Windows installer now preserves default path and enforces Node.js 20+.
+- Importing presets and chats now works correctly.
+- Agents dropdown no longer clipped by overflow containers in top view.
+- Peek Prompt no longer merges `<last_message>` with `<output_format>` sections.
+- Widget popovers no longer clipped by parent overflow.
+- Reflected XSS in Spotify OAuth callback fixed.
+- Heading dedup regex now matches any heading level with special characters.
+- Workbox URL pattern correctly matches API routes in service worker.
+- CSS import ordering for SillyTavern theme fixed.
+- React timer leak in Spotify agent polling fixed.
+- Sidebar border no longer shows when collapsed.
+- Various major and minor bug fixes.
 
-### v1.2.0
-
-**New Features:**
-- **Pinned Gallery Images** — Pin generated images to the chat area as draggable, resizable floating overlays that persist even when the gallery drawer is closed.
-- **Agent Activity Button** — New Sparkles button in the chat header (both roleplay and conversation modes) shows agent results grouped by phase (Pre-Generation, Parallel, Post-Processing) with a badge count.
-- **Agent Error Toasts** — Generation failures and individual agent errors now show toast notifications instead of silently failing.
-- **Agent Auto-Retry** — Failed agents are automatically retried once during generation. If they still fail, a manual Retry button appears in the chat header.
-- **Tracker Widgets in Conversation Mode** — The RoleplayHUD tracker widgets (location, time, weather, inventory, quests, etc.) now appear in conversation mode too when agents are enabled.
-
-**Improvements:**
-- **Connection Moved Up** — The Connection selector in Chat Settings is now the first thing after Chat Name for faster setup.
-- **Toggle Styling Fix** — Fixed all 4 toggle switches in Chat Settings (Enable Tools, Enable Agents, Color Dialogues, Context Limit) — the knob no longer overflows the track.
-- **Open Fonts Folder Fix** — Fixed the "Open Fonts Folder" button in Settings not working due to a double `/api` prefix.
-
-**Bug Fixes:**
-- Fixed generation errors being silently swallowed — now shows error toasts via Sonner.
-- Fixed `requestAnimationFrame` type error in the streaming code.
-- Fixed gallery images disappearing when the gallery drawer was closed (moved to Zustand store).
-- Fixed chat Settings drawer not showing the Connection selector in a prominent position.
+**Planned Next:**
+- OOC conversations about by your roleplays with their participants.
+- Natural chatting experience with the characters via Conversations mode.
+- Setting up harmonograms and autonomic responses for Conversation mode.
+- Discord integration.
 
 ---
 
@@ -106,11 +165,11 @@ All agents are disabled by default — enable only the ones you want. You can al
 
 ## Installation
 
-### Windows Installer (Recommended)
+### Windows Installer
 
-Download **[Marinara-Engine-Installer-1.2.1.exe](https://github.com/SpicyMarinara/Marinara-Engine/releases/download/v1.2.1/Marinara-Engine-Installer-1.2.1.exe)** from the [Releases](https://github.com/SpicyMarinara/Marinara-Engine/releases) page and run it. The installer checks for Node.js and Git, clones the repo, installs everything, and creates a desktop shortcut.
+Download **install.bat** from the [Releases](https://github.com/SpicyMarinara/Marinara-Engine/releases) page and run it. The installer checks for Node.js and Git, clones the repo, installs everything, builds the app, and creates a desktop shortcut.
 
-You still need **Node.js** and **Git** installed first (the installer will tell you if they're missing).
+You need **Node.js** and **Git** installed first (the installer will tell you if they're missing).
 
 ---
 
@@ -213,17 +272,6 @@ pnpm dev:server
 pnpm dev:client
 ```
 
-### Building Desktop Installers
-
-```bash
-pnpm package          # Build for current platform
-pnpm package:win      # Windows .exe
-pnpm package:mac      # macOS .dmg
-pnpm package:linux    # Linux .AppImage
-```
-
-Output goes to `release/`.
-
 ---
 
 ## Configuration
@@ -238,6 +286,8 @@ Copy `.env.example` to `.env` to customize:
 | `ENCRYPTION_KEY` | *(empty)* | AES key for API key encryption (generate with `openssl rand -hex 32`) |
 | `LOG_LEVEL` | `info` | Logging verbosity |
 | `CORS_ORIGINS` | `http://localhost:5173` | Allowed CORS origins |
+| `SSL_CERT` | *(empty)* | Path to TLS certificate (e.g. `fullchain.pem`). Set both `SSL_CERT` and `SSL_KEY` to enable HTTPS |
+| `SSL_KEY` | *(empty)* | Path to TLS private key (e.g. `privkey.pem`) |
 
 ---
 
@@ -249,7 +299,6 @@ marinara-engine/
 │   ├── shared/      # TypeScript types, schemas, constants
 │   ├── server/      # Fastify API + SQLite database + AI agents
 │   └── client/      # React frontend (Vite + Tailwind v4)
-├── electron/        # Electron desktop wrapper
 ├── start.bat        # Windows launcher
 ├── start.sh         # macOS/Linux launcher
 └── .env.example     # Environment template
@@ -261,7 +310,7 @@ marinara-engine/
 |-------|-----------|
 | Frontend | React 19, Tailwind CSS v4, Framer Motion, Zustand, React Query |
 | Backend | Fastify 5, Drizzle ORM, SQLite |
-| Desktop | Electron 33, electron-builder |
+| PWA | vite-plugin-pwa, Web App Manifest |
 | Shared | TypeScript 5, Zod |
 | Build | Vite 6, pnpm workspaces |
 

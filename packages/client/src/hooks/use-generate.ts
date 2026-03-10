@@ -42,6 +42,8 @@ export function useGenerate() {
       lorebookIds?: string[];
       userMessage?: string;
       regenerateMessageId?: string;
+      impersonate?: boolean;
+      attachments?: Array<{ type: string; data: string }>;
     }) => {
       // Create an AbortController so the stop button can cancel this generation
       const abortController = new AbortController();
@@ -55,7 +57,7 @@ export function useGenerate() {
       setRegenerateMessageId(params.regenerateMessageId ?? null);
 
       // Optimistically show the user message in the chat immediately
-      if (params.userMessage) {
+      if (params.userMessage && !params.impersonate) {
         const optimisticMsg: Message = {
           id: `__optimistic_${Date.now()}`,
           chatId: params.chatId,
@@ -578,6 +580,16 @@ function formatAgentBubble(agentType: string, agentName: string, data: unknown):
       const trimmed = text.trim();
       const preview = trimmed.length > 120 ? trimmed.slice(0, 120) + "…" : trimmed;
       return `✍️ ${preview}`;
+    }
+
+    case "html": {
+      const text = d.text as string;
+      return `🎨 ${text || "HTML formatting active"}`;
+    }
+
+    case "chat-summary": {
+      const text = d.text as string;
+      return `📝 ${text || "Chat summary active"}`;
     }
 
     default:

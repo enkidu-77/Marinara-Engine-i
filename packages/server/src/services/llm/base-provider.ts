@@ -9,6 +9,8 @@ export interface ChatMessage {
   tool_call_id?: string;
   /** For assistant messages with tool calls */
   tool_calls?: LLMToolCall[];
+  /** Base64 data URLs for multimodal image inputs */
+  images?: string[];
 }
 
 export interface LLMToolCall {

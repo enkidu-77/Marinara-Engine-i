@@ -18,7 +18,13 @@ export interface SlashCommand {
 export interface SlashCommandContext {
   chatId: string;
   /** Trigger an LLM generation (with optional user message) */
-  generate: (params: { chatId: string; connectionId: string | null; userMessage?: string }) => Promise<void>;
+  generate: (params: {
+    chatId: string;
+    connectionId: string | null;
+    userMessage?: string;
+    impersonate?: boolean;
+    attachments?: { type: string; data: string }[];
+  }) => Promise<void>;
   /** Insert a message directly into the chat (no LLM) */
   createMessage: (data: { role: string; content: string; characterId?: string | null }) => void;
   /** Invalidate chat queries to refresh the UI */
@@ -130,6 +136,20 @@ const COMMANDS: SlashCommand[] = [
         chatId: ctx.chatId,
         connectionId: null,
         userMessage: `[Respond as ${match}]`,
+      });
+      return { handled: true };
+    },
+  },
+  {
+    name: "impersonate",
+    aliases: ["imp"],
+    description: "Generate a response as your character ({{user}})",
+    usage: "/impersonate",
+    async execute(_args, ctx) {
+      await ctx.generate({
+        chatId: ctx.chatId,
+        connectionId: null,
+        impersonate: true,
       });
       return { handled: true };
     },
