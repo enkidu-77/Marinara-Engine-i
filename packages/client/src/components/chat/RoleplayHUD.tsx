@@ -179,123 +179,50 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
   const isVertical = layout === "left" || layout === "right";
 
   return (
-    <div className={cn("rpg-hud pointer-events-none relative z-30", isVertical && "h-full")}>
-      <div
-        className={cn(
-          "pointer-events-none",
-          isVertical
-            ? cn(
-                "flex h-full flex-col flex-wrap gap-1.5 px-1.5 py-3",
-                layout === "right" ? "content-end items-end" : "content-start items-start",
-              )
-            : "flex items-start gap-1.5 px-3 py-1.5",
-        )}
-      >
-        {/* ── Widgets ── */}
-        {/* In top mode, these are inside a flex-wrap row container.
-            In vertical mode, they're direct children so flex-col flex-wrap on the parent handles column reflow. */}
-        {!isVertical && (
-          <div className="rpg-hud pointer-events-none flex flex-wrap items-center gap-1.5">
-            {/* World State */}
-            {enabledAgentTypes.has("world-state") && (
-              <>
-                <LocationWidget value={location ?? ""} onSave={(v) => patchField("location", v)} />
-                <CalendarWidget value={date ?? ""} onSave={(v) => patchField("date", v)} />
-                <ClockWidget value={time ?? ""} onSave={(v) => patchField("time", v)} />
-                <WeatherWidget value={weather ?? ""} onSave={(v) => patchField("weather", v)} />
-                <TemperatureWidget value={temperature ?? ""} onSave={(v) => patchField("temperature", v)} />
-              </>
-            )}
-            {enabledAgentTypes.has("persona-stats") && (
-              <PersonaStatsWidget bars={personaStatBars} onUpdate={(bars) => patchField("personaStats", bars)} />
-            )}
-            {enabledAgentTypes.has("character-tracker") && (
-              <CharactersWidget
-                characters={presentCharacters}
-                onUpdate={(chars) => {
-                  if (gameState) {
-                    setGameState({ ...gameState, presentCharacters: chars });
-                  }
-                  api.patch(`/chats/${chatId}/game-state`, { presentCharacters: chars }).catch(() => {});
-                }}
-              />
-            )}
-            {enabledAgentTypes.has("persona-stats") && (
-              <InventoryWidget items={inventory} onUpdate={(items) => patchPlayerStats("inventory", items)} />
-            )}
-            {enabledAgentTypes.has("quest") && (
-              <QuestsWidget quests={activeQuests} onUpdate={(q) => patchPlayerStats("activeQuests", q)} />
-            )}
-          </div>
-        )}
+    <div className={cn("rpg-hud", isVertical ? "flex flex-col items-center gap-1.5" : "flex items-center gap-1.5")}>
+      {/* Actions (Agents + Clear) */}
+      <ActionsGroup
+        isVertical={isVertical}
+        agentsOpen={agentsOpen}
+        setAgentsOpen={setAgentsOpen}
+        isAgentProcessing={isAgentProcessing}
+        thoughtBubbles={thoughtBubbles}
+        clearThoughtBubbles={clearThoughtBubbles}
+        dismissThoughtBubble={dismissThoughtBubble}
+        enabledAgentTypes={enabledAgentTypes}
+        clearGameState={clearGameState}
+      />
 
-        {/* Actions — top mode: pushed to the right edge */}
-        {!isVertical && (
-          <div className="ml-auto pointer-events-none">
-            <ActionsGroup
-              isVertical={false}
-              agentsOpen={agentsOpen}
-              setAgentsOpen={setAgentsOpen}
-              isAgentProcessing={isAgentProcessing}
-              thoughtBubbles={thoughtBubbles}
-              clearThoughtBubbles={clearThoughtBubbles}
-              dismissThoughtBubble={dismissThoughtBubble}
-              enabledAgentTypes={enabledAgentTypes}
-              clearGameState={clearGameState}
-            />
-          </div>
-        )}
-
-        {/* ── Actions before widgets in vertical mode (always first from the top) ── */}
-        {isVertical && (
-          <ActionsGroup
-            isVertical
-            agentsOpen={agentsOpen}
-            setAgentsOpen={setAgentsOpen}
-            isAgentProcessing={isAgentProcessing}
-            thoughtBubbles={thoughtBubbles}
-            clearThoughtBubbles={clearThoughtBubbles}
-            dismissThoughtBubble={dismissThoughtBubble}
-            enabledAgentTypes={enabledAgentTypes}
-            clearGameState={clearGameState}
-          />
-        )}
-
-        {isVertical && (
-          <>
-            {/* World State */}
-            {enabledAgentTypes.has("world-state") && (
-              <>
-                <LocationWidget value={location ?? ""} onSave={(v) => patchField("location", v)} />
-                <CalendarWidget value={date ?? ""} onSave={(v) => patchField("date", v)} />
-                <ClockWidget value={time ?? ""} onSave={(v) => patchField("time", v)} />
-                <WeatherWidget value={weather ?? ""} onSave={(v) => patchField("weather", v)} />
-                <TemperatureWidget value={temperature ?? ""} onSave={(v) => patchField("temperature", v)} />
-              </>
-            )}
-            {enabledAgentTypes.has("persona-stats") && (
-              <PersonaStatsWidget bars={personaStatBars} onUpdate={(bars) => patchField("personaStats", bars)} />
-            )}
-            {enabledAgentTypes.has("character-tracker") && (
-              <CharactersWidget
-                characters={presentCharacters}
-                onUpdate={(chars) => {
-                  if (gameState) {
-                    setGameState({ ...gameState, presentCharacters: chars });
-                  }
-                  api.patch(`/chats/${chatId}/game-state`, { presentCharacters: chars }).catch(() => {});
-                }}
-              />
-            )}
-            {enabledAgentTypes.has("persona-stats") && (
-              <InventoryWidget items={inventory} onUpdate={(items) => patchPlayerStats("inventory", items)} />
-            )}
-            {enabledAgentTypes.has("quest") && (
-              <QuestsWidget quests={activeQuests} onUpdate={(q) => patchPlayerStats("activeQuests", q)} />
-            )}
-          </>
-        )}
-      </div>
+      {/* World State */}
+      {enabledAgentTypes.has("world-state") && (
+        <>
+          <LocationWidget value={location ?? ""} onSave={(v) => patchField("location", v)} />
+          <CalendarWidget value={date ?? ""} onSave={(v) => patchField("date", v)} />
+          <ClockWidget value={time ?? ""} onSave={(v) => patchField("time", v)} />
+          <WeatherWidget value={weather ?? ""} onSave={(v) => patchField("weather", v)} />
+          <TemperatureWidget value={temperature ?? ""} onSave={(v) => patchField("temperature", v)} />
+        </>
+      )}
+      {enabledAgentTypes.has("persona-stats") && (
+        <PersonaStatsWidget bars={personaStatBars} onUpdate={(bars) => patchField("personaStats", bars)} />
+      )}
+      {enabledAgentTypes.has("character-tracker") && (
+        <CharactersWidget
+          characters={presentCharacters}
+          onUpdate={(chars) => {
+            if (gameState) {
+              setGameState({ ...gameState, presentCharacters: chars });
+            }
+            api.patch(`/chats/${chatId}/game-state`, { presentCharacters: chars }).catch(() => {});
+          }}
+        />
+      )}
+      {enabledAgentTypes.has("persona-stats") && (
+        <InventoryWidget items={inventory} onUpdate={(items) => patchPlayerStats("inventory", items)} />
+      )}
+      {enabledAgentTypes.has("quest") && (
+        <QuestsWidget quests={activeQuests} onUpdate={(q) => patchPlayerStats("activeQuests", q)} />
+      )}
     </div>
   );
 }
@@ -328,7 +255,7 @@ function ActionsGroup({
   clearGameState,
 }: ActionsGroupProps) {
   return (
-    <div className={cn("pointer-events-auto flex gap-1.5", isVertical ? "flex-col items-center" : "items-center")}>
+    <div className={cn("flex gap-1.5", isVertical ? "flex-col items-center" : "items-center")}>
       {/* Agents */}
       <div className="relative">
         <button
@@ -1077,9 +1004,9 @@ function LabeledEdit({ label, value, onSave }: { label: string; value: string; o
 // ═══════════════════════════════════════════════
 
 const WIDGET =
-  "group pointer-events-auto flex w-20 h-[3.75rem] max-md:w-14 max-md:h-11 flex-col items-center justify-center gap-0.5 rounded-xl border bg-black/40 backdrop-blur-md transition-all hover:bg-black/60 cursor-pointer select-none overflow-hidden";
+  "group flex w-20 h-[3.75rem] max-md:w-14 max-md:h-11 flex-col items-center justify-center gap-0.5 rounded-xl border bg-black/40 backdrop-blur-md transition-all hover:bg-black/60 cursor-pointer select-none overflow-hidden";
 const WIDGET_EDIT =
-  "pointer-events-auto flex w-20 h-[3.75rem] max-md:w-14 max-md:h-11 flex-col items-center justify-center gap-0.5 rounded-xl border bg-black/60 backdrop-blur-md overflow-hidden";
+  "flex w-20 h-[3.75rem] max-md:w-14 max-md:h-11 flex-col items-center justify-center gap-0.5 rounded-xl border bg-black/60 backdrop-blur-md overflow-hidden";
 
 function WidgetInput({
   value,

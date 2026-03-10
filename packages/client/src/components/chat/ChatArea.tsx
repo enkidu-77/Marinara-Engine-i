@@ -620,175 +620,287 @@ export function ChatArea() {
             />
           )}
 
-          {/* Chat header with settings */}
-          <div className="relative z-40 flex items-center justify-end border-b border-white/5 bg-black/30 px-4 py-2 backdrop-blur-md">
-            <div className="flex items-center gap-1">
-              {/* Summary popover toggle */}
-              <SummaryButton chatId={chat?.id ?? null} summary={chatMeta.summary ?? null} />
-              <button
-                onClick={() => setFilesOpen(true)}
-                className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
-                title="Manage Chat Files"
-              >
-                <FolderOpen size={16} />
-              </button>
-              {/* Sprite side toggle */}
-              {expressionAgentEnabled && chatCharIds.length > 0 && (
-                <button
-                  onClick={handleToggleSpritePosition}
-                  className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
-                  title={`Sprite: ${spritePosition} side (click to flip)`}
-                >
-                  <FlipHorizontal2 size={16} />
-                </button>
-              )}
-              <button
-                onClick={() => setGalleryOpen(true)}
-                className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
-                title="Gallery"
-              >
-                <Image size={16} />
-              </button>
-
-              <button
-                onClick={() => setSettingsOpen(true)}
-                className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
-                title="Chat Settings"
-              >
-                <Settings2 size={16} />
-              </button>
-            </div>
-          </div>
-
-          {/* HUD overlay — top: h-0 so it doesn't consume flex space; left/right: absolute full-height */}
-          {chat && chatMeta.enableAgents && (
-            <div
-              className={cn(
-                "z-30",
-                hudPosition === "left" || hudPosition === "right"
-                  ? "pointer-events-none absolute top-10 bottom-20 left-0 right-0"
-                  : "relative h-0 overflow-visible",
-              )}
-            >
-              <RoleplayHUD chatId={chat.id} characterCount={chatCharIds.length} layout={hudPosition} />
-            </div>
-          )}
-
-          {/* Combat Encounter Modal */}
-          {encounterActive && <EncounterModal />}
-
-          {/* Messages scroll area */}
-          <div
-            ref={scrollRef}
-            className={cn(
-              "rpg-chat-messages-mobile relative z-10 flex-1 overflow-y-auto py-4",
-              chatCharIds.length > 0 ? "px-[15%]" : "px-3",
-            )}
-          >
-            {/* Load More button */}
-            {hasNextPage && (
-              <div className="mb-3 flex justify-center">
-                <button
-                  onClick={handleLoadMore}
-                  disabled={isFetchingNextPage}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-xs font-medium text-white/70 backdrop-blur-sm transition-all hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
-                >
-                  {isFetchingNextPage ? <Loader2 size={12} className="animate-spin" /> : <ChevronUp size={12} />}
-                  Load More
-                </button>
-              </div>
-            )}
-
-            {isLoading && (
-              <div className="flex flex-col items-center gap-3 py-12">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
-              </div>
-            )}
-
-            {/* Extra space before first message so HUD widgets don't cover it */}
-            {messages && messages.length <= 2 && chatMeta.enableAgents && <div className="h-16" />}
-
-            {messages?.map((msg, i) => {
-              const isRegenerating = isStreaming && regenerateMessageId === msg.id;
-              const displayMsg = isRegenerating ? { ...msg, content: streamBuffer || "" } : msg;
-              return (
-                <div key={msg.id}>
-                  <ChatMessage
-                    message={displayMsg}
-                    isStreaming={isRegenerating}
-                    index={i}
-                    onDelete={handleDelete}
-                    onRegenerate={handleRegenerate}
-                    onEdit={handleEdit}
-                    onSetActiveSwipe={handleSetActiveSwipe}
-                    onToggleConversationStart={handleToggleConversationStart}
-                    onPeekPrompt={handlePeekPrompt}
-                    onBranch={handleBranch}
-                    isLastAssistantMessage={msg.id === lastAssistantMessageId}
-                    characterMap={characterMap}
-                    personaInfo={personaInfo}
-                    chatMode={chatMode}
-                    isGrouped={isGrouped(i)}
-                    groupChatMode={groupChatMode}
-                    chatCharacterIds={chatCharIds}
-                  />
-                </div>
-              );
-            })}
-
-            {/* Streaming / typing indicator (new message only, not regeneration) */}
-            {isStreaming && !regenerateMessageId && (
-              <div className="animate-message-in">
-                <ChatMessage
-                  message={{
-                    id: "__streaming__",
-                    chatId: activeChatId,
-                    role: "assistant",
-                    characterId: streamingCharacterId ?? null,
-                    content: streamBuffer || "",
-                    activeSwipeIndex: 0,
-                    extra: { displayText: null, isGenerated: true, tokenCount: 0, generationInfo: null },
-                    createdAt: new Date().toISOString(),
-                  }}
-                  isStreaming
-                  index={-1}
-                  characterMap={characterMap}
-                  personaInfo={personaInfo}
-                  chatMode={chatMode}
-                  groupChatMode={groupChatMode}
-                  chatCharacterIds={chatCharIds}
-                />
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input area — matches top bar style, full-width */}
-          <div className="relative z-20 border-t border-white/5 bg-black/30 backdrop-blur-md">
-            <div className={cn("relative", chatCharIds.length > 0 && "px-[12%]")}>
-              {combatAgentEnabled && (
-                <div className="flex justify-center py-1">
+          <div className="flex flex-1 overflow-hidden">
+            {/* Combined toolbar + HUD — vertical sidebar on left */}
+            {hudPosition === "left" && chat && chatMeta.enableAgents && (
+              <div className="relative z-40 flex flex-col items-center gap-1.5 overflow-y-auto border-r border-white/5 bg-black/30 px-1.5 py-2 backdrop-blur-md">
+                <div className="flex flex-col items-center gap-1">
+                  <SummaryButton chatId={chat?.id ?? null} summary={chatMeta.summary ?? null} />
                   <button
-                    onClick={() => startEncounter()}
-                    className="flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs text-white/50 transition-all hover:bg-white/10 hover:text-orange-300"
-                    title="Start Combat Encounter"
+                    onClick={() => setFilesOpen(true)}
+                    className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                    title="Manage Chat Files"
                   >
-                    <Swords size={14} />
-                    <span>Encounter</span>
+                    <FolderOpen size={16} />
+                  </button>
+                  {expressionAgentEnabled && chatCharIds.length > 0 && (
+                    <button
+                      onClick={handleToggleSpritePosition}
+                      className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                      title={`Sprite: ${spritePosition} side (click to flip)`}
+                    >
+                      <FlipHorizontal2 size={16} />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setGalleryOpen(true)}
+                    className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                    title="Gallery"
+                  >
+                    <Image size={16} />
+                  </button>
+                  <button
+                    onClick={() => setSettingsOpen(true)}
+                    className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                    title="Chat Settings"
+                  >
+                    <Settings2 size={16} />
                   </button>
                 </div>
-              )}
-              <ChatInput mode="roleplay" characterNames={characterNames} />
-            </div>
-          </div>
+                <div className="w-8 border-t border-white/10" />
+                <RoleplayHUD chatId={chat.id} characterCount={chatCharIds.length} layout="left" />
+              </div>
+            )}
 
-          {/* Settings drawer */}
-          {chat && <ChatSettingsDrawer chat={chat} open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
-          {/* Chat files drawer */}
-          {chat && <ChatFilesDrawer chat={chat} open={filesOpen} onClose={() => setFilesOpen(false)} />}
-          {/* Gallery drawer */}
-          {chat && <ChatGalleryDrawer chat={chat} open={galleryOpen} onClose={() => setGalleryOpen(false)} />}
+            <div className="flex flex-1 flex-col overflow-hidden">
+              {/* Combined toolbar + HUD — horizontal bar on top */}
+              {hudPosition === "top" ? (
+                <div className="relative z-40 flex items-center border-b border-white/5 bg-black/30 px-4 py-2 backdrop-blur-md">
+                  {chat && chatMeta.enableAgents && (
+                    <div className="flex-1 overflow-x-auto">
+                      <RoleplayHUD chatId={chat.id} characterCount={chatCharIds.length} layout="top" />
+                    </div>
+                  )}
+                  <div className="flex shrink-0 items-center gap-1 ml-2">
+                    <SummaryButton chatId={chat?.id ?? null} summary={chatMeta.summary ?? null} />
+                    <button
+                      onClick={() => setFilesOpen(true)}
+                      className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                      title="Manage Chat Files"
+                    >
+                      <FolderOpen size={16} />
+                    </button>
+                    {expressionAgentEnabled && chatCharIds.length > 0 && (
+                      <button
+                        onClick={handleToggleSpritePosition}
+                        className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                        title={`Sprite: ${spritePosition} side (click to flip)`}
+                      >
+                        <FlipHorizontal2 size={16} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setGalleryOpen(true)}
+                      className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                      title="Gallery"
+                    >
+                      <Image size={16} />
+                    </button>
+                    <button
+                      onClick={() => setSettingsOpen(true)}
+                      className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                      title="Chat Settings"
+                    >
+                      <Settings2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ) : !chatMeta.enableAgents ? (
+                /* Fallback toolbar when agents disabled in left/right mode */
+                <div className="relative z-40 flex items-center justify-end border-b border-white/5 bg-black/30 px-4 py-2 backdrop-blur-md">
+                  <div className="flex items-center gap-1">
+                    <SummaryButton chatId={chat?.id ?? null} summary={chatMeta.summary ?? null} />
+                    <button
+                      onClick={() => setFilesOpen(true)}
+                      className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                      title="Manage Chat Files"
+                    >
+                      <FolderOpen size={16} />
+                    </button>
+                    {expressionAgentEnabled && chatCharIds.length > 0 && (
+                      <button
+                        onClick={handleToggleSpritePosition}
+                        className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                        title={`Sprite: ${spritePosition} side (click to flip)`}
+                      >
+                        <FlipHorizontal2 size={16} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setGalleryOpen(true)}
+                      className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                      title="Gallery"
+                    >
+                      <Image size={16} />
+                    </button>
+                    <button
+                      onClick={() => setSettingsOpen(true)}
+                      className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                      title="Chat Settings"
+                    >
+                      <Settings2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Combat Encounter Modal */}
+              {encounterActive && <EncounterModal />}
+
+              {/* Messages scroll area */}
+              <div
+                ref={scrollRef}
+                className={cn(
+                  "rpg-chat-messages-mobile relative z-10 flex-1 overflow-y-auto py-4",
+                  chatCharIds.length > 0 ? "px-[15%]" : "px-3",
+                )}
+              >
+                {/* Load More button */}
+                {hasNextPage && (
+                  <div className="mb-3 flex justify-center">
+                    <button
+                      onClick={handleLoadMore}
+                      disabled={isFetchingNextPage}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-xs font-medium text-white/70 backdrop-blur-sm transition-all hover:bg-white/10 hover:text-white/90 disabled:opacity-50"
+                    >
+                      {isFetchingNextPage ? <Loader2 size={12} className="animate-spin" /> : <ChevronUp size={12} />}
+                      Load More
+                    </button>
+                  </div>
+                )}
+
+                {isLoading && (
+                  <div className="flex flex-col items-center gap-3 py-12">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
+                  </div>
+                )}
+
+                {messages?.map((msg, i) => {
+                  const isRegenerating = isStreaming && regenerateMessageId === msg.id;
+                  const displayMsg = isRegenerating ? { ...msg, content: streamBuffer || "" } : msg;
+                  return (
+                    <div key={msg.id}>
+                      <ChatMessage
+                        message={displayMsg}
+                        isStreaming={isRegenerating}
+                        index={i}
+                        onDelete={handleDelete}
+                        onRegenerate={handleRegenerate}
+                        onEdit={handleEdit}
+                        onSetActiveSwipe={handleSetActiveSwipe}
+                        onToggleConversationStart={handleToggleConversationStart}
+                        onPeekPrompt={handlePeekPrompt}
+                        onBranch={handleBranch}
+                        isLastAssistantMessage={msg.id === lastAssistantMessageId}
+                        characterMap={characterMap}
+                        personaInfo={personaInfo}
+                        chatMode={chatMode}
+                        isGrouped={isGrouped(i)}
+                        groupChatMode={groupChatMode}
+                        chatCharacterIds={chatCharIds}
+                      />
+                    </div>
+                  );
+                })}
+
+                {/* Streaming / typing indicator (new message only, not regeneration) */}
+                {isStreaming && !regenerateMessageId && (
+                  <div className="animate-message-in">
+                    <ChatMessage
+                      message={{
+                        id: "__streaming__",
+                        chatId: activeChatId,
+                        role: "assistant",
+                        characterId: streamingCharacterId ?? null,
+                        content: streamBuffer || "",
+                        activeSwipeIndex: 0,
+                        extra: { displayText: null, isGenerated: true, tokenCount: 0, generationInfo: null },
+                        createdAt: new Date().toISOString(),
+                      }}
+                      isStreaming
+                      index={-1}
+                      characterMap={characterMap}
+                      personaInfo={personaInfo}
+                      chatMode={chatMode}
+                      groupChatMode={groupChatMode}
+                      chatCharacterIds={chatCharIds}
+                    />
+                  </div>
+                )}
+
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Input area — matches top bar style, full-width */}
+              <div className="relative z-20 border-t border-white/5 bg-black/30 backdrop-blur-md">
+                <div className={cn("relative", chatCharIds.length > 0 && "px-[12%]")}>
+                  {combatAgentEnabled && (
+                    <div className="flex justify-center py-1">
+                      <button
+                        onClick={() => startEncounter()}
+                        className="flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs text-white/50 transition-all hover:bg-white/10 hover:text-orange-300"
+                        title="Start Combat Encounter"
+                      >
+                        <Swords size={14} />
+                        <span>Encounter</span>
+                      </button>
+                    </div>
+                  )}
+                  <ChatInput mode="roleplay" characterNames={characterNames} />
+                </div>
+              </div>
+
+              {/* Settings drawer */}
+              {chat && <ChatSettingsDrawer chat={chat} open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
+              {/* Chat files drawer */}
+              {chat && <ChatFilesDrawer chat={chat} open={filesOpen} onClose={() => setFilesOpen(false)} />}
+              {/* Gallery drawer */}
+              {chat && <ChatGalleryDrawer chat={chat} open={galleryOpen} onClose={() => setGalleryOpen(false)} />}
+            </div>
+            {/* end inner flex-col */}
+
+            {/* Combined toolbar + HUD — vertical sidebar on right */}
+            {hudPosition === "right" && chat && chatMeta.enableAgents && (
+              <div className="relative z-40 flex flex-col items-center gap-1.5 overflow-y-auto border-l border-white/5 bg-black/30 px-1.5 py-2 backdrop-blur-md">
+                <div className="flex flex-col items-center gap-1">
+                  <SummaryButton chatId={chat?.id ?? null} summary={chatMeta.summary ?? null} />
+                  <button
+                    onClick={() => setFilesOpen(true)}
+                    className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                    title="Manage Chat Files"
+                  >
+                    <FolderOpen size={16} />
+                  </button>
+                  {expressionAgentEnabled && chatCharIds.length > 0 && (
+                    <button
+                      onClick={handleToggleSpritePosition}
+                      className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                      title={`Sprite: ${spritePosition} side (click to flip)`}
+                    >
+                      <FlipHorizontal2 size={16} />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setGalleryOpen(true)}
+                    className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                    title="Gallery"
+                  >
+                    <Image size={16} />
+                  </button>
+                  <button
+                    onClick={() => setSettingsOpen(true)}
+                    className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                    title="Chat Settings"
+                  >
+                    <Settings2 size={16} />
+                  </button>
+                </div>
+                <div className="w-8 border-t border-white/10" />
+                <RoleplayHUD chatId={chat.id} characterCount={chatCharIds.length} layout="right" />
+              </div>
+            )}
+          </div>
+          {/* end flex-row for left/right sidebars */}
         </div>
 
         {/* Sprite sidebar — right (only if expression agent enabled) */}
@@ -826,99 +938,104 @@ export function ChatArea() {
       )}
       <div className="relative flex flex-1 flex-col overflow-hidden bg-[var(--background)]">
         {/* Chat header */}
-        <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--background)] px-4 py-2.5">
-          <div className="flex items-center gap-2.5">
-            {/* Character avatar stack or icon */}
-            {chatCharIds.length > 0 ? (
-              <div className="flex -space-x-2">
-                {chatCharIds.slice(0, 3).map((cid) => {
-                  const info = characterMap.get(cid);
-                  return info?.avatarUrl ? (
-                    <img
-                      key={cid}
-                      src={info.avatarUrl}
-                      alt={info.name}
-                      className="h-7 w-7 rounded-full object-cover ring-2 ring-[var(--background)]"
-                    />
-                  ) : (
-                    <div
-                      key={cid}
-                      className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accent)] text-[10px] font-bold ring-2 ring-[var(--background)]"
-                    >
-                      {(info?.name ?? "?")[0]}
+        <div className="border-b border-[var(--border)] bg-[var(--background)]">
+          <div className="flex items-center justify-between px-4 py-2.5">
+            <div className="flex items-center gap-2.5">
+              {/* Character avatar stack or icon */}
+              {chatCharIds.length > 0 ? (
+                <div className="flex -space-x-2">
+                  {chatCharIds.slice(0, 3).map((cid) => {
+                    const info = characterMap.get(cid);
+                    return info?.avatarUrl ? (
+                      <img
+                        key={cid}
+                        src={info.avatarUrl}
+                        alt={info.name}
+                        className="h-7 w-7 rounded-full object-cover ring-2 ring-[var(--background)]"
+                      />
+                    ) : (
+                      <div
+                        key={cid}
+                        className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accent)] text-[10px] font-bold ring-2 ring-[var(--background)]"
+                      >
+                        {(info?.name ?? "?")[0]}
+                      </div>
+                    );
+                  })}
+                  {chatCharIds.length > 3 && (
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--secondary)] text-[9px] font-bold ring-2 ring-[var(--background)]">
+                      +{chatCharIds.length - 3}
                     </div>
-                  );
-                })}
-                {chatCharIds.length > 3 && (
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--secondary)] text-[9px] font-bold ring-2 ring-[var(--background)]">
-                    +{chatCharIds.length - 3}
-                  </div>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-white"
+                  style={{ background: "linear-gradient(135deg, #4de5dd, #3ab8b1)" }}
+                >
+                  <MessageSquare size={12} />
+                </div>
+              )}
+              <div>
+                <span className="text-sm font-semibold text-[var(--foreground)]">{chat?.name ?? "Conversation"}</span>
+                {chatCharIds.length > 0 && (
+                  <p className="text-[10px] text-[var(--muted-foreground)]">
+                    {chatCharIds
+                      .map((cid) => characterMap.get(cid)?.name)
+                      .filter(Boolean)
+                      .join(", ")}
+                  </p>
                 )}
               </div>
-            ) : (
-              <div
-                className="flex h-7 w-7 items-center justify-center rounded-full text-white"
-                style={{ background: "linear-gradient(135deg, #4de5dd, #3ab8b1)" }}
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setFilesOpen(true)}
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                title="Manage Chat Files"
               >
-                <MessageSquare size={12} />
-              </div>
-            )}
-            <div>
-              <span className="text-sm font-semibold text-[var(--foreground)]">{chat?.name ?? "Conversation"}</span>
-              {chatCharIds.length > 0 && (
-                <p className="text-[10px] text-[var(--muted-foreground)]">
-                  {chatCharIds
-                    .map((cid) => characterMap.get(cid)?.name)
-                    .filter(Boolean)
-                    .join(", ")}
-                </p>
+                <FolderOpen size={16} />
+              </button>
+              <button
+                onClick={() => setGalleryOpen(true)}
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                title="Gallery"
+              >
+                <Image size={16} />
+              </button>
+              {chatMeta.enableAgents && enabledAgentTypes.size > 0 && (
+                <AgentsHeaderButton
+                  agentConfigs={agentConfigs as AgentConfigRow[] | undefined}
+                  variant="conversation"
+                />
               )}
+              {failedAgentTypes.length > 0 && (
+                <button
+                  onClick={handleRetryAgents}
+                  disabled={agentProcessing}
+                  className="rounded-lg p-1.5 text-amber-500 transition-all hover:bg-[var(--accent)] hover:text-amber-400 disabled:opacity-50"
+                  title="Retry failed agents"
+                >
+                  <RefreshCw size={16} className={agentProcessing ? "animate-spin" : ""} />
+                </button>
+              )}
+              <button
+                onClick={() => setSettingsOpen(true)}
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                title="Chat Settings"
+              >
+                <Settings2 size={16} />
+              </button>
             </div>
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setFilesOpen(true)}
-              className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-              title="Manage Chat Files"
-            >
-              <FolderOpen size={16} />
-            </button>
-            <button
-              onClick={() => setGalleryOpen(true)}
-              className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-              title="Gallery"
-            >
-              <Image size={16} />
-            </button>
-            {chatMeta.enableAgents && enabledAgentTypes.size > 0 && (
-              <AgentsHeaderButton agentConfigs={agentConfigs as AgentConfigRow[] | undefined} variant="conversation" />
-            )}
-            {failedAgentTypes.length > 0 && (
-              <button
-                onClick={handleRetryAgents}
-                disabled={agentProcessing}
-                className="rounded-lg p-1.5 text-amber-500 transition-all hover:bg-[var(--accent)] hover:text-amber-400 disabled:opacity-50"
-                title="Retry failed agents"
-              >
-                <RefreshCw size={16} className={agentProcessing ? "animate-spin" : ""} />
-              </button>
-            )}
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-              title="Chat Settings"
-            >
-              <Settings2 size={16} />
-            </button>
-          </div>
-        </div>
 
-        {/* HUD overlay — tracker widgets (when agents enabled) */}
-        {chat && chatMeta.enableAgents && (
-          <div className="relative z-30 h-0 overflow-visible">
-            <RoleplayHUD chatId={chat.id} characterCount={chatCharIds.length} layout="top" />
-          </div>
-        )}
+          {/* HUD widgets row (when agents enabled) */}
+          {chat && chatMeta.enableAgents && (
+            <div className="overflow-x-auto border-t border-[var(--border)] px-4 py-1.5">
+              <RoleplayHUD chatId={chat.id} characterCount={chatCharIds.length} layout="top" />
+            </div>
+          )}
+        </div>
 
         {/* Combat Encounter Modal */}
         {encounterActive && <EncounterModal />}
