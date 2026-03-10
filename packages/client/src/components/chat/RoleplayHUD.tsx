@@ -4,7 +4,8 @@
 // a compact preview and expandable editable popover.
 // Supports top (horizontal) and left/right (vertical) layout.
 // ──────────────────────────────────────────────
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   Clock,
   MapPin,
@@ -376,40 +377,84 @@ function EchoChamberToggle() {
 // and an expandable popover for full editable view
 // ═══════════════════════════════════════════════
 
-/** Shared popover wrapper used by tracker widgets */
+/** Shared popover wrapper used by tracker widgets — renders via portal to escape overflow clipping */
 function WidgetPopover({
   open,
   onClose,
+  anchorRef,
   children,
   className,
 }: {
   open: boolean;
   onClose: () => void;
+  anchorRef: React.RefObject<HTMLElement | null>;
   children: React.ReactNode;
   className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Position the popover below the anchor element
+  useLayoutEffect(() => {
+    if (!open || !anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    // Place below the anchor, left-aligned
+    let left = rect.left;
+    const top = rect.bottom + 4; // 4px gap
+
+    // Ensure it doesn't overflow the right edge
+    const popoverWidth = ref.current?.offsetWidth ?? 288;
+    if (left + popoverWidth > window.innerWidth - 8) {
+      left = Math.max(8, window.innerWidth - popoverWidth - 8);
+    }
+
+    setPos({ top, left });
+  }, [open, anchorRef]);
+
+  // Reposition on scroll/resize
+  useEffect(() => {
+    if (!open || !anchorRef.current) return;
+    const update = () => {
+      const rect = anchorRef.current!.getBoundingClientRect();
+      let left = rect.left;
+      const top = rect.bottom + 4;
+      const popoverWidth = ref.current?.offsetWidth ?? 288;
+      if (left + popoverWidth > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - popoverWidth - 8);
+      }
+      setPos({ top, left });
+    };
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open, anchorRef]);
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      if (ref.current && !ref.current.contains(target) && !anchorRef.current?.contains(target)) onClose();
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [open, onClose]);
+  }, [open, onClose, anchorRef]);
 
   if (!open) return null;
-  return (
+  return createPortal(
     <div
       ref={ref}
+      style={pos ? { position: "fixed", top: pos.top, left: pos.left } : { position: "fixed", top: -9999, left: -9999 }}
       className={cn(
-        "absolute top-full mt-1 z-50 animate-message-in rounded-xl border border-white/10 bg-black/80 backdrop-blur-xl shadow-xl",
+        "z-[9999] animate-message-in rounded-xl border border-white/10 bg-black/80 backdrop-blur-xl shadow-xl",
         className,
       )}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -488,6 +533,7 @@ function CharactersWidget({
   onUpdate: (chars: PresentCharacter[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const addCharacter = () => {
     onUpdate([
@@ -519,6 +565,7 @@ function CharactersWidget({
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className={cn(WIDGET, "border-purple-500/20 text-purple-300")}
         title="Present Characters"
@@ -544,7 +591,7 @@ function CharactersWidget({
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} className="w-72 max-h-80 overflow-y-auto left-0">
+      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} className="w-72 max-h-80 overflow-y-auto">
         <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
             <Users size={10} /> Present Characters
@@ -690,6 +737,7 @@ function StatBarEditable({
 
 function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdate: (bars: CharacterStat[]) => void }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const updateBar = (idx: number, field: "value" | "max" | "name", val: number | string) => {
     const next = [...bars];
@@ -700,6 +748,7 @@ function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdat
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className={cn(WIDGET, "border-violet-500/20 text-violet-300")}
         title="Persona Stats"
@@ -723,7 +772,7 @@ function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdat
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} className="w-60 max-h-80 overflow-y-auto left-0">
+      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} className="w-60 max-h-80 overflow-y-auto">
         <div className="border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider">Persona Stats</span>
         </div>
@@ -747,6 +796,7 @@ function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdat
 
 function InventoryWidget({ items, onUpdate }: { items: InventoryItem[]; onUpdate: (items: InventoryItem[]) => void }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const addItem = () => {
     onUpdate([...items, { name: "New Item", description: "", quantity: 1, location: "on_person" }]);
@@ -765,6 +815,7 @@ function InventoryWidget({ items, onUpdate }: { items: InventoryItem[]; onUpdate
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className={cn(WIDGET, "border-amber-500/20 text-amber-300")}
         title="Inventory"
@@ -780,7 +831,7 @@ function InventoryWidget({ items, onUpdate }: { items: InventoryItem[]; onUpdate
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} className="w-64 max-h-80 overflow-y-auto left-0">
+      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} className="w-64 max-h-80 overflow-y-auto">
         <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
             <Package size={10} /> Inventory ({items.length})
@@ -829,6 +880,7 @@ function InventoryWidget({ items, onUpdate }: { items: InventoryItem[]; onUpdate
 
 function QuestsWidget({ quests, onUpdate }: { quests: QuestProgress[]; onUpdate: (quests: QuestProgress[]) => void }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const addQuest = () => {
     onUpdate([
@@ -858,6 +910,7 @@ function QuestsWidget({ quests, onUpdate }: { quests: QuestProgress[]; onUpdate:
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className={cn(WIDGET, "border-emerald-500/20 text-emerald-300")}
         title="Active Quests"
@@ -870,7 +923,7 @@ function QuestsWidget({ quests, onUpdate }: { quests: QuestProgress[]; onUpdate:
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} className="w-72 max-h-96 overflow-y-auto left-0">
+      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} className="w-72 max-h-96 overflow-y-auto">
         <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
             <Scroll size={10} /> Quests ({quests.length})
