@@ -5,77 +5,200 @@ import { useState, useMemo } from "react";
 import { X, ChevronRight, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/utils";
 
-/**
- * Rough token estimate: ~4 characters per token on average.
- * This is a common heuristic that works reasonably well across
- * most LLM tokenizers (GPT, Claude, Llama, etc.).
- */
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/** Format a token number with commas for readability. */
 function fmtTokens(n: number): string {
   return n.toLocaleString();
 }
 
+interface GenerationInfo {
+  model?: string;
+  provider?: string;
+  temperature?: number | null;
+  maxTokens?: number | null;
+  showThoughts?: boolean | null;
+  reasoningEffort?: string | null;
+  verbosity?: string | null;
+  tokensPrompt?: number | null;
+  tokensCompletion?: number | null;
+  durationMs?: number | null;
+  finishReason?: string | null;
+}
+
 interface PeekPromptModalProps {
-  data: { messages: Array<{ role: string; content: string }>; parameters: unknown; agentNote?: string };
+  data: {
+    messages: Array<{ role: string; content: string }>;
+    parameters: unknown;
+    generationInfo?: GenerationInfo | null;
+    agentNote?: string;
+  };
   onClose: () => void;
 }
 
-/** A parsed block: either an XML-wrapped section or raw content. */
-interface ContentBlock {
-  label: string;
-  content: string;
-  isChatHistory: boolean;
+function prettifyTag(tag: string): string {
+  return tag.replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// ═══════════════════════════════════════════════
+//  Section types for the final display list
+// ═══════════════════════════════════════════════
+
+interface SectionBlock {
+  kind: "section";
+  label: string;
+  role: string;
+  content: string;
+}
+
+interface ChatHistoryEntry {
+  role: string;
+  content: string;
+}
+
+interface ChatHistoryBlock {
+  kind: "chat-history";
+  entries: ChatHistoryEntry[];
+  rawContent: string; // for token counting
+}
+
+type DisplaySection = SectionBlock | ChatHistoryBlock;
+
+// ═══════════════════════════════════════════════
+//  Parsing: works on the WHOLE messages array
+// ═══════════════════════════════════════════════
+
 /**
- * Parse a message's content into named blocks by detecting XML section tags.
- * E.g. `<system_prompt>\ncontent\n</system_prompt>` → { label: "system_prompt", content }
- * Anything not inside a tag becomes an "Ungrouped" block.
- * Also detects partial `<chat_history>` / `</chat_history>` that span across messages.
+ * Parse XML sections from a single message's content.
+ * Only matches tags whose opening AND closing appear on their own line
+ * (prompt-level sections like <system_prompt>, <character_info>, etc.).
+ * Returns named blocks; anything between/around sections becomes a block
+ * named after the message role.
  */
-function parseContentBlocks(content: string): ContentBlock[] {
-  const blocks: ContentBlock[] = [];
-  // Match top-level XML tags: <tag_name>\n...\n</tag_name>
-  const tagRegex = /<([a-z_][a-z0-9_-]*)>\n?([\s\S]*?)\n?<\/\1>/gi;
+function parseXmlSections(content: string, fallbackLabel: string): SectionBlock[] {
+  const blocks: SectionBlock[] = [];
+  // Match <tag_name>\n...\n</tag_name> where both tags sit on their own line.
+  const tagRegex = /(?:^|\n)(<([a-z_][a-z0-9_-]*)>\n[\s\S]*?\n<\/\2>)(?:\n|$)/gi;
   let lastIndex = 0;
 
   for (const match of content.matchAll(tagRegex)) {
-    const before = content.slice(lastIndex, match.index);
+    const matchStart = match.index!;
+    const realStart = content[matchStart] === "\n" ? matchStart + 1 : matchStart;
+    const before = content.slice(lastIndex, realStart);
     if (before.trim()) {
-      blocks.push({ label: "Ungrouped", content: before.trim(), isChatHistory: false });
+      blocks.push({ kind: "section", label: fallbackLabel, role: fallbackLabel, content: before.trim() });
     }
-    const tagName = match[1]!;
-    const innerContent = match[2]!;
-    const isCH = /chat.?history/i.test(tagName);
-    // Include the XML tags in displayed content so the user sees exactly what's sent
-    blocks.push({ label: tagName, content: match[0], isChatHistory: isCH });
+    const tagName = match[2]!;
+    const tagContent = match[1]!;
+    blocks.push({ kind: "section", label: tagName, role: fallbackLabel, content: tagContent.trimEnd() });
     lastIndex = match.index! + match[0].length;
   }
 
   const remaining = content.slice(lastIndex);
   if (remaining.trim()) {
-    // Check if the remaining text starts with <chat_history> (open tag spanning messages)
-    const hasChatHistoryOpen = /^<chat_history>/i.test(remaining.trim());
-    // Check if it ends with </chat_history> (close tag spanning messages)
-    const hasChatHistoryClose = /<\/chat_history>\s*$/i.test(remaining.trim());
-    blocks.push({
-      label: "Ungrouped",
-      content: remaining.trim(),
-      isChatHistory: hasChatHistoryOpen || hasChatHistoryClose,
-    });
+    blocks.push({ kind: "section", label: fallbackLabel, role: fallbackLabel, content: remaining.trim() });
   }
 
-  return blocks;
+  return blocks.length > 0 ? blocks : [{ kind: "section", label: fallbackLabel, role: fallbackLabel, content }];
 }
 
-/** Prettify a snake_case tag name → "System Prompt" */
-function prettifyTag(tag: string): string {
-  return tag.replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+/**
+ * Build the display section list from the raw messages array.
+ *
+ * The key challenge: `<chat_history>` opens in one message and closes in another,
+ * with bare user/assistant messages in between. We detect boundaries at the
+ * array level first, then handle each region appropriately.
+ */
+function buildDisplaySections(messages: Array<{ role: string; content: string }>): DisplaySection[] {
+  // ── Pass 1: find chat history boundaries across the messages array ──
+  let chStartIdx = -1;
+  let chEndIdx = -1;
+  let lastMsgIdx = -1; // <last_message> or ## Last Message
+
+  for (let i = 0; i < messages.length; i++) {
+    const c = messages[i]!.content;
+    if (chStartIdx < 0 && (/<chat_history>/i.test(c) || /^## Chat History\n/i.test(c))) {
+      chStartIdx = i;
+    }
+    if (/<\/chat_history>/i.test(c)) {
+      chEndIdx = i;
+    }
+    if (/<last_message>/i.test(c) || /^## Last Message\n/i.test(c)) {
+      lastMsgIdx = i;
+    }
+  }
+
+  // If we found an opening tag but no explicit close, the history runs until
+  // the message before <last_message>, or to the end of user/assistant messages.
+  if (chStartIdx >= 0 && chEndIdx < 0) {
+    if (lastMsgIdx > chStartIdx) {
+      chEndIdx = lastMsgIdx - 1;
+    } else {
+      // Find the last consecutive user/assistant message after chStartIdx
+      chEndIdx = chStartIdx;
+      for (let i = chStartIdx + 1; i < messages.length; i++) {
+        const r = messages[i]!.role;
+        if (r === "user" || r === "assistant") chEndIdx = i;
+        else break;
+      }
+    }
+  }
+
+  // ── Pass 2: build output sections ──
+  const result: DisplaySection[] = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+
+    // ── Chat history region ──
+    if (chStartIdx >= 0 && i >= chStartIdx && i <= chEndIdx) {
+      // Collect all chat history entries in one pass
+      const entries: ChatHistoryEntry[] = [];
+      const rawParts: string[] = [];
+      for (let j = chStartIdx; j <= chEndIdx; j++) {
+        let content = messages[j]!.content;
+        // Strip the wrapping tags from the content shown inside child blocks
+        content = content
+          .replace(/^<chat_history>\n?/i, "")
+          .replace(/\n?<\/chat_history>\s*$/i, "")
+          .replace(/^## Chat History\n?/i, "");
+        const trimmed = content.trim();
+        if (trimmed) {
+          entries.push({ role: messages[j]!.role, content: trimmed });
+          rawParts.push(trimmed);
+        }
+      }
+      if (entries.length > 0) {
+        result.push({ kind: "chat-history", entries, rawContent: rawParts.join("\n\n") });
+      }
+      i = chEndIdx; // skip past the whole range
+      continue;
+    }
+
+    // ── Last message (separate from chat history) ──
+    if (i === lastMsgIdx) {
+      let content = msg.content
+        .replace(/^<last_message>\n?/i, "")
+        .replace(/\n?<\/last_message>\s*$/i, "")
+        .replace(/^## Last Message\n?/i, "");
+      result.push({ kind: "section", label: "last_message", role: msg.role, content: content.trim() });
+      continue;
+    }
+
+    // ── System/other messages: parse XML sections within them ──
+    const blocks = parseXmlSections(msg.content, msg.role);
+    for (const b of blocks) {
+      result.push(b);
+    }
+  }
+
+  return result;
 }
+
+// ═══════════════════════════════════════════════
+//  UI Components
+// ═══════════════════════════════════════════════
 
 function CollapsibleBlock({
   label,
@@ -120,96 +243,125 @@ function CollapsibleBlock({
   );
 }
 
+function ChatHistorySection({ entries, rawContent }: { entries: ChatHistoryEntry[]; rawContent: string }) {
+  const [open, setOpen] = useState(false);
+  const tokens = estimateTokens(rawContent);
+
+  const msgRoleColor = (role: string) => {
+    if (role === "user") return "bg-blue-500/20 text-blue-400";
+    if (role === "assistant") return "bg-purple-500/20 text-purple-400";
+    return "bg-amber-500/20 text-amber-400";
+  };
+
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/50 overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--accent)]/50"
+      >
+        {open ? (
+          <ChevronDown size={12} className="shrink-0 text-[var(--muted-foreground)]" />
+        ) : (
+          <ChevronRight size={12} className="shrink-0 text-[var(--muted-foreground)]" />
+        )}
+        <span
+          className={cn(
+            "rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+            "bg-green-500/20 text-green-400",
+          )}
+        >
+          Chat History
+        </span>
+        <span className="text-[10px] text-[var(--muted-foreground)]">
+          {entries.length} message{entries.length !== 1 ? "s" : ""}
+        </span>
+        <span className="ml-auto text-[10px] text-[var(--muted-foreground)]">
+          ~{fmtTokens(tokens)} token{tokens !== 1 ? "s" : ""}
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-[var(--border)]/50 p-2 space-y-1">
+          {entries.map((entry, i) => (
+            <ChatHistoryMessage key={i} entry={entry} roleColor={msgRoleColor(entry.role)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChatHistoryMessage({ entry, roleColor }: { entry: ChatHistoryEntry; roleColor: string }) {
+  const [open, setOpen] = useState(false);
+  const tokens = estimateTokens(entry.content);
+  const preview = entry.content.split("\n")[0]?.slice(0, 80) ?? "";
+
+  return (
+    <div className="rounded-md border border-[var(--border)]/30 bg-[var(--background)]/50 overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--accent)]/30"
+      >
+        {open ? (
+          <ChevronDown size={10} className="shrink-0 text-[var(--muted-foreground)]" />
+        ) : (
+          <ChevronRight size={10} className="shrink-0 text-[var(--muted-foreground)]" />
+        )}
+        <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider", roleColor)}>
+          {entry.role}
+        </span>
+        {!open && <span className="min-w-0 flex-1 truncate text-[10px] text-[var(--muted-foreground)]">{preview}</span>}
+        <span className="shrink-0 ml-auto text-[9px] text-[var(--muted-foreground)]">~{fmtTokens(tokens)}</span>
+      </button>
+      {open && (
+        <div className="border-t border-[var(--border)]/30 px-2.5 py-1.5">
+          <pre className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-[var(--foreground)]/80">
+            {entry.content}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
+//  Main Modal
+// ═══════════════════════════════════════════════
+
 export function PeekPromptModal({ data, onClose }: PeekPromptModalProps) {
-  // Parse all messages into collapsible blocks
-  const sections = useMemo(() => {
-    const result: Array<{
-      role: string;
-      label: string;
-      content: string;
-      isChatHistory: boolean;
-    }> = [];
-
-    for (const msg of data.messages) {
-      const blocks = parseContentBlocks(msg.content);
-      if (blocks.length === 0) {
-        // Empty message, skip
-        continue;
-      }
-
-      if (blocks.length === 1 && blocks[0]!.label === "Ungrouped") {
-        // No XML tags found — show as a single role block
-        result.push({
-          role: msg.role,
-          label: msg.role,
-          content: blocks[0]!.content,
-          isChatHistory: false,
-        });
-      } else {
-        for (const block of blocks) {
-          result.push({
-            role: msg.role,
-            label: block.label,
-            content: block.content,
-            isChatHistory: block.isChatHistory,
-          });
-        }
-      }
-    }
-
-    // Group consecutive chat history entries into one block.
-    // Also detect runs of bare user/assistant messages as chat history.
-    const grouped: typeof result = [];
-    let chatHistoryBuffer: string[] = [];
-    let inChatHistory = false;
-
-    for (let i = 0; i < result.length; i++) {
-      const section = result[i]!;
-      const isBareChat = (section.role === "user" || section.role === "assistant") && section.label === section.role;
-
-      // Start or continue grouping chat history
-      if (
-        section.isChatHistory ||
-        (inChatHistory && isBareChat) ||
-        // Detect start of a bare user/assistant run: next is also bare chat
-        (!inChatHistory &&
-          isBareChat &&
-          result[i + 1] &&
-          (result[i + 1]!.role === "user" || result[i + 1]!.role === "assistant") &&
-          result[i + 1]!.label === result[i + 1]!.role)
-      ) {
-        inChatHistory = true;
-        chatHistoryBuffer.push(`[${section.role.toUpperCase()}]\n${section.content}`);
-      } else {
-        if (chatHistoryBuffer.length > 0) {
-          grouped.push({
-            role: "system",
-            label: "Chat History",
-            content: chatHistoryBuffer.join("\n\n"),
-            isChatHistory: true,
-          });
-          chatHistoryBuffer = [];
-          inChatHistory = false;
-        }
-        grouped.push(section);
-      }
-    }
-    if (chatHistoryBuffer.length > 0) {
-      grouped.push({
-        role: "system",
-        label: "Chat History",
-        content: chatHistoryBuffer.join("\n\n"),
-        isChatHistory: true,
-      });
-    }
-
-    return grouped;
-  }, [data.messages]);
-
+  const sections = useMemo(() => buildDisplaySections(data.messages), [data.messages]);
   const totalTokens = useMemo(() => estimateTokens(data.messages.map((m) => m.content).join("")), [data.messages]);
 
-  const roleColor = (role: string, label: string) => {
-    if (label === "Chat History") return "bg-green-500/20 text-green-400";
+  const gen = data.generationInfo;
+  const params = data.parameters as Record<string, unknown> | null;
+
+  // Build parameter pills from generationInfo (cached) or assembled parameters
+  const paramPills = useMemo(() => {
+    const pills: Array<{ label: string; value: string }> = [];
+    if (gen) {
+      if (gen.temperature != null) pills.push({ label: "Temperature", value: String(gen.temperature) });
+      if (gen.maxTokens != null) pills.push({ label: "Max Tokens", value: fmtTokens(gen.maxTokens) });
+      if (gen.showThoughts) pills.push({ label: "Thinking", value: "On" });
+      if (gen.reasoningEffort) pills.push({ label: "Reasoning", value: gen.reasoningEffort });
+      if (gen.verbosity) pills.push({ label: "Verbosity", value: gen.verbosity });
+    } else if (params) {
+      if (params.temperature != null) pills.push({ label: "Temperature", value: String(params.temperature) });
+      if (params.topP != null && params.topP !== 1) pills.push({ label: "Top P", value: String(params.topP) });
+      if (params.topK != null && params.topK !== 0) pills.push({ label: "Top K", value: String(params.topK) });
+      if (params.minP != null && params.minP !== 0) pills.push({ label: "Min P", value: String(params.minP) });
+      if (params.maxTokens != null) pills.push({ label: "Max Tokens", value: fmtTokens(params.maxTokens as number) });
+      if (params.frequencyPenalty != null && params.frequencyPenalty !== 0)
+        pills.push({ label: "Freq Penalty", value: String(params.frequencyPenalty) });
+      if (params.presencePenalty != null && params.presencePenalty !== 0)
+        pills.push({ label: "Pres Penalty", value: String(params.presencePenalty) });
+      if (params.showThoughts) pills.push({ label: "Thinking", value: "On" });
+      if (params.reasoningEffort) pills.push({ label: "Reasoning", value: String(params.reasoningEffort) });
+      if (params.verbosity) pills.push({ label: "Verbosity", value: String(params.verbosity) });
+    }
+    return pills;
+  }, [gen, params]);
+
+  const sectionRoleColor = (role: string, label: string) => {
+    if (/last.?message/i.test(label)) return "bg-blue-500/20 text-blue-400";
     if (role === "system") return "bg-amber-500/20 text-amber-400";
     if (role === "user") return "bg-blue-500/20 text-blue-400";
     return "bg-purple-500/20 text-purple-400";
@@ -239,20 +391,56 @@ export function PeekPromptModal({ data, onClose }: PeekPromptModalProps) {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
+          {/* Generation info panel */}
+          {(gen || paramPills.length > 0) && (
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/30 px-4 py-3 space-y-2">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+                {gen?.model && (
+                  <span className="font-medium text-[var(--foreground)]">
+                    {gen.provider ? (
+                      <span className="text-[var(--muted-foreground)] font-normal">{gen.provider} / </span>
+                    ) : null}
+                    {gen.model}
+                  </span>
+                )}
+                <span className="text-[var(--muted-foreground)]">
+                  ~{fmtTokens(totalTokens)} est. tokens
+                  {gen?.tokensPrompt != null && <> · {fmtTokens(gen.tokensPrompt)} actual prompt tokens</>}
+                </span>
+              </div>
+              {paramPills.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {paramPills.map((p) => (
+                    <span
+                      key={p.label}
+                      className="inline-flex items-center gap-1 rounded-md bg-[var(--accent)]/50 px-2 py-0.5 text-[10px]"
+                    >
+                      <span className="text-[var(--muted-foreground)]">{p.label}</span>
+                      <span className="font-medium text-[var(--foreground)]">{p.value}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {data.agentNote && (
             <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300/80">
               ⚠ {data.agentNote}
             </div>
           )}
-          {sections.map((s, i) => (
-            <CollapsibleBlock
-              key={i}
-              label={s.label}
-              content={s.content}
-              defaultOpen={false}
-              roleColor={roleColor(s.role, s.label)}
-            />
-          ))}
+          {sections.map((s, i) =>
+            s.kind === "chat-history" ? (
+              <ChatHistorySection key={i} entries={s.entries} rawContent={s.rawContent} />
+            ) : (
+              <CollapsibleBlock
+                key={i}
+                label={s.label}
+                content={s.content}
+                defaultOpen={false}
+                roleColor={sectionRoleColor(s.role, s.label)}
+              />
+            ),
+          )}
         </div>
       </div>
     </div>

@@ -633,11 +633,11 @@ export const ChatMessage = memo(function ChatMessage({
             {/* Message bubble */}
             <div
               className={cn(
-                "relative rounded-2xl px-4 py-3",
+                "relative rounded-2xl px-4 py-3 shadow-lg shadow-black/20",
                 isUser
                   ? "rounded-tr-sm text-neutral-100 ring-1 ring-white/10"
                   : "rounded-tl-sm text-white/90 ring-1 ring-white/8",
-                !boxBgColor && (isUser ? "bg-white/12" : "bg-white/8"),
+                !boxBgColor && (isUser ? "bg-black/30 dark:bg-neutral-900/70" : "bg-black/20 dark:bg-neutral-900/60"),
                 isGrouped && (isUser ? "rounded-tr-2xl" : "rounded-tl-2xl"),
                 isStreaming && "rpg-streaming",
                 isConversationStart && "ring-amber-400/30",

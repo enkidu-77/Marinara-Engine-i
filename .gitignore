@@ -34,7 +34,5 @@ packages/server/data/
 # Logs
 *.log
 
-# Electron / electron-builder output
+# Build output
 release/
-electron/app-server/
-electron/client/

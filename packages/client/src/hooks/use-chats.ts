@@ -70,7 +70,16 @@ export function useDeleteChat() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/chats/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: chatKeys.list() }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: chatKeys.list() });
+      const previous = qc.getQueryData<Chat[]>(chatKeys.list());
+      qc.setQueryData<Chat[]>(chatKeys.list(), (old) => old?.filter((c) => c.id !== id));
+      return { previous };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous) qc.setQueryData(chatKeys.list(), context.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: chatKeys.list() }),
   });
 }
 
@@ -78,7 +87,16 @@ export function useDeleteChatGroup() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (groupId: string) => api.delete(`/chats/group/${groupId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: chatKeys.list() }),
+    onMutate: async (groupId) => {
+      await qc.cancelQueries({ queryKey: chatKeys.list() });
+      const previous = qc.getQueryData<Chat[]>(chatKeys.list());
+      qc.setQueryData<Chat[]>(chatKeys.list(), (old) => old?.filter((c) => c.groupId !== groupId));
+      return { previous };
+    },
+    onError: (_err, _groupId, context) => {
+      if (context?.previous) qc.setQueryData(chatKeys.list(), context.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: chatKeys.list() }),
   });
 }
 
@@ -172,10 +190,23 @@ export function useUpdateMessageExtra(chatId: string | null) {
 export function usePeekPrompt() {
   return useMutation({
     mutationFn: (chatId: string) =>
-      api.post<{ messages: Array<{ role: string; content: string }>; parameters: unknown }>(
-        `/chats/${chatId}/peek-prompt`,
-        {},
-      ),
+      api.post<{
+        messages: Array<{ role: string; content: string }>;
+        parameters: unknown;
+        generationInfo: {
+          model?: string;
+          provider?: string;
+          temperature?: number | null;
+          maxTokens?: number | null;
+          showThoughts?: boolean | null;
+          reasoningEffort?: string | null;
+          verbosity?: string | null;
+          tokensPrompt?: number | null;
+          tokensCompletion?: number | null;
+          durationMs?: number | null;
+          finishReason?: string | null;
+        } | null;
+      }>(`/chats/${chatId}/peek-prompt`, {}),
   });
 }
 

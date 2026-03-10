@@ -78,8 +78,6 @@ export interface PlayerStats {
   activeQuests: QuestProgress[];
   /** Status text */
   status: string;
-  /** Mood emoji */
-  moodEmoji: string;
 }
 
 /** Classic D&D-style attributes. */

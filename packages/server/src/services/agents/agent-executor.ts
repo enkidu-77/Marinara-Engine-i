@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Agent Executor — Single & Batched LLM execution
 // ──────────────────────────────────────────────
-import type { BaseLLMProvider, ChatMessage } from "../llm/base-provider.js";
+import type { BaseLLMProvider, ChatMessage, LLMToolDefinition, LLMToolCall } from "../llm/base-provider.js";
 import type { AgentResult, AgentContext, AgentResultType } from "@marinara-engine/shared";
 import { getDefaultAgentPrompt } from "@marinara-engine/shared";
 
@@ -16,14 +16,22 @@ export interface AgentExecConfig {
   settings: Record<string, unknown>;
 }
 
+/** Optional tool context for agents that need function calling. */
+export interface AgentToolContext {
+  tools: LLMToolDefinition[];
+  executeToolCall: (call: LLMToolCall) => Promise<string>;
+}
+
 /**
  * Execute a single agent: build prompt → call LLM → parse response.
+ * If toolContext is provided, the agent can make tool calls in a loop.
  */
 export async function executeAgent(
   config: AgentExecConfig,
   context: AgentContext,
   provider: BaseLLMProvider,
   model: string,
+  toolContext?: AgentToolContext,
 ): Promise<AgentResult> {
   const startTime = Date.now();
 
@@ -46,7 +54,12 @@ export async function executeAgent(
     const temperature = (config.settings.temperature as number) ?? 0.3;
     const maxTokens = (config.settings.maxTokens as number) ?? 2048;
 
-    // Call LLM (non-streaming)
+    // If tools are available, use the tool call loop
+    if (toolContext && toolContext.tools.length > 0) {
+      return executeAgentWithTools(config, messages, provider, model, temperature, maxTokens, toolContext, startTime);
+    }
+
+    // Call LLM (non-streaming, no tools)
     const result = await provider.chatComplete(messages, {
       model,
       temperature,
@@ -72,6 +85,85 @@ export async function executeAgent(
   } catch (err) {
     return makeError(config, err instanceof Error ? err.message : "Agent execution failed", startTime);
   }
+}
+
+/**
+ * Execute an agent with tool-calling support.
+ * Loops: call LLM → handle tool calls → feed results back → repeat until final response.
+ */
+async function executeAgentWithTools(
+  config: AgentExecConfig,
+  initialMessages: ChatMessage[],
+  provider: BaseLLMProvider,
+  model: string,
+  temperature: number,
+  maxTokens: number,
+  toolContext: AgentToolContext,
+  startTime: number,
+): Promise<AgentResult> {
+  const MAX_TOOL_ROUNDS = 5;
+  const loopMessages = [...initialMessages];
+  let totalTokens = 0;
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const result = await provider.chatComplete(loopMessages, {
+      model,
+      temperature,
+      maxTokens,
+      tools: toolContext.tools,
+    });
+
+    totalTokens += result.usage?.totalTokens ?? 0;
+
+    // No tool calls → final response
+    if (!result.toolCalls || result.toolCalls.length === 0) {
+      const responseText = result.content?.trim() ?? "";
+      const parsed = parseAgentResponse(config.type, responseText);
+      return {
+        agentId: config.id,
+        agentType: config.type,
+        type: parsed.type,
+        data: parsed.data,
+        tokensUsed: totalTokens,
+        durationMs: Date.now() - startTime,
+        success: true,
+        error: null,
+      };
+    }
+
+    // Append assistant message with tool calls
+    loopMessages.push({
+      role: "assistant",
+      content: result.content ?? "",
+      tool_calls: result.toolCalls,
+    });
+
+    // Execute each tool call and append results
+    for (const tc of result.toolCalls) {
+      const toolResult = await toolContext.executeToolCall(tc);
+      loopMessages.push({
+        role: "tool",
+        content: toolResult,
+        tool_call_id: tc.id,
+      });
+    }
+  }
+
+  // Exhausted tool rounds — make one final call without tools to get JSON response
+  const finalResult = await provider.chatComplete(loopMessages, { model, temperature, maxTokens });
+  totalTokens += finalResult.usage?.totalTokens ?? 0;
+  const responseText = finalResult.content?.trim() ?? "";
+  const parsed = parseAgentResponse(config.type, responseText);
+  return {
+    agentId: config.id,
+    agentType: config.type,
+    type: parsed.type,
+    data: parsed.data,
+    tokensUsed: totalTokens,
+    durationMs: Date.now() - startTime,
+    success: true,
+    error: null,
+  };
 }
 
 // ──────────────────────────────────────────────

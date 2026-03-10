@@ -77,7 +77,19 @@ export function createGameStateStorage(db: DB) {
 
     async updateLatest(
       chatId: string,
-      fields: Partial<Pick<GameState, "date" | "time" | "location" | "weather" | "temperature" | "presentCharacters">>,
+      fields: Partial<
+        Pick<
+          GameState,
+          | "date"
+          | "time"
+          | "location"
+          | "weather"
+          | "temperature"
+          | "presentCharacters"
+          | "playerStats"
+          | "personaStats"
+        >
+      >,
     ) {
       const latest = await this.getLatest(chatId);
       if (!latest) return null;
@@ -88,6 +100,10 @@ export function createGameStateStorage(db: DB) {
       if (fields.weather !== undefined) updates.weather = fields.weather;
       if (fields.temperature !== undefined) updates.temperature = fields.temperature;
       if (fields.presentCharacters !== undefined) updates.presentCharacters = JSON.stringify(fields.presentCharacters);
+      if (fields.playerStats !== undefined)
+        updates.playerStats = fields.playerStats ? JSON.stringify(fields.playerStats) : null;
+      if (fields.personaStats !== undefined)
+        updates.personaStats = fields.personaStats ? JSON.stringify(fields.personaStats) : null;
       if (Object.keys(updates).length === 0) return latest;
       await db.update(gameStateSnapshots).set(updates).where(eq(gameStateSnapshots.id, latest.id));
       return { ...latest, ...updates };

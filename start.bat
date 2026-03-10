@@ -33,6 +33,9 @@ if exist ".git" (
             if exist "packages\shared\dist" rmdir /s /q "packages\shared\dist"
             if exist "packages\server\dist" rmdir /s /q "packages\server\dist"
             if exist "packages\client\dist" rmdir /s /q "packages\client\dist"
+            del /q "packages\shared\tsconfig.tsbuildinfo" 2>nul
+            del /q "packages\server\tsconfig.tsbuildinfo" 2>nul
+            del /q "packages\client\tsconfig.tsbuildinfo" 2>nul
         ) else (
             echo  [OK] Already up to date
         )

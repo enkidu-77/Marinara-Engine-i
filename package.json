@@ -1,12 +1,11 @@
 {
   "name": "marinara-engine",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "private": true,
   "description": "AI Chat & Roleplay Frontend — Conversation, Roleplay, Visual Novel",
   "author": "Marianna",
   "license": "AGPL-3.0",
   "type": "module",
-  "main": "electron/main.cjs",
   "engines": {
     "node": ">=20",
     "pnpm": ">=9"
@@ -20,29 +19,22 @@
     "build:server": "pnpm --filter @marinara-engine/server build",
     "build:client": "pnpm --filter @marinara-engine/client build",
     "start": "node packages/server/dist/index.js",
-    "package": "pnpm build && node electron/bundle-server.cjs && electron-builder --config electron-builder.cjs",
-    "package:win": "pnpm build && node electron/bundle-server.cjs && electron-builder --config electron-builder.cjs --win",
-    "package:mac": "pnpm build && node electron/bundle-server.cjs && electron-builder --config electron-builder.cjs --mac",
-    "package:linux": "pnpm build && node electron/bundle-server.cjs && electron-builder --config electron-builder.cjs --linux",
     "format": "prettier --write \"packages/**/*.{ts,tsx}\"",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
     "db:push": "pnpm --filter @marinara-engine/server db:push",
     "db:generate": "pnpm --filter @marinara-engine/server db:generate",
     "db:migrate": "pnpm --filter @marinara-engine/server db:migrate",
-    "clean": "pnpm -r run clean && rm -rf node_modules release"
+    "clean": "pnpm -r run clean && rm -rf node_modules"
   },
   "devDependencies": {
-    "electron": "^33.4.11",
-    "electron-builder": "^25.1.8",
     "esbuild": "^0.27.3",
     "prettier": "^3.8.1"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",
-      "esbuild",
-      "electron"
+      "esbuild"
     ]
   }
 }

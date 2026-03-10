@@ -2,7 +2,14 @@
 // Routes: Generation (SSE Streaming with Tool Use + Agent Pipeline)
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
-import { generateRequestSchema, BUILT_IN_TOOLS, BUILT_IN_AGENTS, findKnownModel } from "@marinara-engine/shared";
+import {
+  generateRequestSchema,
+  BUILT_IN_TOOLS,
+  BUILT_IN_AGENTS,
+  findKnownModel,
+  nameToXmlTag,
+  DEFAULT_AGENT_TOOLS,
+} from "@marinara-engine/shared";
 import type { AgentContext, AgentResult, AgentPhase, APIProvider, GameState } from "@marinara-engine/shared";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
@@ -400,11 +407,13 @@ export async function generateRoutes(app: FastifyInstance) {
       // ── Fallback: inject character & persona info if the preset didn't include them ──
       const allContent = finalMessages.map((m) => m.content).join("\n");
       for (const ci of charInfo) {
-        // Check if this character already appears by description snippet OR by name tag
+        // Check if this character already appears by description snippet, XML tag, or markdown heading
+        const xmlTag = nameToXmlTag(ci.name);
         const hasCharInfo =
-          (ci.description && allContent.includes(ci.description.slice(0, 80))) ||
+          (ci.description && allContent.includes(ci.description.split("\n")[0]!.trim().slice(0, 80))) ||
+          allContent.includes(`<${xmlTag}>`) ||
           allContent.includes(`<${ci.name}>`) ||
-          allContent.includes(`## ${ci.name}`);
+          allContent.includes(`# ${ci.name}`);
         if (!hasCharInfo && ci.description) {
           const fieldParts = wrapFields(
             {
@@ -424,10 +433,12 @@ export async function generateRoutes(app: FastifyInstance) {
         }
       }
       if (personaDescription) {
+        const personaXmlTag = nameToXmlTag(personaName);
         const hasPersonaInfo =
-          allContent.includes(personaDescription.slice(0, 80)) ||
+          allContent.includes(personaDescription.split("\n")[0]!.trim().slice(0, 80)) ||
+          allContent.includes(`<${personaXmlTag}>`) ||
           allContent.includes(`<${personaName}>`) ||
-          allContent.includes(`## ${personaName}`);
+          allContent.includes(`# ${personaName}`);
         if (!hasPersonaInfo) {
           const fieldParts = wrapFields(
             {
@@ -595,7 +606,8 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // If the chat-summary agent is enabled, provide the previous summary
-      if (resolvedAgents.some((a) => a.type === "chat-summary") && chatMeta.summary) {
+      const chatSummaryEnabled = enabledConfigs.some((c: any) => c.type === "chat-summary");
+      if (chatSummaryEnabled && chatMeta.summary) {
         agentContext.memory._previousSummary = chatMeta.summary;
       }
 
@@ -739,7 +751,42 @@ export async function generateRoutes(app: FastifyInstance) {
                 (wrapFormat === "xml" ? `<immersive_html>\n${htmlPrompt}\n</immersive_html>` : htmlBlock),
             };
           }
+
+          // Notify the UI that this static agent was injected
+          reply.raw.write(
+            `data: ${JSON.stringify({
+              type: "agent_result",
+              data: {
+                agentType: "html",
+                agentName: htmlAgent.name || "Immersive HTML",
+                resultType: "context_injection",
+                data: { text: "HTML formatting instructions injected into prompt" },
+                success: true,
+                error: null,
+                durationMs: 0,
+              },
+            })}\n\n`,
+          );
         }
+      }
+
+      // Notify UI if the chat-summary agent is enabled and was injected into the prompt
+      if (chatSummaryEnabled && chatMeta.summary) {
+        const chatSummaryCfg = enabledConfigs.find((c: any) => c.type === "chat-summary");
+        reply.raw.write(
+          `data: ${JSON.stringify({
+            type: "agent_result",
+            data: {
+              agentType: "chat-summary",
+              agentName: (chatSummaryCfg as any)?.name || "Chat Summary",
+              resultType: "context_injection",
+              data: { text: "Chat summary injected into prompt" },
+              success: true,
+              error: null,
+              durationMs: 0,
+            },
+          })}\n\n`,
+        );
       }
 
       // Check if tool-use is requested (from chat metadata or input).
@@ -885,8 +932,84 @@ export async function generateRoutes(app: FastifyInstance) {
 
           // Extract Spotify credentials from the Spotify agent settings (if configured)
           const spotifyAgent = resolvedAgents.find((a) => a.type === "spotify");
-          const spotifyAccessToken = (spotifyAgent?.settings?.spotifyAccessToken as string) || null;
+          const spotifySettings = spotifyAgent?.settings
+            ? typeof spotifyAgent.settings === "string"
+              ? JSON.parse(spotifyAgent.settings)
+              : spotifyAgent.settings
+            : {};
+          let spotifyAccessToken = (spotifySettings.spotifyAccessToken as string) || null;
+
+          // Auto-refresh if token is expired and we have a refresh token
+          const spotifyExpiresAt = (spotifySettings.spotifyExpiresAt as number) ?? 0;
+          const spotifyRefreshToken = (spotifySettings.spotifyRefreshToken as string) || null;
+          const spotifyClientId = (spotifySettings.spotifyClientId as string) || null;
+          if (
+            spotifyAccessToken &&
+            spotifyRefreshToken &&
+            spotifyClientId &&
+            spotifyExpiresAt > 0 &&
+            Date.now() > spotifyExpiresAt - 60_000 // Refresh 1 min before expiry
+          ) {
+            try {
+              const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                  grant_type: "refresh_token",
+                  refresh_token: spotifyRefreshToken,
+                  client_id: spotifyClientId,
+                }),
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (tokenRes.ok) {
+                const tokens = (await tokenRes.json()) as {
+                  access_token: string;
+                  refresh_token?: string;
+                  expires_in: number;
+                };
+                spotifyAccessToken = tokens.access_token;
+                // Persist refreshed tokens in background (don't await)
+                const agentsStore = createAgentsStorage(app.db);
+                agentsStore
+                  .update(spotifyAgent!.id, {
+                    settings: {
+                      ...spotifySettings,
+                      spotifyAccessToken: tokens.access_token,
+                      spotifyRefreshToken: tokens.refresh_token ?? spotifyRefreshToken,
+                      spotifyExpiresAt: Date.now() + tokens.expires_in * 1000,
+                    },
+                  })
+                  .catch(() => {});
+              }
+            } catch {
+              // Use the existing token as fallback
+            }
+          }
+
           const spotifyCreds = spotifyAccessToken ? { accessToken: spotifyAccessToken } : undefined;
+
+          // Attach tool context to the Spotify agent for function calling
+          if (spotifyCreds && spotifyAgent) {
+            const resolvedSpotify = resolvedAgents.find((a) => a.type === "spotify");
+            if (resolvedSpotify) {
+              const spotifyToolNames = DEFAULT_AGENT_TOOLS["spotify"] ?? [];
+              const spotifyToolDefs = BUILT_IN_TOOLS.filter((t) => spotifyToolNames.includes(t.name)).map((t) => ({
+                type: "function" as const,
+                function: {
+                  name: t.name,
+                  description: t.description,
+                  parameters: t.parameters as unknown as Record<string, unknown>,
+                },
+              }));
+              resolvedSpotify.toolContext = {
+                tools: spotifyToolDefs,
+                executeToolCall: async (call) => {
+                  const results = await executeToolCalls([call], { spotify: spotifyCreds });
+                  return results[0]?.result ?? "Tool execution failed";
+                },
+              };
+            }
+          }
 
           // Stream tokens in real-time via onToken callback
           const onToken = (chunk: string) => {
@@ -1083,6 +1206,10 @@ export async function generateRoutes(app: FastifyInstance) {
               model: conn.model,
               provider: conn.provider,
               temperature: temperature ?? null,
+              maxTokens: maxTokens ?? null,
+              showThoughts: showThoughts ?? null,
+              reasoningEffort: resolvedEffort ?? reasoningEffort ?? null,
+              verbosity: verbosity ?? null,
               tokensPrompt: usage?.promptTokens ?? null,
               tokensCompletion: usage?.completionTokens ?? null,
               durationMs,
@@ -1226,7 +1353,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 temperature: (gs.temperature as string) ?? null,
                 presentCharacters: (gs.presentCharacters as any[]) ?? [],
                 recentEvents: (gs.recentEvents as string[]) ?? [],
-                playerStats: (gs.playerStats as any) ?? null,
+                playerStats: null,
                 personaStats: (gs.personaStats as any[]) ?? null,
               });
               // Send game state to client so HUD updates live
@@ -1268,18 +1395,36 @@ export async function generateRoutes(app: FastifyInstance) {
             try {
               const psData = result.data as Record<string, unknown>;
               const bars = (psData.stats as any[]) ?? [];
-              if (bars.length > 0) {
-                const latest = await gameStateStore.getLatest(input.chatId);
-                if (latest) {
-                  await app.db
-                    .update(gameStateSnapshotsTable)
-                    .set({ personaStats: JSON.stringify(bars) })
-                    .where(eq(gameStateSnapshotsTable.id, latest.id));
-                }
-                reply.raw.write(
-                  `data: ${JSON.stringify({ type: "game_state_patch", data: { personaStats: bars } })}\n\n`,
-                );
+              const status = (psData.status as string) ?? "";
+              const inventory = (psData.inventory as any[]) ?? [];
+              const latest = await gameStateStore.getLatest(input.chatId);
+              if (latest) {
+                const updates: Record<string, unknown> = {};
+                if (bars.length > 0) updates.personaStats = JSON.stringify(bars);
+                // Merge status + inventory into playerStats
+                const existingPS = latest.playerStats
+                  ? typeof latest.playerStats === "string"
+                    ? JSON.parse(latest.playerStats)
+                    : latest.playerStats
+                  : { stats: [], attributes: null, skills: {}, inventory: [], activeQuests: [], status: "" };
+                const mergedPS = { ...existingPS };
+                if (status) mergedPS.status = status;
+                if (inventory.length > 0) mergedPS.inventory = inventory;
+                updates.playerStats = JSON.stringify(mergedPS);
+                await app.db
+                  .update(gameStateSnapshotsTable)
+                  .set(updates)
+                  .where(eq(gameStateSnapshotsTable.id, latest.id));
               }
+              const patchData: Record<string, unknown> = {};
+              if (bars.length > 0) patchData.personaStats = bars;
+              if (status || inventory.length > 0) {
+                patchData.playerStats = {
+                  status: status || undefined,
+                  inventory: inventory.length > 0 ? inventory : undefined,
+                };
+              }
+              reply.raw.write(`data: ${JSON.stringify({ type: "game_state_patch", data: patchData })}\n\n`);
             } catch {
               // Non-critical
             }

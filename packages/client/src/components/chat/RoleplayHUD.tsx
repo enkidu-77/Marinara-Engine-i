@@ -124,7 +124,6 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
         inventory: [],
         activeQuests: [],
         status: "",
-        moodEmoji: "",
       };
       const next = { ...current, [field]: value };
       patchField("playerStats", next);
@@ -148,7 +147,6 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
         inventory: [],
         activeQuests: [],
         status: "",
-        moodEmoji: "",
       },
       personaStats: [],
     };
@@ -222,7 +220,7 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
                 }}
               />
             )}
-            {enabledAgentTypes.has("world-state") && (
+            {enabledAgentTypes.has("persona-stats") && (
               <InventoryWidget items={inventory} onUpdate={(items) => patchPlayerStats("inventory", items)} />
             )}
             {enabledAgentTypes.has("quest") && (
@@ -289,7 +287,7 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
                 }}
               />
             )}
-            {enabledAgentTypes.has("world-state") && (
+            {enabledAgentTypes.has("persona-stats") && (
               <InventoryWidget items={inventory} onUpdate={(items) => patchPlayerStats("inventory", items)} />
             )}
             {enabledAgentTypes.has("quest") && (
@@ -1092,7 +1090,7 @@ function LabeledEdit({ label, value, onSave }: { label: string; value: string; o
 // ═══════════════════════════════════════════════
 
 const WIDGET =
-  "group flex w-20 h-[3.75rem] flex-col items-center justify-center gap-0.5 rounded-xl border bg-black/40 backdrop-blur-md transition-all hover:bg-black/60 cursor-pointer overflow-hidden";
+  "group flex w-20 h-[3.75rem] flex-col items-center justify-center gap-0.5 rounded-xl border bg-black/40 backdrop-blur-md transition-all hover:bg-black/60 cursor-pointer select-none overflow-hidden";
 const WIDGET_EDIT =
   "flex w-20 h-[3.75rem] flex-col items-center justify-center gap-0.5 rounded-xl border bg-black/60 backdrop-blur-md overflow-hidden";
 

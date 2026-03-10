@@ -25,6 +25,7 @@ if [ -d ".git" ]; then
             pnpm install
             # Force rebuild
             rm -rf packages/shared/dist packages/server/dist packages/client/dist
+            rm -f packages/shared/tsconfig.tsbuildinfo packages/server/tsconfig.tsbuildinfo packages/client/tsconfig.tsbuildinfo
         else
             echo "  [OK] Already up to date"
         fi

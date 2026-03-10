@@ -580,6 +580,16 @@ function formatAgentBubble(agentType: string, agentName: string, data: unknown):
       return `✍️ ${preview}`;
     }
 
+    case "html": {
+      const text = d.text as string;
+      return `🎨 ${text || "HTML formatting active"}`;
+    }
+
+    case "chat-summary": {
+      const text = d.text as string;
+      return `📝 ${text || "Chat summary active"}`;
+    }
+
     default:
       return null;
   }

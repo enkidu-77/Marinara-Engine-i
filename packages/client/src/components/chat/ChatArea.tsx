@@ -56,6 +56,7 @@ import { useEncounter } from "../../hooks/use-encounter";
 import { useEncounterStore } from "../../stores/encounter.store";
 import { SummaryPopover } from "./SummaryPopover";
 import { APP_VERSION } from "@marinara-engine/shared";
+import { BUILT_IN_AGENTS } from "@marinara-engine/shared";
 
 /** Map characterId → { name, avatarUrl, colors } */
 export type CharacterMap = Map<
@@ -73,6 +74,49 @@ export type CharacterMap = Map<
 function WeatherEffectsConnected() {
   const gs = useGameStateStore((s) => s.current);
   return <WeatherEffects weather={gs?.weather ?? null} timeOfDay={gs?.time ?? null} />;
+}
+
+/** Crossfade background — smoothly transitions between background images using two alternating layers. */
+function CrossfadeBackground({ url, className }: { url: string | null; className?: string }) {
+  const [bgA, setBgA] = useState<string | null>(url);
+  const [bgB, setBgB] = useState<string | null>(null);
+  const [aActive, setAActive] = useState(true);
+  const activeSlot = useRef<"a" | "b">("a");
+
+  useEffect(() => {
+    const currentUrl = activeSlot.current === "a" ? bgA : bgB;
+    if (url === currentUrl) return;
+
+    if (activeSlot.current === "a") {
+      setBgB(url);
+      setAActive(false);
+      activeSlot.current = "b";
+    } else {
+      setBgA(url);
+      setAActive(true);
+      activeSlot.current = "a";
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
+
+  return (
+    <>
+      <div
+        className={cn(
+          "absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-700 ease-in-out",
+          className,
+        )}
+        style={{ backgroundImage: bgA ? `url(${bgA})` : "none", opacity: aActive ? 1 : 0 }}
+      />
+      <div
+        className={cn(
+          "absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-700 ease-in-out",
+          className,
+        )}
+        style={{ backgroundImage: bgB ? `url(${bgB})` : "none", opacity: aActive ? 0 : 1 }}
+      />
+    </>
+  );
 }
 
 export function ChatArea() {
@@ -318,6 +362,19 @@ export function ChatArea() {
   const [peekPromptData, setPeekPromptData] = useState<{
     messages: Array<{ role: string; content: string }>;
     parameters: unknown;
+    generationInfo?: {
+      model?: string;
+      provider?: string;
+      temperature?: number | null;
+      maxTokens?: number | null;
+      showThoughts?: boolean | null;
+      reasoningEffort?: string | null;
+      verbosity?: string | null;
+      tokensPrompt?: number | null;
+      tokensCompletion?: number | null;
+      durationMs?: number | null;
+      finishReason?: string | null;
+    } | null;
     agentNote?: string;
   } | null>(null);
 
@@ -543,10 +600,7 @@ export function ChatArea() {
         )}
         <div className="rpg-chat-area relative flex flex-1 flex-col overflow-hidden">
           {/* Background layer */}
-          <div
-            className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-            style={chatBackground ? { backgroundImage: `url(${chatBackground})` } : undefined}
-          />
+          <CrossfadeBackground url={chatBackground} />
           {/* Dark atmospheric overlay */}
           <div className="absolute inset-0 rpg-overlay" />
           {/* Vignette effect */}
@@ -595,19 +649,7 @@ export function ChatArea() {
               >
                 <Image size={16} />
               </button>
-              {chatMeta.enableAgents && enabledAgentTypes.size > 0 && (
-                <AgentsHeaderButton agentConfigs={agentConfigs as AgentConfigRow[] | undefined} variant="roleplay" />
-              )}
-              {failedAgentTypes.length > 0 && (
-                <button
-                  onClick={handleRetryAgents}
-                  disabled={agentProcessing}
-                  className="rounded-lg p-1.5 text-amber-400/80 transition-all hover:bg-white/10 hover:text-amber-300 disabled:opacity-50"
-                  title="Retry failed agents"
-                >
-                  <RefreshCw size={16} className={agentProcessing ? "animate-spin" : ""} />
-                </button>
-              )}
+
               <button
                 onClick={() => setSettingsOpen(true)}
                 className="rounded-lg p-1.5 text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
@@ -885,10 +927,7 @@ export function ChatArea() {
         <div className="relative flex-1 overflow-hidden">
           {chatBackground && (
             <>
-              <div
-                className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-                style={{ backgroundImage: `url(${chatBackground})` }}
-              />
+              <CrossfadeBackground url={chatBackground} />
               <div className="absolute inset-0 bg-[var(--background)]/60" />
             </>
           )}
@@ -1105,9 +1144,14 @@ function AgentsHeaderButton({
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  // Build phase map from agentConfigs
+  // Build phase map from agentConfigs + built-in fallback
   const phaseMap = useMemo(() => {
     const map = new Map<string, string>();
+    // Built-in agent defaults
+    for (const a of BUILT_IN_AGENTS) {
+      map.set(a.id, a.phase);
+    }
+    // DB configs override
     if (agentConfigs) {
       for (const a of agentConfigs) {
         map.set(a.type, a.phase);

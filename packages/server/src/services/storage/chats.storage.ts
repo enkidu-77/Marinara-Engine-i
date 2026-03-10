@@ -163,10 +163,12 @@ export function createChatsStorage(db: DB) {
       if (inputs.length === 0) return;
       const msgRows: (typeof messages.$inferInsert)[] = [];
       const swipeRows: (typeof messageSwipes.$inferInsert)[] = [];
-      const timestamp = now();
+      const baseTime = Date.now();
 
-      for (const input of inputs) {
+      for (let idx = 0; idx < inputs.length; idx++) {
+        const input = inputs[idx]!;
         const id = newId();
+        const timestamp = new Date(baseTime + idx).toISOString();
         msgRows.push({
           id,
           chatId,
@@ -192,6 +194,8 @@ export function createChatsStorage(db: DB) {
         });
       }
 
+      const lastTimestamp = new Date(baseTime + inputs.length - 1).toISOString();
+
       // Batch in chunks of 500 to stay within SQLite variable limits
       const CHUNK = 500;
       await db.transaction(async (tx) => {
@@ -199,7 +203,7 @@ export function createChatsStorage(db: DB) {
           await tx.insert(messages).values(msgRows.slice(i, i + CHUNK));
           await tx.insert(messageSwipes).values(swipeRows.slice(i, i + CHUNK));
         }
-        await tx.update(chats).set({ updatedAt: timestamp }).where(eq(chats.id, chatId));
+        await tx.update(chats).set({ updatedAt: lastTimestamp }).where(eq(chats.id, chatId));
       });
     },
 

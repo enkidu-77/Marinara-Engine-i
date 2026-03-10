@@ -1,6 +1,6 @@
 # 🍝 Marinara Engine
 
-### Release 1.2.1
+### Release 1.3.0
 
 **An AI-powered chat & roleplay engine** — with conversation, roleplay, and visual novel modes, a full character & sprite system, 18 built-in AI agents, turn-based combat, lorebooks, and more.
 
@@ -11,6 +11,11 @@ Everything runs locally. No accounts, no cloud, no telemetry. Connect to any Ope
 ---
 
 ## Changelog
+
+### v1.3.0
+
+**Changes:**
+- **Removed Electron** — The app is now fully browser-based with PWA support. No desktop wrapper needed.
 
 ### v1.2.1
 
@@ -106,11 +111,11 @@ All agents are disabled by default — enable only the ones you want. You can al
 
 ## Installation
 
-### Windows Installer (Recommended)
+### Windows Installer
 
-Download **[Marinara-Engine-Installer-1.2.1.exe](https://github.com/SpicyMarinara/Marinara-Engine/releases/download/v1.2.1/Marinara-Engine-Installer-1.2.1.exe)** from the [Releases](https://github.com/SpicyMarinara/Marinara-Engine/releases) page and run it. The installer checks for Node.js and Git, clones the repo, installs everything, and creates a desktop shortcut.
+Download **install.bat** from the [Releases](https://github.com/SpicyMarinara/Marinara-Engine/releases) page and run it. The installer checks for Node.js and Git, clones the repo, installs everything, builds the app, and creates a desktop shortcut.
 
-You still need **Node.js** and **Git** installed first (the installer will tell you if they're missing).
+You need **Node.js** and **Git** installed first (the installer will tell you if they're missing).
 
 ---
 
@@ -213,17 +218,6 @@ pnpm dev:server
 pnpm dev:client
 ```
 
-### Building Desktop Installers
-
-```bash
-pnpm package          # Build for current platform
-pnpm package:win      # Windows .exe
-pnpm package:mac      # macOS .dmg
-pnpm package:linux    # Linux .AppImage
-```
-
-Output goes to `release/`.
-
 ---
 
 ## Configuration
@@ -249,7 +243,6 @@ marinara-engine/
 │   ├── shared/      # TypeScript types, schemas, constants
 │   ├── server/      # Fastify API + SQLite database + AI agents
 │   └── client/      # React frontend (Vite + Tailwind v4)
-├── electron/        # Electron desktop wrapper
 ├── start.bat        # Windows launcher
 ├── start.sh         # macOS/Linux launcher
 └── .env.example     # Environment template
@@ -261,7 +254,7 @@ marinara-engine/
 |-------|-----------|
 | Frontend | React 19, Tailwind CSS v4, Framer Motion, Zustand, React Query |
 | Backend | Fastify 5, Drizzle ORM, SQLite |
-| Desktop | Electron 33, electron-builder |
+| PWA | vite-plugin-pwa, Web App Manifest |
 | Shared | TypeScript 5, Zod |
 | Build | Vite 6, pnpm workspaces |
 

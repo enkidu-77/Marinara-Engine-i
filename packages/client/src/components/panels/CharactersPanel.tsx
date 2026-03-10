@@ -10,7 +10,7 @@ import {
   useUpdateGroup,
   useDeleteGroup,
 } from "../../hooks/use-characters";
-import { useUpdateChat } from "../../hooks/use-chats";
+import { useUpdateChat, useCreateMessage } from "../../hooks/use-chats";
 import { useChatStore } from "../../stores/chat.store";
 import {
   Plus,
@@ -31,6 +31,7 @@ import {
   ArrowUpDown,
   Pencil,
   Tag,
+  MessageCircle,
 } from "lucide-react";
 import { useUIStore } from "../../stores/ui.store";
 import { cn } from "../../lib/utils";
@@ -51,6 +52,7 @@ export function CharactersPanel() {
   const openCharacterDetail = useUIStore((s) => s.openCharacterDetail);
   const activeChat = useChatStore((s) => s.activeChat);
   const updateChat = useUpdateChat();
+  const createMessage = useCreateMessage(activeChat?.id ?? null);
 
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortOption>("name-asc");
@@ -62,6 +64,11 @@ export function CharactersPanel() {
   const [editGroupName, setEditGroupName] = useState("");
   // When non-null, clicking a character adds/removes it from this group
   const [assigningToGroup, setAssigningToGroup] = useState<string | null>(null);
+  const [firstMesConfirm, setFirstMesConfirm] = useState<{
+    charId: string;
+    charName: string;
+    message: string;
+  } | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
 
   const chatCharacterIds: string[] = activeChat
@@ -162,13 +169,57 @@ export function CharactersPanel() {
     const isActive = chatCharacterIds.includes(charId);
     const newIds = isActive ? chatCharacterIds.filter((id: string) => id !== charId) : [...chatCharacterIds, charId];
     if (newIds.length === 0) return;
-    updateChat.mutate({ id: activeChat.id, characterIds: newIds });
+    updateChat.mutate(
+      { id: activeChat.id, characterIds: newIds },
+      {
+        onSuccess: () => {
+          if (isActive) return; // removing, not adding
+          const charList = (characters ?? []) as CharacterRow[];
+          const char = charList.find((c) => c.id === charId);
+          if (!char) return;
+          try {
+            const parsed = typeof char.data === "string" ? JSON.parse(char.data) : char.data;
+            const firstMes = (parsed as { first_mes?: string }).first_mes;
+            const name = (parsed as { name?: string }).name ?? "Unknown";
+            if (firstMes) {
+              setFirstMesConfirm({ charId, charName: name, message: firstMes });
+            }
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+    );
   };
 
   const addGroupToChat = (memberIds: string[]) => {
     if (!activeChat || memberIds.length === 0) return;
     const merged = [...new Set([...chatCharacterIds, ...memberIds])];
-    updateChat.mutate({ id: activeChat.id, characterIds: merged });
+    const newlyAdded = memberIds.filter((id) => !chatCharacterIds.includes(id));
+    updateChat.mutate(
+      { id: activeChat.id, characterIds: merged },
+      {
+        onSuccess: () => {
+          // Find the first newly-added character with a first_mes
+          const charList = (characters ?? []) as CharacterRow[];
+          for (const charId of newlyAdded) {
+            const char = charList.find((c) => c.id === charId);
+            if (!char) continue;
+            try {
+              const parsed = typeof char.data === "string" ? JSON.parse(char.data) : char.data;
+              const firstMes = (parsed as { first_mes?: string }).first_mes;
+              const name = (parsed as { name?: string }).name ?? "Unknown";
+              if (firstMes) {
+                setFirstMesConfirm({ charId, charName: name, message: firstMes });
+                break; // show one at a time
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        },
+      },
+    );
   };
 
   const handleCreateGroup = useCallback(() => {
@@ -661,6 +712,55 @@ export function CharactersPanel() {
         <p className="px-1 text-[10px] text-[var(--muted-foreground)]/60">
           Click to edit · Use ✓ to assign/remove from chat
         </p>
+      )}
+
+      {/* First message confirmation dialog */}
+      {firstMesConfirm && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+          onClick={() => setFirstMesConfirm(null)}
+        >
+          <div
+            className="relative mx-4 flex w-full max-w-sm flex-col rounded-xl bg-[var(--card)] shadow-2xl ring-1 ring-[var(--border)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
+              <MessageCircle size={14} className="text-[var(--muted-foreground)]" />
+              <span className="text-sm font-semibold text-[var(--foreground)]">First Message</span>
+            </div>
+            <div className="px-4 py-3">
+              <p className="text-sm text-[var(--foreground)]">
+                Add <strong>{firstMesConfirm.charName}</strong>'s first message to the chat?
+              </p>
+              <p className="mt-2 max-h-32 overflow-y-auto rounded-lg bg-[var(--accent)]/50 px-3 py-2 text-xs leading-relaxed text-[var(--muted-foreground)]">
+                {firstMesConfirm.message.length > 300
+                  ? firstMesConfirm.message.slice(0, 300) + "\u2026"
+                  : firstMesConfirm.message}
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-3">
+              <button
+                onClick={() => setFirstMesConfirm(null)}
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"
+              >
+                Skip
+              </button>
+              <button
+                onClick={() => {
+                  createMessage.mutate({
+                    role: "assistant",
+                    content: firstMesConfirm.message,
+                    characterId: firstMesConfirm.charId,
+                  });
+                  setFirstMesConfirm(null);
+                }}
+                className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-medium text-[var(--primary-foreground)] transition-colors hover:opacity-90"
+              >
+                Add Message
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
