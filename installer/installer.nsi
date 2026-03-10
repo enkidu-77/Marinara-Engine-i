@@ -28,8 +28,8 @@ Section "Install"
     DetailPrint "A command prompt window will open — follow the prompts there."
     DetailPrint ""
 
-    ; Run the bat in a visible console so the user can interact
-    nsExec::ExecToLog '"cmd.exe" /c "$TEMP\marinara-installer\install.bat"'
+    ; Run the bat in a visible, interactive console
+    ExecWait '"cmd.exe" /c "$TEMP\marinara-installer\install.bat"'
 
     ; Clean up
     RMDir /r "$TEMP\marinara-installer"
