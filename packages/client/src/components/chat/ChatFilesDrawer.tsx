@@ -2,9 +2,9 @@
 // Chat: Manage Chat Files — switch between branches
 // Like SillyTavern's "Manage chat files" feature
 // ──────────────────────────────────────────────
-import { X, Plus, Trash2, FileText, MessageSquare } from "lucide-react";
+import { X, Plus, Trash2, FileText, MessageSquare, Download } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { useChatGroup, useCreateChat, useDeleteChat, useDeleteChatGroup } from "../../hooks/use-chats";
+import { useChatGroup, useCreateChat, useDeleteChat, useDeleteChatGroup, useExportChat } from "../../hooks/use-chats";
 import { useChatStore } from "../../stores/chat.store";
 import type { Chat } from "@marinara-engine/shared";
 
@@ -20,6 +20,7 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
   const createChat = useCreateChat();
   const deleteChat = useDeleteChat();
   const deleteChatGroup = useDeleteChatGroup();
+  const exportChat = useExportChat();
   const setActiveChatId = useChatStore((s) => s.setActiveChatId);
   const activeChatId = useChatStore((s) => s.activeChatId);
 
@@ -74,6 +75,16 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
               <X size={16} />
             </button>
           </div>
+          <div className="border-b border-[var(--border)] px-4 py-3">
+            <button
+              onClick={() => exportChat.mutate(chat.id)}
+              disabled={exportChat.isPending}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium text-[var(--foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98] disabled:opacity-50"
+            >
+              <Download size={13} />
+              Export Chat
+            </button>
+          </div>
           <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
             <FileText size={32} className="text-[var(--muted-foreground)]/40" />
             <p className="text-xs text-[var(--muted-foreground)]">
@@ -113,6 +124,14 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
           >
             <Plus size={13} />
             Start New Chat
+          </button>
+          <button
+            onClick={() => exportChat.mutate(activeChatId ?? chat.id)}
+            disabled={exportChat.isPending}
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium text-[var(--foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98] disabled:opacity-50"
+          >
+            <Download size={13} />
+            Export Chat
           </button>
           <p className="mt-2 text-center text-[10px] text-[var(--muted-foreground)]/60">
             {chatFiles.length} chat file{chatFiles.length !== 1 ? "s" : ""} in this group
