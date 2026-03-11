@@ -84,19 +84,36 @@ if [ ! -d "node_modules" ]; then
 fi
 
 # ── Ensure better-sqlite3 native binary is built ──
-# @libsql/client has no Android ARM64 binary, so we need better-sqlite3.
-# pnpm install may skip native compilation if build tools were missing.
-BS3_NODE=$(find node_modules -path "*/better-sqlite3/build/Release/better_sqlite3.node" 2>/dev/null | head -1)
-if [ -z "$BS3_NODE" ]; then
-    echo "  [..] Building better-sqlite3 native module..."
-    echo "       (requires build-essential — may take a minute)"
-    pnpm rebuild better-sqlite3 2>&1 || {
-        echo "  [ERR] Failed to build better-sqlite3."
-        echo "        Run: pkg install build-essential"
-        echo "        Then: pnpm rebuild better-sqlite3"
+# @libsql/client has no Android ARM64 binary, so we fall back to better-sqlite3.
+# pnpm install may skip native compilation if build tools were missing at the time.
+BS3_PKG=$(find node_modules -path "*/better-sqlite3/package.json" -not -path "*/.cache/*" 2>/dev/null | head -1)
+if [ -n "$BS3_PKG" ]; then
+    BS3_DIR=$(dirname "$BS3_PKG")
+else
+    # Package not installed — pnpm may have skipped the optional dep entirely.
+    echo "  [..] Installing better-sqlite3 (required for Termux)..."
+    pnpm --filter @marinara-engine/server add -O better-sqlite3@"^11.0.0" 2>&1 || true
+    BS3_PKG=$(find node_modules -path "*/better-sqlite3/package.json" -not -path "*/.cache/*" 2>/dev/null | head -1)
+    if [ -n "$BS3_PKG" ]; then
+        BS3_DIR=$(dirname "$BS3_PKG")
+    fi
+fi
+
+if [ -n "$BS3_DIR" ] && [ ! -f "$BS3_DIR/build/Release/better_sqlite3.node" ]; then
+    echo "  [..] Compiling better-sqlite3 native module..."
+    echo "       (requires clang — may take a minute)"
+    (cd "$BS3_DIR" && npx --yes node-gyp rebuild --release 2>&1) || {
+        echo "  [ERR] Failed to compile better-sqlite3."
+        echo "        Make sure build tools are installed:"
+        echo "          pkg install build-essential python"
+        echo "        Then try again: ./start-termux.sh"
         exit 1
     }
-    echo "  [OK] better-sqlite3 native module built"
+    echo "  [OK] better-sqlite3 compiled successfully"
+elif [ -z "$BS3_DIR" ]; then
+    echo "  [ERR] Could not install better-sqlite3."
+    echo "        Try manually: pnpm --filter @marinara-engine/server add -O better-sqlite3"
+    exit 1
 fi
 
 # ── Build if needed ──
