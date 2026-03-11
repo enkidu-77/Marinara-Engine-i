@@ -99,21 +99,48 @@ else
     fi
 fi
 
-if [ -n "$BS3_DIR" ] && [ ! -f "$BS3_DIR/build/Release/better_sqlite3.node" ]; then
-    echo "  [..] Compiling better-sqlite3 native module..."
-    echo "       (requires clang — may take a minute)"
-    (cd "$BS3_DIR" && npx --yes node-gyp rebuild --release 2>&1) || {
-        echo "  [ERR] Failed to compile better-sqlite3."
-        echo "        Make sure build tools are installed:"
-        echo "          pkg install build-essential python"
-        echo "        Then try again: ./start-termux.sh"
-        exit 1
-    }
-    echo "  [OK] better-sqlite3 compiled successfully"
-elif [ -z "$BS3_DIR" ]; then
+if [ -z "$BS3_DIR" ]; then
     echo "  [ERR] Could not install better-sqlite3."
     echo "        Try manually: pnpm --filter @marinara-engine/server add -O better-sqlite3"
     exit 1
+fi
+
+if [ ! -f "$BS3_DIR/build/Release/better_sqlite3.node" ]; then
+    echo "  [..] Compiling better-sqlite3 native module..."
+    echo "       (requires clang — may take a minute)"
+
+    # node-gyp needs these on Termux:
+    #  - CC/CXX: clang is provided by build-essential
+    #  - PYTHON: gyp configure uses it to generate Makefiles
+    #  - --nodedir: tells node-gyp where include/node/node.h lives
+    #    (Termux prefix, NOT ~/.cache/node-gyp which node-gyp downloads from nodejs.org)
+    export CC="${CC:-cc}"
+    export CXX="${CXX:-c++}"
+    export LINK="${LINK:-c++}"
+    export AR="${AR:-ar}"
+    PYTHON_BIN="$(which python3 2>/dev/null || which python 2>/dev/null)"
+    if [ -n "$PYTHON_BIN" ]; then
+        export PYTHON="$PYTHON_BIN"
+    fi
+    NODE_PREFIX="$(dirname "$(dirname "$(command -v node)")")"
+
+    # Install node-gyp globally — npx creates a temp env that breaks
+    # require('node-addon-api') resolution inside pnpm's virtual store.
+    if ! command -v node-gyp &>/dev/null; then
+        echo "  [..] Installing node-gyp..."
+        npm install -g node-gyp 2>&1
+    fi
+
+    (cd "$BS3_DIR" && node-gyp rebuild --release --nodedir="$NODE_PREFIX" 2>&1) || {
+        echo ""
+        echo "  [ERR] Failed to compile better-sqlite3."
+        echo "        Make sure build tools are installed:"
+        echo "          pkg install build-essential python"
+        echo "        Then delete node_modules and try again:"
+        echo "          rm -rf node_modules && ./start-termux.sh"
+        exit 1
+    }
+    echo "  [OK] better-sqlite3 compiled successfully"
 fi
 
 # ── Build if needed ──
