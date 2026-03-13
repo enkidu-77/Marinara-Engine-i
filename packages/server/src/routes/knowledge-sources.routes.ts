@@ -61,6 +61,17 @@ async function writeMeta(meta: MetaStore) {
 }
 
 /**
+ * Look up a knowledge-source file by its ID.
+ * Returns the resolved file path and original name, or null if not found.
+ */
+export function getSourceFilePath(id: string): { filePath: string; originalName: string } | null {
+  const meta = readMeta();
+  const entry = meta[id];
+  if (!entry) return null;
+  return { filePath: join(SOURCES_DIR, entry.filename), originalName: entry.originalName };
+}
+
+/**
  * Extract plain text from a file based on its extension.
  */
 export async function extractFileText(filePath: string): Promise<string> {
