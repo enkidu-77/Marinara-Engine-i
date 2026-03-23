@@ -859,46 +859,44 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
               ))}
           </Section>
 
-          {/* Group Chat Settings — only when 2+ characters */}
-          {chatCharIds.length > 1 && (
+          {/* Group Chat Settings — only when 2+ characters, roleplay only (conversations always use merged) */}
+          {chatCharIds.length > 1 && !isConversation && (
             <Section
               label="Group Chat"
               icon={<Users size="0.875rem" />}
               help="Configure how multiple characters interact. Merged mode combines all characters into one narrator; Individual mode has each character respond separately."
             >
-              {/* Mode selector — roleplay only (conversations always use merged) */}
-              {!isConversation && (
-                <div className="space-y-2">
-                  <label className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Mode</label>
-                  <div className="flex rounded-lg ring-1 ring-[var(--border)]">
-                    <button
-                      onClick={() => updateMeta.mutate({ id: chat.id, groupChatMode: "merged" })}
-                      className={cn(
-                        "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors rounded-l-lg",
-                        (metadata.groupChatMode ?? "merged") === "merged"
-                          ? "bg-[var(--primary)] text-white"
-                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
-                      )}
-                    >
-                      Merged (Narrator)
-                    </button>
-                    <button
-                      onClick={() => updateMeta.mutate({ id: chat.id, groupChatMode: "individual" })}
-                      className={cn(
-                        "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors rounded-r-lg",
-                        metadata.groupChatMode === "individual"
-                          ? "bg-[var(--primary)] text-white"
-                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
-                      )}
-                    >
-                      Individual
-                    </button>
-                  </div>
+              {/* Mode selector */}
+              <div className="space-y-2">
+                <label className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Mode</label>
+                <div className="flex rounded-lg ring-1 ring-[var(--border)]">
+                  <button
+                    onClick={() => updateMeta.mutate({ id: chat.id, groupChatMode: "merged" })}
+                    className={cn(
+                      "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors rounded-l-lg",
+                      (metadata.groupChatMode ?? "merged") === "merged"
+                        ? "bg-[var(--primary)] text-white"
+                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                    )}
+                  >
+                    Merged (Narrator)
+                  </button>
+                  <button
+                    onClick={() => updateMeta.mutate({ id: chat.id, groupChatMode: "individual" })}
+                    className={cn(
+                      "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors rounded-r-lg",
+                      metadata.groupChatMode === "individual"
+                        ? "bg-[var(--primary)] text-white"
+                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                    )}
+                  >
+                    Individual
+                  </button>
                 </div>
-              )}
+              </div>
 
-              {/* Merged mode: speaker color option (roleplay only — conversations auto-enable colors) */}
-              {!isConversation && (metadata.groupChatMode ?? "merged") === "merged" && (
+              {/* Merged mode: speaker color option */}
+              {(metadata.groupChatMode ?? "merged") === "merged" && (
                 <div className="mt-2">
                   <button
                     onClick={() => updateMeta.mutate({ id: chat.id, groupSpeakerColors: !metadata.groupSpeakerColors })}
@@ -934,7 +932,7 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
               )}
 
               {/* Individual mode: response order */}
-              {!isConversation && metadata.groupChatMode === "individual" && (
+              {metadata.groupChatMode === "individual" && (
                 <div className="mt-2 space-y-2">
                   <label className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Response Order</label>
                   <div className="flex rounded-lg ring-1 ring-[var(--border)]">

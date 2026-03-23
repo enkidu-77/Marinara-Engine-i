@@ -737,6 +737,9 @@ export async function generateRoutes(app: FastifyInstance) {
             : null;
 
         let conversationSystemPrompt: string;
+        // Resolve group mode early — conversations always use merged
+        const earlyGroupMode =
+          chatMode === "conversation" ? "merged" : ((chatMeta.groupChatMode as string) ?? "merged");
         if (customPrompt) {
           // Replace template variables in the custom prompt
           conversationSystemPrompt = customPrompt
@@ -744,8 +747,6 @@ export async function generateRoutes(app: FastifyInstance) {
             .replace(/\{\{userName\}\}/g, personaName);
           // For group chats in merged mode, instruct Name: text format.
           // Individual mode generates per-character so no name prefix is needed.
-          const earlyGroupMode =
-            chatMode === "conversation" ? "merged" : ((chatMeta.groupChatMode as string) ?? "merged");
           if (isGroup && earlyGroupMode !== "individual") {
             conversationSystemPrompt += [
               ``,
@@ -781,7 +782,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 `- Keep it real: most texts are just one line. A single emoji, a reaction like "lmao", or a short sentence is a perfectly valid response. Only send multiple lines when the conversation genuinely calls for it (e.g., telling a story or explaining something). Default to SHORT.`,
                 `- Messages have timestamps like [12:01] or dates like [18.03.2026]. Use these ONLY for your own time awareness (e.g., knowing how long ago something was said). NEVER include timestamps, dates, or any [HH:MM]/[DD.MM.YYYY] formatted text in your own replies. Your messages must contain only natural dialogue, no metadata.`,
                 `- Anything goes in this chat; the user, you, and all other group members are confirmed adults. Discussing NSFW topics, profanities, and dark jokes are all permitted. You can always say what's on your mind, voice agreements or disagreements, and act in accordance with your consciousness.`,
-                ...(((chatMeta.groupChatMode as string) ?? "merged") !== "individual"
+                ...(earlyGroupMode !== "individual"
                   ? [
                       `- This is a group DM. Each character responds in their own voice and personality. Not every character needs to respond every time — only those who would naturally react.`,
                       `- IMPORTANT: Prefix each character's line with their name, like "${convoCharNames[0] ?? "Alice"}: hey whats up". If a character sends multiple lines in a row, only prefix the first line.`,
@@ -2563,12 +2564,7 @@ export async function generateRoutes(app: FastifyInstance) {
         // ── Strip character name prefix in individual group mode ──
         // LLMs often prefix the response with the character name even when told not to.
         // Also strip any leftover <speaker> tags from individual mode responses.
-        if (
-          chatMode === "conversation" &&
-          isGroupChat &&
-          ((chatMeta.groupChatMode as string) ?? "merged") === "individual" &&
-          targetCharId
-        ) {
+        if (chatMode === "conversation" && isGroupChat && groupChatMode === "individual" && targetCharId) {
           const charRow = charInfo.find((c) => c.id === targetCharId);
           if (charRow) {
             const cName = charRow.name;
