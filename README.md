@@ -72,39 +72,6 @@
 
 ---
 
-### v1.4.0
-
-**Added:**
-
-- **Conversations Rework** — Discord-inspired mode for casual chats with the characters, where they remember everything, post selfies, and have access to the group chats and roleplays they're added to.
-- **Default OpenRouter Free Connection** — New users automatically get a pre-configured OpenRouter free connection linked to the initial Professor Mari chat.
-- **Professor Mari** — An assistant that can explain you everything about the Marinara Engine, and even setup chats and characters for you.
-- **Embedding Support** — With in-built model for embeddings that can be toggled on/off for any chats, or option for you to choose an API-provided one.
-- **Conversation Mode Markdown** — Bold (`**text**`) and italic (`*text*`) now render correctly in conversation mode messages.
-- **OpenAI Responses API** — Full support for models that require the Responses API (`gpt-5.4-pro`, Codex models). Streaming, tool use, and non-streaming paths all covered.
-- **New Models** — Added Gemini 3.1, GPT-5.4, GPT-5.4 Pro, 7 Codex models (`gemini-3.1-pro-preview`,`gemini-3.0-flash-preview`,`gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, `gpt-5-codex`, `codex-mini-latest`).
-- **Gallery Recovery** — Server startup now scans `data/gallery/` for orphaned image files and re-creates missing database records, preventing gallery loss across updates.
-- **GHCR Docker Workflow** — Added GitHub Container Registry CI/CD workflow for automated multi-arch Docker image builds on push/tag.
-- **IP Allowlist Middleware** — Optional IP-based access control for self-hosted deployments.
-- **Lorebook Token Counts** — Each lorebook entry now shows its estimated token count. Sort entries by Order, Name, Tokens, or Keys, and see total token usage at a glance.
-- **World Info Button** — Floating globe icon in the chat toolbar (desktop and mobile) showing all currently activated lorebook entries, their keywords, and total token usage for the active chat — similar to Chat Summary.
-- **Avatar Zoom & Repositioning** — Zoom in and drag-to-reposition character avatars from the Character Editor's Metadata tab. Crop settings are applied everywhere avatars appear: chat messages, character cards, expression panel, and group chat cycling avatars.
-- **/narrator Command** — `/narrator <direction>` sends a narrative steering instruction to the AI, asking it to move the story toward what you describe (e.g., `/narrator the storm intensifies`).
-- **/random Command** — `/random` (aliases: `/rand`, `/event`) asks the AI to introduce a random, unexpected event to shake up the plot.
-
-**Changes:**
-
-- **Thinking/Reasoning Support** — Full extended thinking support for Gemini and Claude (streaming + non-streaming thinking blocks), Gemini (thought-flagged parts), and OpenAI (reasoning_content). Configurable via Reasoning Effort (Low/Medium/High/Maximum) and Show Thoughts toggle.
-- **Agent Data Per-Chat Filtering** — Agent data markers in the prompt now respect the per-chat active agent list. Inactive agents no longer leak their data sections (quests, world state, etc.) into the prompt.
-- **Agent Resolution Fix** — Built-in agents added to a chat's per-chat agent list now resolve correctly even without a prior DB configuration row. Previously, agents like World State would silently fail to run if never opened in the Agent Editor.
-- **Gallery Cleanup** — Deleting a chat now properly removes its associated gallery images (both DB records and physical files).
-
-**Fixes:**
-
-- **Heh** — Too many to count.
-
----
-
 ## Installation
 
 ## Windows EASIEST METHOD
