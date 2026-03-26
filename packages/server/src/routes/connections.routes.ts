@@ -54,6 +54,15 @@ export async function connectionsRoutes(app: FastifyInstance) {
       const provider = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
       const baseUrl = conn.baseUrl || provider?.defaultBaseUrl || "";
 
+      
+      if (!baseUrl) {
+        return {
+          success: false,
+          message: "No base URL configured for this provider",
+          latencyMs: 0,
+          modelName: null,
+        };
+      }
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (provider?.usesAuthHeader) {
         headers["Authorization"] = `Bearer ${conn.apiKey}`;
