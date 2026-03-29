@@ -2028,6 +2028,11 @@ export async function generateRoutes(app: FastifyInstance) {
         pipelineAgents = pipelineAgents.filter((a) => !trackerIds.has(a.type));
       }
 
+      // Echo Chamber should only fire on fresh user messages, not swipes/regenerates
+      if (input.regenerateMessageId) {
+        pipelineAgents = pipelineAgents.filter((a) => a.type !== "echo-chamber");
+      }
+
       const pipeline = createAgentPipeline(pipelineAgents, agentContext, sendAgentEvent);
 
       // ────────────────────────────────────────
