@@ -54,6 +54,35 @@
 
 ### v1.4.5
 
+**New Features:**
+
+- **Buttplug.io Haptic Integration** — "Love Toys Control" agent with per-device capability detection and 6 haptic actions (vibrate, oscillate, rotate, position, stop, constrict). Characters can trigger device commands inline via `<haptic>` tags.
+- **CYOA Choices Agent** — Generates 2–4 in-character choices after each roleplay response. Click a choice to send it as your next message.
+- **Multi-Select Message Deletion** — Select and bulk-delete messages in both Conversation and Roleplay modes via a new dialog flow.
+- **Echo Chamber Persistence** — Echo messages are now saved to the database and restored when switching back to a chat.
+- **Profile Export/Import** — Full backup and restore of characters, personas, lorebooks, presets, and agent configs as a single JSON file.
+- **Always-Enabled Send Button** — Roleplay mode now always shows a send/generate button with smart continue logic.
+
+**Improvements:**
+
+- **Responsive Layout** — Auto-closing panels on narrow screens, improved breakpoints, `min-w-0` overflow fix on AppShell.
+- **Accessibility** — Message multi-select checkboxes now use proper `<button role="checkbox">` with `aria-checked` and `aria-label`.
+- **Security** — Bulk message deletes are now scoped to the chat's `chatId`, preventing cross-chat deletion.
+- **Validation** — `Number.isFinite()` guards on haptic intensity/duration in both the service layer and command parser.
+- **Robustness** — Bulk deletes are chunked (500/batch) to avoid hitting SQLite's variable limit.
+- **Echo Chamber** — `loadedChatRef` reset on toggle-off for proper reload on re-enable.
+- **Haptic Safety** — Invalid device indices now return an empty target list instead of falling back to all connected devices.
+
+**Bug Fixes:**
+
+- Fixed Echo Chamber agent count badge not updating
+- Fixed combat agent type mismatch error
+- Fixed Character Menu `.marinara` file import failing silently
+- "Clear Trackers" now also clears committed agent runs and agent memory from the database
+- Removed unused connections data from profile export envelope
+
+### v1.4.4
+
 **Added:**
 
 - **Lorebook Depth Injection** — Lorebook entries with depth > 0 are now properly injected at the correct position in the prompt. Previously, depth entries were computed but never inserted into the message array (in both conversation and preset assembly modes).
@@ -264,7 +293,7 @@ pnpm dev:client
 - **Two Visual Themes** — Y2K Marinara theme and a faithful SillyTavern classic theme
 - **Light & Dark Mode** — One is obviously superior.
 
-### AI Agent System (23 Built-In)
+### AI Agent System (25 Built-In)
 
 Agents are autonomous AI assistants that run alongside your chat, each handling a specific task:
 
@@ -292,6 +321,8 @@ Agents are autonomous AI assistants that run alongside your chat, each handling 
 | **Knowledge Retrieval**   | Scans lorebooks for relevant context using chunked RAG                       |
 | **Schedule Planner**      | Generates realistic weekly schedules for characters in Conversation mode     |
 | **Response Orchestrator** | Decides which character(s) should respond in group Conversations             |
+| **Love Toys Control**     | Controls Buttplug.io haptic devices with per-device capability awareness     |
+| **CYOA Choices**          | Generates 2–4 in-character choices for the player after each response        |
 | **Autonomous Messenger**  | Lets characters send messages unprompted when the user is inactive           |
 
 All agents are disabled by default — enable only the ones you want. You can also create **custom agents** with your own prompts and tool configurations.
