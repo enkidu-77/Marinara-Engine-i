@@ -17,6 +17,9 @@ import {
   type SlashCommandContext,
 } from "../../lib/slash-commands";
 import { cn } from "../../lib/utils";
+import { QuickConnectionSwitcher } from "./QuickConnectionSwitcher";
+import { QuickPersonaSwitcher } from "./QuickPersonaSwitcher";
+import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
 import { EmojiPicker } from "../ui/EmojiPicker";
 import { GifPicker } from "../ui/GifPicker";
 
@@ -542,7 +545,15 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
           <Plus size="1rem" />
         </button>
 
+        {/* Quick Switchers — desktop: inline, mobile: chevron */}
+        <QuickConnectionSwitcher className="hidden sm:flex" />
+        <QuickPersonaSwitcher className="hidden sm:flex" />
+        <div className="sm:hidden">
+          <QuickSwitcherMobile />
+        </div>
+
         {/* Textarea */}
+
         <textarea
           ref={textareaRef}
           placeholder={characterNames.length > 0 ? `Message @${characterNames[0]}` : "Message..."}

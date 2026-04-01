@@ -18,6 +18,11 @@ import {
   type SlashCommandContext,
 } from "../../lib/slash-commands";
 import { cn } from "../../lib/utils";
+import { QuickConnectionSwitcher } from "./QuickConnectionSwitcher";
+import { QuickPersonaSwitcher } from "./QuickPersonaSwitcher";
+import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
+
+
 
 interface Attachment {
   type: string; // MIME type
@@ -431,6 +436,13 @@ export const ChatInput = memo(function ChatInput({ mode = "conversation", charac
           <Paperclip size="1rem" />
         </button>
 
+        {/* Quick Switchers — desktop: inline, mobile: chevron */}
+        <QuickConnectionSwitcher className="hidden sm:flex" />
+        <QuickPersonaSwitcher className="hidden sm:flex" />
+        <div className="sm:hidden">
+          <QuickSwitcherMobile />
+        </div>
+
         {/* Text input */}
         <textarea
           ref={textareaRef}
@@ -445,6 +457,7 @@ export const ChatInput = memo(function ChatInput({ mode = "conversation", charac
         />
 
         {/* Send / Stop button */}
+
         <button
           onClick={isStreaming ? () => useChatStore.getState().stopGeneration() : handleSend}
           disabled={(!hasInput && !attachments.length && !isStreaming && !canRetry && !canContinue) || !activeChatId}
