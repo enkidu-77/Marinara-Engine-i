@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Chat: Discord-style conversation message
 // ──────────────────────────────────────────────
-import { useState, useCallback, useRef, memo, useMemo, type ReactNode } from "react";
+import { useState, useCallback, useRef, useEffect, memo, useMemo, type ReactNode } from "react";
 import { Pencil, Trash2, Copy, RefreshCw, Eye, Brain, X, User, Languages } from "lucide-react";
 import { cn, copyToClipboard } from "../../lib/utils";
 import type { CharacterMap } from "./ChatArea";
@@ -23,6 +23,41 @@ function nameColorStyle(color?: string): React.CSSProperties | undefined {
 
 /** Regex to detect a message that is just an image/GIF URL */
 const IMAGE_URL_RE = /^https?:\/\/\S+\.(?:gif|png|jpe?g|webp)(?:\?[^\s]*)?$/i;
+
+/** Highlight @mentions in a list of ReactNodes. Scans string nodes for @CharacterName and wraps matches in a styled span. */
+function highlightMentions(nodes: ReactNode[], names: string[], keyPrefix: string): ReactNode[] {
+  if (names.length === 0) return nodes;
+  // Sort longest-first so "Mary Jane" matches before "Mary"
+  const sorted = [...names].sort((a, b) => b.length - a.length);
+  const pattern = new RegExp(
+    `(@(?:${sorted.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")}))(\\b|(?=[^\\w])|$)`,
+    "gi",
+  );
+  let key = 0;
+  return nodes.flatMap((node) => {
+    if (typeof node !== "string") return [node];
+    const parts: ReactNode[] = [];
+    let lastIdx = 0;
+    let m: RegExpExecArray | null;
+    pattern.lastIndex = 0;
+    while ((m = pattern.exec(node)) !== null) {
+      if (m.index > lastIdx) parts.push(node.slice(lastIdx, m.index));
+      parts.push(
+        <span
+          key={`${keyPrefix}at${key++}`}
+          className="mention-highlight rounded-[3px] bg-[var(--primary)]/15 px-px text-[var(--primary)] font-medium hover:bg-[var(--primary)]/25 cursor-default"
+        >
+          {m[1]}
+        </span>,
+      );
+      lastIdx = m.index + m[1]!.length;
+      // Don't consume the boundary character
+      pattern.lastIndex = lastIdx;
+    }
+    if (lastIdx < node.length) parts.push(node.slice(lastIdx));
+    return parts.length > 0 ? parts : [node];
+  });
+}
 
 /** Apply markdown-style inline formatting: **bold** and *italic*. */
 function applyInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
@@ -56,7 +91,7 @@ const HEADING_RE = /^(#{1,6})\s+(.+)$/;
 const HR_LINE_RE = /^(?:\*{3,}|-{3,})$/;
 
 /** Renders message content, showing image URLs as inline images */
-function MessageContent({ content }: { content: string }) {
+function MessageContent({ content, mentionNames }: { content: string; mentionNames?: string[] }) {
   if (IMAGE_URL_RE.test(content.trim())) {
     const url = content.trim();
     return (
@@ -74,7 +109,7 @@ function MessageContent({ content }: { content: string }) {
 
   const flushBuffer = () => {
     if (buffer.length > 0) {
-      segments.push(<span key={`seg${key++}`}>{applyInlineMarkdown(buffer.join("\n"), "m")}</span>);
+      segments.push(<span key={`seg${key++}`}>{mentionNames?.length ? highlightMentions(applyInlineMarkdown(buffer.join("\n"), "m"), mentionNames, "m") : applyInlineMarkdown(buffer.join("\n"), "m")}</span>);
       buffer = [];
     }
   };
@@ -190,6 +225,7 @@ function groupConsecutiveSegments(segments: SpeakerSegment[]): GroupedSegment[] 
 interface PersonaInfo {
   name: string;
   avatarUrl: string | null;
+  nameColor?: string;
 }
 
 interface MessageData {
@@ -276,7 +312,7 @@ export const ConversationMessage = memo(function ConversationMessage({
   const charInfo = message.characterId && characterMap ? characterMap.get(message.characterId) : null;
   const avatarUrl = isUser ? (personaInfo?.avatarUrl ?? null) : (charInfo?.avatarUrl ?? null);
   const displayName = isUser ? (personaInfo?.name ?? "You") : (charInfo?.name ?? "Assistant");
-  const nameColor = !isUser ? charInfo?.nameColor : undefined;
+  const nameColor = isUser ? personaInfo?.nameColor : charInfo?.nameColor;
 
   // Build name→character lookup for speaker tag resolution.
   // When multiple characters share the same name, prefer the one assigned to this message.
@@ -297,6 +333,16 @@ export const ConversationMessage = memo(function ConversationMessage({
     return map;
   }, [characterMap, message.characterId]);
 
+  // Collect character names for @mention highlighting
+  const mentionNames = useMemo(() => {
+    if (!characterMap) return [] as string[];
+    const names: string[] = [];
+    for (const [, v] of characterMap) {
+      if (v?.name) names.push(v.name);
+    }
+    return names;
+  }, [characterMap]);
+
   // Parse speaker tags or Name: text format for group merged-mode messages
   const groupedSegments = useMemo(() => {
     if (isUser || !message.content) return null;
@@ -309,6 +355,42 @@ export const ConversationMessage = memo(function ConversationMessage({
     if (nameSegs) return groupConsecutiveSegments(nameSegs);
     return null;
   }, [isUser, message.content, charByName]);
+
+  // Staggered reveal for multi-speaker grouped messages.
+  // On first render (history load), show all segments immediately.
+  // When content changes (new message arrival), reveal one by one.
+  const segmentCount = groupedSegments?.length ?? 0;
+  const prevContentRef = useRef(message.content);
+  const initialRenderRef = useRef(true);
+  const [visibleSegments, setVisibleSegments] = useState(segmentCount);
+
+  useEffect(() => {
+    // On initial mount, show everything (history messages)
+    if (initialRenderRef.current) {
+      initialRenderRef.current = false;
+      setVisibleSegments(segmentCount);
+      prevContentRef.current = message.content;
+      return;
+    }
+    // Content changed — new message or regeneration
+    if (message.content !== prevContentRef.current && segmentCount > 1) {
+      prevContentRef.current = message.content;
+      setVisibleSegments(1);
+      let count = 1;
+      const reveal = () => {
+        count++;
+        setVisibleSegments(count);
+      };
+      const timers: ReturnType<typeof setTimeout>[] = [];
+      for (let i = 1; i < segmentCount; i++) {
+        timers.push(setTimeout(reveal, i * 1500));
+      }
+      return () => timers.forEach(clearTimeout);
+    }
+    // Segment count changed without content change (shouldn't happen, but be safe)
+    setVisibleSegments(segmentCount);
+    prevContentRef.current = message.content;
+  }, [message.content, segmentCount]);
 
   const extra = useMemo(() => {
     if (!message.extra) return {};
@@ -396,8 +478,8 @@ export const ConversationMessage = memo(function ConversationMessage({
             </button>
           </div>
         )}
-        {/* Render each grouped speaker as a mini-message row */}
-        {groupedSegments.map((grp, i) => {
+        {/* Render each grouped speaker as a mini-message row (staggered reveal) */}
+        {groupedSegments.slice(0, visibleSegments).map((grp, i) => {
           const segChar = grp.speaker && charByName ? charByName.get(grp.speaker.toLowerCase()) : null;
           const segAvatar = segChar?.avatarUrl ?? null;
           const segName = segChar?.name ?? grp.speaker ?? "";
@@ -410,15 +492,15 @@ export const ConversationMessage = memo(function ConversationMessage({
             return (
               <div
                 key={i}
-                className="pl-14 py-0.5 text-[0.875rem] leading-relaxed break-words whitespace-pre-wrap text-[var(--muted-foreground)] italic"
+                className="pl-14 py-0.5 text-[0.875rem] leading-relaxed break-words whitespace-pre-wrap text-[var(--muted-foreground)] italic animate-[fadeSlideIn_0.4s_ease-out]"
               >
-                {applyInlineMarkdown(combinedText, `ns${i}`)}
+                {mentionNames.length ? highlightMentions(applyInlineMarkdown(combinedText, `ns${i}`), mentionNames, `ns${i}`) : applyInlineMarkdown(combinedText, `ns${i}`)}
               </div>
             );
           }
 
           return (
-            <div key={i} className={cn("flex gap-4", i > 0 && "mt-3")}>
+            <div key={i} className={cn("flex gap-4 animate-[fadeSlideIn_0.4s_ease-out]", i > 0 && "mt-3")}>
               {/* Avatar */}
               <div className="w-10 flex-shrink-0">
                 <div className="h-10 w-10 overflow-hidden rounded-full bg-[var(--accent)]">
@@ -447,7 +529,7 @@ export const ConversationMessage = memo(function ConversationMessage({
                   )}
                 </div>
                 <div className="text-[0.9375rem] leading-relaxed break-words whitespace-pre-wrap">
-                  {applyInlineMarkdown(combinedText, `gs${i}`)}
+                  {mentionNames.length ? highlightMentions(applyInlineMarkdown(combinedText, `gs${i}`), mentionNames, `gs${i}`) : applyInlineMarkdown(combinedText, `gs${i}`)}
                 </div>
               </div>
             </div>
@@ -651,7 +733,7 @@ export const ConversationMessage = memo(function ConversationMessage({
               </div>
             ) : (
               <>
-                <MessageContent content={message.content} />
+                <MessageContent content={message.content} mentionNames={mentionNames} />
                 {isStreaming && (
                   <span className="ml-0.5 inline-block h-4 w-[0.125rem] animate-pulse rounded-full bg-[var(--foreground)]/50" />
                 )}

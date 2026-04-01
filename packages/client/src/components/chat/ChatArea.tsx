@@ -182,17 +182,10 @@ function StreamingIndicator({
   groupChatMode?: string;
 }) {
   const streamBuffer = useChatStore((s) => s.streamBuffer);
-  const generationPhase = useChatStore((s) => s.generationPhase);
   const streamingCharacterId = useChatStore((s) => s.streamingCharacterId);
 
   return (
     <div className="animate-message-in">
-      {!streamBuffer && generationPhase && (
-        <div className="flex items-center gap-2 px-[12%] max-md:px-4 py-2 text-xs text-[var(--muted-foreground)] italic">
-          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--muted-foreground)]" />
-          {generationPhase}
-        </div>
-      )}
       <ChatMessage
         message={{
           id: "__streaming__",

@@ -1092,6 +1092,17 @@ summary[class*="cursor-pointer"],
   animation: pulse-ring 2s ease-out infinite;
 }
 
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes typewriter {
   from {
     max-height: 0;

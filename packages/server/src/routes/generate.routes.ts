@@ -1394,6 +1394,9 @@ export async function generateRoutes(app: FastifyInstance) {
           ...(mentionLine ? [mentionLine] : []),
           ...scheduleLines,
           `The current time and date: ${timeStr}, ${dateStr}.`,
+          ...(isGroup && earlyGroupMode !== "individual"
+            ? [`- Remember to prefix messages with \`Name: message\`!`]
+            : []),
           `</context>`,
         ].join("\n");
 
