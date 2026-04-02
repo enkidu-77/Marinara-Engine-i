@@ -281,7 +281,7 @@ export const BUILT_IN_AGENTS: BuiltInAgentMeta[] = [
     id: "illustrator",
     name: "Illustrator",
     description: "Generates image prompts for key scenes (requires image generation API).",
-    phase: "parallel",
+    phase: "post_processing",
     enabledByDefault: false,
     category: "misc",
   },

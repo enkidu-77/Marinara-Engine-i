@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { X, MessageCircle } from "lucide-react";
 import { useChatStore } from "../../stores/chat.store";
+import { useUIStore } from "../../stores/ui.store";
 import { cn } from "../../lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -16,7 +17,14 @@ export function ChatNotificationBubbles() {
   const chatNotifications = useChatStore((s) => s.chatNotifications);
   const setActiveChatId = useChatStore((s) => s.setActiveChatId);
   const dismissNotification = useChatStore((s) => s.dismissNotification);
+  const closeAllDetails = useUIStore((s) => s.closeAllDetails);
   const [mobileExpanded, setMobileExpanded] = useState(false);
+
+  /** Navigate to a chat — close any editor/detail view first so ChatArea is visible. */
+  const navigateToChat = (chatId: string) => {
+    closeAllDetails();
+    setActiveChatId(chatId);
+  };
 
   const notifications = Array.from(chatNotifications.values());
 
@@ -33,7 +41,7 @@ export function ChatNotificationBubbles() {
             <NotificationBubble
               key={notif.chatId}
               notif={notif}
-              onNavigate={() => setActiveChatId(notif.chatId)}
+              onNavigate={() => navigateToChat(notif.chatId)}
               onDismiss={() => dismissNotification(notif.chatId)}
             />
           ))}
@@ -50,7 +58,7 @@ export function ChatNotificationBubbles() {
                 key={notif.chatId}
                 notif={notif}
                 onNavigate={() => {
-                  setActiveChatId(notif.chatId);
+                  navigateToChat(notif.chatId);
                   setMobileExpanded(false);
                 }}
                 onDismiss={() => {

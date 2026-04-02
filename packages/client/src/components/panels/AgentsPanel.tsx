@@ -2,7 +2,7 @@
 // Panel: Agents & Tools
 // ──────────────────────────────────────────────
 import { useState } from "react";
-import { Sparkles, Pencil, Plus, Wrench, ChevronDown, Trash2, Bot, Regex, PenLine, Radar, Puzzle } from "lucide-react";
+import { Sparkles, Pencil, Plus, Wrench, ChevronDown, Trash2, Regex, PenLine, Radar, Puzzle } from "lucide-react";
 import { useUIStore } from "../../stores/ui.store";
 import { useAgentConfigs, useDeleteAgent, type AgentConfigRow } from "../../hooks/use-agents";
 import { useCustomTools, useDeleteCustomTool, type CustomToolRow } from "../../hooks/use-custom-tools";
@@ -249,7 +249,7 @@ export function AgentsPanel() {
                     key={agent.id}
                     className="flex items-start gap-2.5 rounded-lg p-2 transition-colors hover:bg-[var(--sidebar-accent)]"
                   >
-                    <Bot size="0.875rem" className="mt-0.5 shrink-0 text-[var(--primary)]" />
+                    <Sparkles size="0.875rem" className="mt-0.5 shrink-0 text-[var(--primary)]" />
                     <button className="min-w-0 flex-1 text-left" onClick={() => openAgentDetail(agent.id)}>
                       <div className="text-xs font-medium font-mono">{agent.name}</div>
                       <div className="text-[0.625rem] text-[var(--muted-foreground)] line-clamp-2">

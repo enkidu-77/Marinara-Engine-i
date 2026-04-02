@@ -1213,7 +1213,7 @@ export function ChatSettingsDrawer({
                   </button>
                 )}
 
-                {/* Selfie — image generation connection picker */}
+                {/* Selfie Connection — connection picker for character selfies */}
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
                     <Image size="0.75rem" className="text-[var(--primary)]" />
@@ -1232,8 +1232,7 @@ export function ChatSettingsDrawer({
                     ))}
                   </select>
                   <p className="text-[0.55rem] text-[var(--muted-foreground)]">
-                    Pick a connection to let characters send selfie photos. Any connection with image generation support
-                    works.
+                    Used for character selfies. The Illustrator agent uses its own connection from the Agents tab.
                   </p>
 
                   {/* Selfie resolution picker */}

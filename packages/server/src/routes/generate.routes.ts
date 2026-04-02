@@ -218,11 +218,14 @@ export async function generateRoutes(app: FastifyInstance) {
             ? { providerMetadata: { geminiParts: extra.geminiParts } }
             : {};
 
-        // Annotate assistant messages that have image attachments (selfies, etc.)
-        // so the model is aware it sent a photo in prior turns
+        // Annotate assistant messages that have user-uploaded image attachments
+        // so the model is aware it sent a photo in prior turns.
+        // Skip illustration/selfie attachments (type "image") — those are generated
+        // by agents and should be invisible to the main model.
         let content = m.content as string;
-        if (m.role === "assistant" && attachments?.some((a) => a.type === "image" || a.type?.startsWith("image/"))) {
-          const photoName = attachments.find((a) => a.type === "image" || a.type?.startsWith("image/"))?.filename;
+        const userUploadedImages = attachments?.filter((a) => a.type?.startsWith("image/"));
+        if (m.role === "assistant" && userUploadedImages?.length) {
+          const photoName = userUploadedImages[0]?.filename;
           content += `\n[Sent a photo${photoName ? `: ${photoName}` : ""}]`;
         }
 
@@ -4222,11 +4225,13 @@ export async function generateRoutes(app: FastifyInstance) {
             const aspectRatio = ((illData.aspectRatio as string) ?? "portrait").trim();
 
             if (shouldGenerate && imagePrompt) {
-              const imgConnId = chatMeta.imageGenConnectionId as string | undefined;
+              // Use the Illustrator agent's own connection (set in the Agents tab)
+              const illustratorAgent = resolvedAgents.find((a) => a.id === result.agentId || a.type === "illustrator");
+              const imgConnId = illustratorAgent?.connectionId ?? null;
               if (imgConnId) {
                 try {
                   const imgConnFull = await connections.getWithKey(imgConnId);
-                  if (!imgConnFull) throw new Error("Cannot decrypt image generation connection");
+                  if (!imgConnFull) throw new Error("Cannot resolve Illustrator agent connection");
 
                   const { generateImage, saveImageToDisk } = await import("../services/image/image-generation.js");
                   const { createGalleryStorage } = await import("../services/storage/gallery.storage.js");
@@ -4236,14 +4241,24 @@ export async function generateRoutes(app: FastifyInstance) {
                   const imgBaseUrl = imgConnFull.baseUrl || "https://image.pollinations.ai";
                   const imgApiKey = imgConnFull.apiKey || "";
 
-                  // Determine dimensions from aspect ratio
-                  let imgWidth = 768;
-                  let imgHeight = 512;
-                  if (aspectRatio === "portrait") {
+                  // Use selfie resolution from chat metadata if set, otherwise fall back to aspect ratio defaults
+                  const selfieRes = (chatMeta.selfieResolution as string) ?? "";
+                  const resParts = selfieRes.split("x").map(Number);
+                  const parsedW = resParts[0] ?? 0;
+                  const parsedH = resParts[1] ?? 0;
+                  let imgWidth: number;
+                  let imgHeight: number;
+                  if (parsedW > 0 && parsedH > 0) {
+                    imgWidth = parsedW;
+                    imgHeight = parsedH;
+                  } else if (aspectRatio === "portrait") {
                     imgWidth = 512;
                     imgHeight = 768;
                   } else if (aspectRatio === "square") {
                     imgWidth = 512;
+                    imgHeight = 512;
+                  } else {
+                    imgWidth = 768;
                     imgHeight = 512;
                   }
 
@@ -4310,9 +4325,27 @@ export async function generateRoutes(app: FastifyInstance) {
                   );
                 } catch (illErr) {
                   console.error("[illustrator] Image generation failed:", illErr);
+                  reply.raw.write(
+                    `data: ${JSON.stringify({
+                      type: "agent_error",
+                      data: {
+                        agentType: "illustrator",
+                        error: `Image generation failed: ${illErr instanceof Error ? illErr.message : String(illErr)}`,
+                      },
+                    })}\n\n`,
+                  );
                 }
               } else {
-                console.warn("[illustrator] Agent wants to generate but no imageGenConnectionId set on chat metadata");
+                console.warn("[illustrator] Agent wants to generate but no connection set on the Illustrator agent");
+                reply.raw.write(
+                  `data: ${JSON.stringify({
+                    type: "agent_error",
+                    data: {
+                      agentType: "illustrator",
+                      error: "No connection set on the Illustrator agent. Go to Settings → Agents and assign an image generation connection to the Illustrator.",
+                    },
+                  })}\n\n`,
+                );
               }
             }
           }

@@ -626,12 +626,20 @@ export function useGenerate() {
                 if (activeNow !== params.chatId) {
                   useChatStore.getState().incrementUnread(params.chatId);
                   // Show floating avatar notification bubble
-                  const charData = qc.getQueryData<{ avatarPath?: string | null }>(
+                  const charDetail = qc.getQueryData<{ avatarPath?: string | null }>(
                     characterKeys.detail(turn.characterId),
                   );
+                  // Detail cache may be empty — fall back to list cache
+                  let avatarPath = charDetail?.avatarPath ?? null;
+                  if (!avatarPath) {
+                    const charList = qc.getQueryData<Array<{ id: string; avatarPath?: string | null }>>(
+                      characterKeys.list(),
+                    );
+                    avatarPath = charList?.find((c) => c.id === turn.characterId)?.avatarPath ?? null;
+                  }
                   useChatStore
                     .getState()
-                    .addNotification(params.chatId, turn.characterName, charData?.avatarPath ?? null);
+                    .addNotification(params.chatId, turn.characterName, avatarPath);
                   const chatList = qc.getQueryData<Chat[]>(chatKeys.list());
                   const thisChat = chatList?.find((c) => c.id === params.chatId);
                   const isRpMode = thisChat?.mode === "roleplay" || thisChat?.mode === "visual_novel";
@@ -782,6 +790,12 @@ export function useGenerate() {
               toast(illData.reason ? `🎨 ${illData.reason}` : "🎨 Scene illustration generated");
               // Invalidate messages to show the new attachment
               qc.invalidateQueries({ queryKey: ["chats", "messages", params.chatId] });
+              break;
+            }
+
+            case "agent_error": {
+              const errData = event.data as { agentType: string; error: string };
+              toast.error(errData.error);
               break;
             }
 
@@ -985,12 +999,30 @@ export function useGenerate() {
                 : [];
           const firstCharId = parsedIds[0];
           if (firstCharId) {
-            const charData = qc.getQueryData<{ data?: { name?: string } | string; avatarPath?: string | null }>(
+            const charDetail = qc.getQueryData<{ data?: { name?: string } | string; avatarPath?: string | null }>(
               characterKeys.detail(firstCharId),
             );
-            const parsed = typeof charData?.data === "string" ? JSON.parse(charData.data) : charData?.data;
-            const charName = parsed?.name ?? "Character";
-            useChatStore.getState().addNotification(params.chatId, charName, charData?.avatarPath ?? null);
+            // Detail cache may be empty — fall back to the always-populated list cache
+            let charAvatar = charDetail?.avatarPath ?? null;
+            let charName = "Character";
+            if (charDetail) {
+              const parsed = typeof charDetail.data === "string" ? JSON.parse(charDetail.data) : charDetail.data;
+              charName = parsed?.name ?? "Character";
+            }
+            if (!charAvatar || charName === "Character") {
+              const charList = qc.getQueryData<Array<{ id: string; data?: string | { name?: string }; avatarPath?: string | null }>>(
+                characterKeys.list(),
+              );
+              const fromList = charList?.find((c) => c.id === firstCharId);
+              if (fromList) {
+                if (!charAvatar) charAvatar = fromList.avatarPath ?? null;
+                if (charName === "Character") {
+                  const p = typeof fromList.data === "string" ? JSON.parse(fromList.data) : fromList.data;
+                  charName = p?.name ?? "Character";
+                }
+              }
+            }
+            useChatStore.getState().addNotification(params.chatId, charName, charAvatar);
           }
           const isRp = chat?.mode === "roleplay" || chat?.mode === "visual_novel";
           const soundEnabled = isRp
