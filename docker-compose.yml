@@ -1,20 +1,10 @@
 # ──────────────────────────────────────────────
 # Marinara Engine — Docker Compose
 # ──────────────────────────────────────────────
-# Usage:
-#   docker compose up -d          # start
-#   docker compose up -d --build  # rebuild & start
-#   docker compose down            # stop (data is preserved)
-#
-# ⚠ Never use "docker compose down -v" unless you want to DELETE all data
-#   (database, gallery images, avatars, sprites, backgrounds, fonts).
-# ──────────────────────────────────────────────
 services:
   marinara:
-    # To use a pre-built image from GHCR instead of building locally,
-    # comment out "build: ." and uncomment the "image:" line below:
-    build: .
-    # image: ghcr.io/spicymarinara/marinara-engine:latest
+    # Use the pre-built image from GHCR
+    image: ghcr.io/spicymarinara/marinara-engine:latest
     ports:
       - "${PORT:-7860}:7860"
     volumes:
