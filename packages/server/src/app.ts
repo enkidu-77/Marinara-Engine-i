@@ -20,6 +20,7 @@ import { APP_VERSION } from "@marinara-engine/shared";
 import { existsSync } from "fs";
 import { basename, join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { getBuildCommit, getBuildLabel } from "./config/build-info.js";
 import { getCorsConfig, getLogLevel, getNodeEnv } from "./config/runtime-config.js";
 
 const REVALIDATE_FILES = new Set(["index.html"]);
@@ -129,11 +130,16 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   }
 
   // ── Health Check ──
-  app.get("/api/health", async () => ({
-    status: "ok",
-    version: APP_VERSION,
-    timestamp: new Date().toISOString(),
-  }));
+  app.get("/api/health", async () => {
+    const commit = getBuildCommit();
+    return {
+      status: "ok",
+      version: APP_VERSION,
+      commit,
+      build: getBuildLabel(),
+      timestamp: new Date().toISOString(),
+    };
+  });
 
   return app;
 }

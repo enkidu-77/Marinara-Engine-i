@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api-client";
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
+import { APP_VERSION } from "@marinara-engine/shared";
 import {
   Upload,
   X,
@@ -1686,6 +1687,18 @@ function AdvancedSettings() {
     queryFn: () => api.get("/backup"),
   });
 
+  const health = useQuery<{
+    status: string;
+    timestamp: string;
+    version: string;
+    commit: string | null;
+    build: string;
+  }>({
+    queryKey: ["health"],
+    queryFn: () => api.get("/health"),
+    staleTime: 60_000,
+  });
+
   const deleteBackupMutation = useMutation({
     mutationFn: (name: string) => api.delete(`/backup/${name}`),
     onSuccess: () => {
@@ -1696,6 +1709,8 @@ function AdvancedSettings() {
 
   const updateCheck = useQuery<{
     currentVersion: string;
+    currentCommit: string | null;
+    currentBuild: string;
     latestVersion: string;
     updateAvailable: boolean;
     releaseUrl: string;
@@ -1723,6 +1738,12 @@ function AdvancedSettings() {
       toast.error(message);
     },
   });
+
+  const currentBuildLabel = (() => {
+    const version = health.data?.version ?? updateCheck.data?.currentVersion ?? APP_VERSION;
+    const commit = health.data?.commit ?? updateCheck.data?.currentCommit ?? null;
+    return commit ? `v${version}+${commit}` : `v${version}`;
+  })();
 
   return (
     <div className="flex flex-col gap-3">
@@ -1752,17 +1773,13 @@ function AdvancedSettings() {
               </>
             )}
           </button>
-          {updateCheck.data && (
-            <span className="text-[0.6875rem] text-[var(--muted-foreground)]">
-              Current: v{updateCheck.data.currentVersion}
-            </span>
-          )}
+          <span className="text-[0.6875rem] text-[var(--muted-foreground)]">Running: {currentBuildLabel}</span>
         </div>
 
         {updateCheck.data && !updateCheck.data.updateAvailable && (
           <div className="flex items-center gap-1.5 rounded-lg bg-[var(--secondary)] px-2.5 py-2 ring-1 ring-[var(--border)]">
             <Check size="0.8125rem" className="text-green-500 shrink-0" />
-            <span className="text-xs">You're on the latest version (v{updateCheck.data.currentVersion})</span>
+            <span className="text-xs">You're on the latest version ({currentBuildLabel})</span>
           </div>
         )}
 

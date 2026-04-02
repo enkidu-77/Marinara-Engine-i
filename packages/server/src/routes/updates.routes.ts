@@ -8,6 +8,7 @@ import { existsSync } from "fs";
 import { resolve } from "path";
 import { promisify } from "util";
 import { getMonorepoRoot } from "../config/runtime-config.js";
+import { getBuildCommit, getBuildLabel } from "../config/build-info.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -137,11 +138,15 @@ export async function updatesRoutes(app: FastifyInstance) {
   // with matching release metadata when that release exists.
   app.get("/check", async (_req, reply) => {
     const now = Date.now();
+    const currentCommit = getBuildCommit();
+    const currentBuild = getBuildLabel();
 
     // Return cached if fresh
     if (cachedRelease && now - cacheTimestamp < CACHE_TTL_MS) {
       return {
         currentVersion: APP_VERSION,
+        currentCommit,
+        currentBuild,
         ...cachedRelease,
         updateAvailable: isNewerVersion(APP_VERSION, cachedRelease.latestVersion),
         installType: isGitInstall() ? "git" : "standalone",
@@ -160,6 +165,8 @@ export async function updatesRoutes(app: FastifyInstance) {
 
       return {
         currentVersion: APP_VERSION,
+        currentCommit,
+        currentBuild,
         ...cachedRelease,
         updateAvailable: isNewerVersion(APP_VERSION, cachedRelease.latestVersion),
         installType: isGitInstall() ? "git" : "standalone",
@@ -169,6 +176,8 @@ export async function updatesRoutes(app: FastifyInstance) {
       return reply.status(502).send({
         error: `Failed to check for updates: ${message}`,
         currentVersion: APP_VERSION,
+        currentCommit,
+        currentBuild,
         updateAvailable: false,
       });
     }
