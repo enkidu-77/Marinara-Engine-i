@@ -15,6 +15,7 @@ import {
 
 /**
  * Models that ONLY support the Responses API (`/responses`) and not Chat Completions.
+ * GPT-5.4 base uses Chat Completions; Pro and Codex variants use Responses.
  * Matching is case-insensitive.
  */
 const RESPONSES_ONLY_PREFIXES = ["gpt-5.4", "codex-"];
@@ -90,6 +91,18 @@ export class OpenAIProvider extends BaseLLMProvider {
     return /^(o1|o3|o4)/.test(m) || m.startsWith("gpt-5");
   }
 
+  /**
+   * Check if a model/config does NOT support temperature/topP.
+   * o-series models never do.
+   * GPT-5.x models only support temperature when reasoning effort is "none" (the default).
+   */
+  private isNoTemperatureModel(model: string, reasoningEffort?: string): boolean {
+    const m = model.toLowerCase();
+    if (/^(o1|o3|o4)/.test(m)) return true;
+    if (m.startsWith("gpt-5") && reasoningEffort && reasoningEffort !== "none") return true;
+    return false;
+  }
+
   /** Check if a model requires the Responses API instead of Chat Completions */
   private useResponsesAPI(model: string): boolean {
     const m = model.toLowerCase();
@@ -132,6 +145,7 @@ export class OpenAIProvider extends BaseLLMProvider {
   async *chat(messages: ChatMessage[], options: ChatOptions): AsyncGenerator<string, LLMUsage | void, unknown> {
     // Route to Responses API for models that require it
     if (this.useResponsesAPI(options.model)) {
+      console.log("[OpenAI] Routing chat() to Responses API for model=%s stream=%s", options.model, options.stream ?? true);
       return yield* this.chatResponses(messages, options);
     }
 
@@ -157,10 +171,13 @@ export class OpenAIProvider extends BaseLLMProvider {
     if (reasoning) {
       // Reasoning models use max_completion_tokens instead of max_tokens
       body.max_completion_tokens = options.maxTokens ?? 4096;
-      // Reasoning models don't support temperature/top_p
     } else {
-      body.temperature = options.temperature ?? 1;
       body.max_tokens = options.maxTokens ?? 4096;
+    }
+
+    // o-series models never support temperature/topP; GPT-5.x only with effort=none
+    if (!this.isNoTemperatureModel(options.model, options.reasoningEffort)) {
+      body.temperature = options.temperature ?? 1;
       if (options.topP != null) body.top_p = options.topP;
       if (options.frequencyPenalty) body.frequency_penalty = options.frequencyPenalty;
       if (options.presencePenalty) body.presence_penalty = options.presencePenalty;
@@ -175,10 +192,17 @@ export class OpenAIProvider extends BaseLLMProvider {
       body.reasoning_effort = options.reasoningEffort;
     }
 
+    // GPT-5+ text verbosity control (Chat Completions path)
+    if (options.verbosity) {
+      body.text = { verbosity: options.verbosity };
+    }
+
     // OpenRouter provider routing preference
     if (options.openrouterProvider && this.baseUrl.includes("openrouter.ai")) {
       body.provider = { order: [options.openrouterProvider] };
     }
+
+    console.log("[OpenAI chat()] stream=%s model=%s", body.stream, body.model);
 
     const response = await llmFetch(url, {
       method: "POST",
@@ -298,6 +322,7 @@ export class OpenAIProvider extends BaseLLMProvider {
   async chatComplete(messages: ChatMessage[], options: ChatOptions): Promise<ChatCompletionResult> {
     // Route to Responses API for models that require it
     if (this.useResponsesAPI(options.model)) {
+      console.log("[OpenAI] Routing chatComplete() to Responses API for model=%s onToken=%s", options.model, !!options.onToken);
       return this.chatCompleteResponses(messages, options);
     }
 
@@ -324,8 +349,12 @@ export class OpenAIProvider extends BaseLLMProvider {
     if (reasoning) {
       body.max_completion_tokens = options.maxTokens ?? 4096;
     } else {
-      body.temperature = options.temperature ?? 1;
       body.max_tokens = options.maxTokens ?? 4096;
+    }
+
+    // o-series models never support temperature/topP; GPT-5.x only with effort=none
+    if (!this.isNoTemperatureModel(options.model, options.reasoningEffort)) {
+      body.temperature = options.temperature ?? 1;
       if (options.topP != null) body.top_p = options.topP;
       if (options.frequencyPenalty) body.frequency_penalty = options.frequencyPenalty;
       if (options.presencePenalty) body.presence_penalty = options.presencePenalty;
@@ -336,10 +365,17 @@ export class OpenAIProvider extends BaseLLMProvider {
       body.reasoning_effort = options.reasoningEffort;
     }
 
+    // GPT-5+ text verbosity control (Chat Completions path)
+    if (options.verbosity) {
+      body.text = { verbosity: options.verbosity };
+    }
+
     // OpenRouter provider routing preference
     if (options.openrouterProvider && this.baseUrl.includes("openrouter.ai")) {
       body.provider = { order: [options.openrouterProvider] };
     }
+
+    console.log("[OpenAI chatComplete()] stream=%s model=%s onToken=%s", useStream, body.model, !!options.onToken);
 
     const response = await llmFetch(url, {
       method: "POST",
@@ -533,12 +569,28 @@ export class OpenAIProvider extends BaseLLMProvider {
     instructions: string | undefined;
     input: Array<Record<string, unknown>>;
   } {
+    // The Responses API requires function-call IDs to start with "fc_".
+    // Tool calls coming from Chat Completions history use "call_" prefix.
+    // Re-map consistently so both function_call and function_call_output match.
+    const idMap = new Map<string, string>();
+    let fcCounter = 0;
+    const ensureFcId = (id: string): string => {
+      if (id.startsWith("fc_")) return id;
+      const existing = idMap.get(id);
+      if (existing) return existing;
+      const mapped = `fc_mapped_${++fcCounter}`;
+      idMap.set(id, mapped);
+      return mapped;
+    };
+
     let instructions: string | undefined;
     const input: Array<Record<string, unknown>> = [];
 
     for (const m of messages) {
       if (m.role === "system") {
-        // Merge all system messages into instructions (skip empty)
+        // Merge all system messages into the top-level `instructions` field,
+        // which is the canonical way to pass system/developer messages in
+        // the Responses API.
         if (m.content?.trim()) {
           if (instructions) {
             instructions += "\n\n" + m.content;
@@ -553,7 +605,7 @@ export class OpenAIProvider extends BaseLLMProvider {
         // Tool result → function_call_output item
         input.push({
           type: "function_call_output",
-          call_id: m.tool_call_id,
+          call_id: m.tool_call_id ? ensureFcId(m.tool_call_id) : m.tool_call_id,
           output: m.content,
         });
         continue;
@@ -566,10 +618,11 @@ export class OpenAIProvider extends BaseLLMProvider {
         }
         // Then emit each tool call as a function_call item
         for (const tc of m.tool_calls) {
+          const fcId = ensureFcId(tc.id);
           input.push({
             type: "function_call",
-            id: tc.id,
-            call_id: tc.id,
+            id: fcId,
+            call_id: fcId,
             name: tc.function.name,
             arguments: tc.function.arguments,
           });
@@ -606,15 +659,45 @@ export class OpenAIProvider extends BaseLLMProvider {
     }));
   }
 
+  /** Check if a Responses API error is due to stale/corrupt encrypted reasoning items */
+  private isEncryptedContentError(errorText: string): boolean {
+    return errorText.includes("encrypted content") && errorText.includes("could not be");
+  }
+
+  /** Strip encrypted reasoning items from a Responses API body for retry */
+  private stripEncryptedItems(body: Record<string, unknown>): Record<string, unknown> {
+    const input = body.input as Array<Record<string, unknown>> | undefined;
+    if (input) {
+      body.input = input.filter((item) => item.type !== "reasoning");
+    }
+    return body;
+  }
+
   /** Build the Responses API request body */
   private buildResponsesBody(messages: ChatMessage[], options: ChatOptions): Record<string, unknown> {
     const { instructions, input } = this.formatResponsesInput(messages);
+
+    // Inject encrypted reasoning items from the previous turn right before the
+    // final user message so the model can continue its reasoning chain.
+    if (options.encryptedReasoningItems?.length) {
+      // Find the last user message index to insert reasoning items before it
+      let lastUserIdx = input.length;
+      for (let i = input.length - 1; i >= 0; i--) {
+        if ((input[i] as Record<string, unknown>).role === "user") {
+          lastUserIdx = i;
+          break;
+        }
+      }
+      input.splice(lastUserIdx, 0, ...(options.encryptedReasoningItems as Array<Record<string, unknown>>));
+    }
 
     const body: Record<string, unknown> = {
       model: options.model,
       input,
       stream: options.stream ?? true,
       store: false, // don't persist responses on OpenAI side
+      // Request encrypted reasoning items so we can replay them on the next turn
+      include: ["reasoning.encrypted_content"],
     };
 
     if (instructions) {
@@ -625,8 +708,8 @@ export class OpenAIProvider extends BaseLLMProvider {
       body.max_output_tokens = options.maxTokens;
     }
 
-    // Reasoning models don't use temperature/top_p
-    if (!this.isReasoningModel(options.model)) {
+    // o-series models never support temperature/topP; GPT-5.x only with effort=none
+    if (!this.isNoTemperatureModel(options.model, options.reasoningEffort)) {
       if (options.temperature != null) body.temperature = options.temperature;
       if (options.topP != null) body.top_p = options.topP;
       if (options.frequencyPenalty) body.frequency_penalty = options.frequencyPenalty;
@@ -638,6 +721,11 @@ export class OpenAIProvider extends BaseLLMProvider {
     if (options.reasoningEffort) reasoning.effort = options.reasoningEffort;
     if (options.enableThinking) reasoning.summary = "auto";
     if (Object.keys(reasoning).length > 0) body.reasoning = reasoning;
+
+    // GPT-5+ text verbosity control
+    if (options.verbosity) {
+      body.text = { verbosity: options.verbosity };
+    }
 
     if (options.tools?.length) {
       body.tools = this.formatResponsesTools(options.tools);
@@ -656,8 +744,13 @@ export class OpenAIProvider extends BaseLLMProvider {
   ): AsyncGenerator<string, LLMUsage | void, unknown> {
     const url = `${this.baseUrl}/responses`;
     const body = this.buildResponsesBody(messages, options);
+    console.log(
+      "[OpenAI chatResponses] reasoning=%j onThinking=%s",
+      body.reasoning ?? null,
+      !!options.onThinking,
+    );
 
-    const response = await llmFetch(url, {
+    let response = await llmFetch(url, {
       method: "POST",
       headers: this.buildHeaders(),
       body: JSON.stringify(body),
@@ -666,7 +759,24 @@ export class OpenAIProvider extends BaseLLMProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`OpenAI Responses API error ${response.status}: ${sanitizeApiError(errorText)}`);
+      // Retry without encrypted reasoning items if they're stale/corrupt
+      if (response.status === 400 && this.isEncryptedContentError(errorText) && options.encryptedReasoningItems?.length) {
+        console.warn("[OpenAI chatResponses] Encrypted reasoning items rejected, retrying without them");
+        options.onEncryptedReasoning?.([]); // clear the cache
+        this.stripEncryptedItems(body);
+        response = await llmFetch(url, {
+          method: "POST",
+          headers: this.buildHeaders(),
+          body: JSON.stringify(body),
+          ...(options.signal ? { signal: options.signal } : {}),
+        });
+        if (!response.ok) {
+          const retryError = await response.text();
+          throw new Error(`OpenAI Responses API error ${response.status}: ${sanitizeApiError(retryError)}`);
+        }
+      } else {
+        throw new Error(`OpenAI Responses API error ${response.status}: ${sanitizeApiError(errorText)}`);
+      }
     }
 
     if (!options.stream) {
@@ -690,6 +800,8 @@ export class OpenAIProvider extends BaseLLMProvider {
           }
         }
       }
+      // Emit encrypted reasoning items for multi-turn context
+      this.emitEncryptedReasoning(json, options);
       const text = this.extractResponsesText(json);
       if (text) yield text;
       return this.extractResponsesUsage(json);
@@ -729,8 +841,11 @@ export class OpenAIProvider extends BaseLLMProvider {
 
         try {
           const parsed = JSON.parse(data) as Record<string, unknown>;
+          // Use SSE event: field if present, otherwise fall back to the JSON type field.
+          // Some proxies strip SSE event names and only forward data lines.
+          const eventType = currentEvent || (parsed.type as string) || "";
 
-          switch (currentEvent) {
+          switch (eventType) {
             case "response.output_text.delta": {
               const delta = parsed.delta as string | undefined;
               if (delta) yield delta;
@@ -748,10 +863,11 @@ export class OpenAIProvider extends BaseLLMProvider {
               break;
             }
             case "response.completed": {
-              // Extract usage from the completed response
+              // Extract usage and encrypted reasoning from the completed response
               const resp = parsed.response as Record<string, unknown> | undefined;
               if (resp) {
                 streamUsage = this.extractResponsesUsage(resp);
+                this.emitEncryptedReasoning(resp, options);
               }
               break;
             }
@@ -774,8 +890,13 @@ export class OpenAIProvider extends BaseLLMProvider {
     const url = `${this.baseUrl}/responses`;
     const useStream = !!options.onToken;
     const body = this.buildResponsesBody(messages, { ...options, stream: useStream });
+    console.log(
+      "[OpenAI chatCompleteResponses] reasoning=%j onThinking=%s",
+      body.reasoning ?? null,
+      !!options.onThinking,
+    );
 
-    const response = await llmFetch(url, {
+    let response = await llmFetch(url, {
       method: "POST",
       headers: this.buildHeaders(),
       body: JSON.stringify(body),
@@ -784,7 +905,24 @@ export class OpenAIProvider extends BaseLLMProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`OpenAI Responses API error ${response.status}: ${sanitizeApiError(errorText)}`);
+      // Retry without encrypted reasoning items if they're stale/corrupt
+      if (response.status === 400 && this.isEncryptedContentError(errorText) && options.encryptedReasoningItems?.length) {
+        console.warn("[OpenAI chatCompleteResponses] Encrypted reasoning items rejected, retrying without them");
+        options.onEncryptedReasoning?.([]); // clear the cache
+        this.stripEncryptedItems(body);
+        response = await llmFetch(url, {
+          method: "POST",
+          headers: this.buildHeaders(),
+          body: JSON.stringify(body),
+          ...(options.signal ? { signal: options.signal } : {}),
+        });
+        if (!response.ok) {
+          const retryError = await response.text();
+          throw new Error(`OpenAI Responses API error ${response.status}: ${sanitizeApiError(retryError)}`);
+        }
+      } else {
+        throw new Error(`OpenAI Responses API error ${response.status}: ${sanitizeApiError(errorText)}`);
+      }
     }
 
     if (!useStream) {
@@ -808,6 +946,8 @@ export class OpenAIProvider extends BaseLLMProvider {
           }
         }
       }
+      // Emit encrypted reasoning items for multi-turn context
+      this.emitEncryptedReasoning(json, options);
       return this.parseResponsesResult(json);
     }
 
@@ -858,8 +998,11 @@ export class OpenAIProvider extends BaseLLMProvider {
 
         try {
           const parsed = JSON.parse(data) as Record<string, unknown>;
+          // Use SSE event: field if present, otherwise fall back to the JSON type field.
+          // Some proxies strip SSE event names and only forward data lines.
+          const eventType = currentEvent || (parsed.type as string) || "";
 
-          switch (currentEvent) {
+          switch (eventType) {
             case "response.output_text.delta": {
               const delta = parsed.delta as string | undefined;
               if (delta) {
@@ -934,6 +1077,7 @@ export class OpenAIProvider extends BaseLLMProvider {
               const resp = parsed.response as Record<string, unknown> | undefined;
               if (resp) {
                 streamUsage = this.extractResponsesUsage(resp);
+                this.emitEncryptedReasoning(resp, options);
                 const status = resp.status as string | undefined;
                 if (status === "incomplete") finishReason = "length";
               }
@@ -983,6 +1127,26 @@ export class OpenAIProvider extends BaseLLMProvider {
       }
     }
     return text;
+  }
+
+  /**
+   * Extract encrypted reasoning items from a Responses API result's output array.
+   * These are opaque `{ type: "reasoning", encrypted_content: "..." }` objects
+   * that can be replayed in the next turn's input for reasoning continuity.
+   */
+  private extractEncryptedReasoningItems(json: Record<string, unknown>): unknown[] {
+    const output = json.output as Array<Record<string, unknown>> | undefined;
+    if (!output) return [];
+    return output.filter(
+      (item) => item.type === "reasoning" && typeof item.encrypted_content === "string",
+    );
+  }
+
+  /** Emit encrypted reasoning items via the callback if present */
+  private emitEncryptedReasoning(json: Record<string, unknown>, options: ChatOptions): void {
+    if (!options.onEncryptedReasoning) return;
+    const items = this.extractEncryptedReasoningItems(json);
+    if (items.length > 0) options.onEncryptedReasoning(items);
   }
 
   /** Extract usage from a Responses API result */

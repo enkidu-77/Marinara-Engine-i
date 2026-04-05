@@ -36,6 +36,12 @@ interface AgentState {
     reaction: string;
     timestamp: number;
   }>;
+  /** How many echo messages are currently revealed (stagger counter) */
+  echoVisibleCount: number;
+  /** Baseline: messages at or below this count are shown without stagger */
+  echoBaseline: number;
+  /** Chat ID whose echo messages have been loaded — prevents redundant fetches across remounts */
+  echoLoadedChatId: string | null;
   cyoaChoices: Array<{
     label: string;
     text: string;
@@ -54,6 +60,9 @@ interface AgentState {
   addEchoMessage: (characterName: string, reaction: string) => void;
   setEchoMessages: (messages: Array<{ characterName: string; reaction: string; timestamp: number }>) => void;
   clearEchoMessages: () => void;
+  setEchoVisibleCount: (count: number) => void;
+  setEchoBaseline: (count: number) => void;
+  setEchoLoadedChatId: (chatId: string | null) => void;
   setCyoaChoices: (choices: Array<{ label: string; text: string }>) => void;
   clearCyoaChoices: () => void;
   addDebugEntry: (entry: AgentDebugEntry) => void;
@@ -68,6 +77,9 @@ export const useAgentStore = create<AgentState>((set) => ({
   failedAgentTypes: [],
   thoughtBubbles: [],
   echoMessages: [],
+  echoVisibleCount: 0,
+  echoBaseline: 0,
+  echoLoadedChatId: null,
   cyoaChoices: [],
   debugLog: [],
 
@@ -108,7 +120,11 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   setEchoMessages: (messages) => set({ echoMessages: messages.slice(-100) }),
 
-  clearEchoMessages: () => set({ echoMessages: [] }),
+  clearEchoMessages: () => set({ echoMessages: [], echoVisibleCount: 0, echoBaseline: 0, echoLoadedChatId: null }),
+
+  setEchoVisibleCount: (count) => set({ echoVisibleCount: count }),
+  setEchoBaseline: (count) => set({ echoBaseline: count }),
+  setEchoLoadedChatId: (chatId) => set({ echoLoadedChatId: chatId }),
 
   setCyoaChoices: (choices) => set({ cyoaChoices: choices }),
   clearCyoaChoices: () => set({ cyoaChoices: [] }),
@@ -124,6 +140,9 @@ export const useAgentStore = create<AgentState>((set) => ({
       failedAgentTypes: [],
       thoughtBubbles: [],
       echoMessages: [],
+      echoVisibleCount: 0,
+      echoBaseline: 0,
+      echoLoadedChatId: null,
       cyoaChoices: [],
       debugLog: [],
     }),

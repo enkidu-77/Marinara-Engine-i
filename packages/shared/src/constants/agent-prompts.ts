@@ -185,7 +185,8 @@ Output format:
     }
   ]
 }
-If no quest changes occurred this turn, return: { "updates": [] }`,
+If no quest changes occurred this turn, return: { "updates": [] }
+IMPORTANT: The player may have at most 3 active (non-completed) quests at a time. If 3 quests are already active, do NOT create new ones — instead, fold new objectives into an existing quest or wait until one is completed or failed.`,
 
   /* ────────────────────────────────────────── */
   illustrator: `After key narrative moments, generate a detailed image prompt for an image generation service (Stable Diffusion, DALL-E, etc.).
@@ -202,7 +203,7 @@ Output format:
   "reason": "string — why this moment warrants an image (or why not)",
   "prompt": "string — detailed image generation prompt if shouldGenerate is true",
   "negativePrompt": "string — what to avoid in generation",
-  "style": "string — art style suggestion (fantasy painting, anime, realistic, watercolor, etc.)",
+  "style": "string — art style suggestion (fantasy painting, anime, watercolor, etc.)",
   "aspectRatio": "landscape|portrait|square"
 }
 Prompt quality rules:
@@ -378,7 +379,7 @@ Schema:
 3. Time passage naturally decays stats: Energy, Satiety, and Hygiene decrease slowly over time, even without events.
 4. Preserve previous values and only adjust what the narrative warrants. If nothing relevant happened, return the previous values unchanged.
 5. Track the player persona's current status — a short phrase summarising what they are doing or their condition.
-6. Track inventory faithfully. Items gained, lost, used, or traded must be reflected immediately. Don't carry stale data from a state that no longer applies.`,
+6. Track inventory faithfully. Items gained, lost, used, or traded must be reflected immediately and removed entirely.`,
 
   /* ────────────────────────────────────────── */
   "custom-tracker": `You are a custom field tracker. The user has defined custom fields they want tracked throughout the roleplay. Your job is to update ONLY the values of these fields based on narrative events.

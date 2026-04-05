@@ -2454,7 +2454,8 @@ function AdvancedParametersSection({
     setPromptOpen(false);
   };
 
-  const get = <K extends keyof ChatParameters>(key: K): ChatParameters[K] => params[key] ?? defaults[key];
+  const get = <K extends keyof ChatParameters>(key: K): ChatParameters[K] =>
+    key in params && params[key] !== undefined ? params[key] : defaults[key];
 
   const set = <K extends keyof ChatParameters>(key: K, value: ChatParameters[K]) => {
     updateMeta.mutate({ id: chat.id, chatParameters: { ...params, [key]: value } });

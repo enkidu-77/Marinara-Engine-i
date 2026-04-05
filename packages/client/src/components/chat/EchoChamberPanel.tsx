@@ -87,54 +87,61 @@ export function EchoChamberPanel() {
   }, [chat, agentConfigs]);
 
   // ── Timed reveal: show one more message every 30 s ──
-  const [visibleCount, setVisibleCount] = useState(0);
-  const prevLenRef = useRef(echoMessages.length);
+  // visibleCount and baseline live in the Zustand store so they survive
+  // component remounts (e.g. when the panel is toggled or the HUD re-renders).
+  const visibleCount = useAgentStore((s) => s.echoVisibleCount);
+  const baseline = useAgentStore((s) => s.echoBaseline);
+  const setEchoVisibleCount = useAgentStore((s) => s.setEchoVisibleCount);
+  const setEchoBaseline = useAgentStore((s) => s.setEchoBaseline);
 
   // ── Load persisted echo messages when chat changes ──
   const setEchoMessages = useAgentStore((s) => s.setEchoMessages);
   const clearEchoMessages = useAgentStore((s) => s.clearEchoMessages);
-  const loadedChatRef = useRef<string | null>(null);
+  const echoLoadedChatId = useAgentStore((s) => s.echoLoadedChatId);
+  const setEchoLoadedChatId = useAgentStore((s) => s.setEchoLoadedChatId);
 
   useEffect(() => {
-    if (!activeChatId || !echoEnabled) {
-      loadedChatRef.current = null;
-      return;
-    }
-    if (loadedChatRef.current === activeChatId) return;
+    if (!activeChatId || !echoEnabled) return;
+    // Already loaded for this chat (survives component remounts)
+    if (echoLoadedChatId === activeChatId) return;
 
-    // Chat changed — clear old messages and reset reveal
-    clearEchoMessages();
-    setVisibleCount(0);
-    prevLenRef.current = 0;
-    loadedChatRef.current = activeChatId;
+    const previousChatId = echoLoadedChatId;
+    setEchoLoadedChatId(activeChatId);
+
+    // Only clear + reset when switching to a *different* chat
+    if (previousChatId !== null && previousChatId !== activeChatId) {
+      clearEchoMessages();
+    }
 
     api
       .get<Array<{ characterName: string; reaction: string; timestamp: number }>>(
         `/agents/echo-messages/${activeChatId}`,
       )
       .then((msgs) => {
+        if (useAgentStore.getState().echoLoadedChatId !== activeChatId) return; // stale
         if (msgs.length > 0) {
           setEchoMessages(msgs);
           // Show all loaded messages immediately (no stagger for persisted data)
-          setVisibleCount(msgs.length);
-          prevLenRef.current = msgs.length;
+          setEchoVisibleCount(msgs.length);
+          setEchoBaseline(msgs.length);
         }
       })
       .catch(() => {
         /* silently ignore load failures */
       });
-  }, [activeChatId, echoEnabled, setEchoMessages, clearEchoMessages]);
+  }, [activeChatId, echoEnabled, echoLoadedChatId, setEchoLoadedChatId, setEchoMessages, clearEchoMessages, setEchoVisibleCount, setEchoBaseline]);
 
-  useEffect(() => {
-    if (echoMessages.length < prevLenRef.current) setVisibleCount(0);
-    prevLenRef.current = echoMessages.length;
-  }, [echoMessages.length]);
-
+  // When new messages arrive beyond the baseline, stagger them one-by-one.
   useEffect(() => {
     if (visibleCount >= echoMessages.length) return;
-    const id = setTimeout(() => setVisibleCount((c) => c + 1), MESSAGE_INTERVAL_MS);
+    // Messages at or below the baseline are already visible
+    if (visibleCount < baseline) {
+      setEchoVisibleCount(baseline);
+      return;
+    }
+    const id = setTimeout(() => setEchoVisibleCount(visibleCount + 1), MESSAGE_INTERVAL_MS);
     return () => clearTimeout(id);
-  }, [visibleCount, echoMessages.length]);
+  }, [visibleCount, echoMessages.length, baseline, setEchoVisibleCount]);
 
   // Auto-scroll when a new message becomes visible
   useEffect(() => {

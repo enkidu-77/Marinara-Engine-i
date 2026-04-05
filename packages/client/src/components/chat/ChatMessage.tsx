@@ -44,12 +44,24 @@ const EditTextarea = memo(function EditTextarea({
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
+  const autoResize = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Find the nearest scrollable ancestor so we can freeze its scroll
+    // position while we re-measure the textarea height.
+    const scroller = el.closest("[data-chat-scroll]") as HTMLElement | null;
+    const scrollTop = scroller?.scrollTop ?? 0;
+    el.style.height = "0";
+    el.style.height = el.scrollHeight + "px";
+    if (scroller) scroller.scrollTop = scrollTop;
+  }, []);
+
   useLayoutEffect(() => {
     if (ref.current) {
-      ref.current.style.height = ref.current.scrollHeight + "px";
+      autoResize();
       ref.current.focus({ preventScroll: true });
     }
-  }, []);
+  }, [autoResize]);
 
   const handleSave = useCallback(() => {
     if (ref.current) onSave(ref.current.value);
@@ -60,12 +72,14 @@ const EditTextarea = memo(function EditTextarea({
       <textarea
         ref={ref}
         defaultValue={initialContent.replace(/[\u201C\u201D\u201E\u201F]/g, '"').replace(/[\u2018\u2019]/g, "'")}
+        rows={1}
+        onInput={autoResize}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSave();
           if (e.key === "Escape") onCancel();
         }}
-        className="w-full resize-none rounded-lg bg-black/30 px-3 py-2 text-white outline-none ring-1 ring-white/20 focus:ring-blue-400/50"
-        style={{ fontSize, lineHeight: 1.5, fieldSizing: "content" } as React.CSSProperties}
+        className="w-full resize-none overflow-y-hidden rounded-lg bg-black/30 px-3 py-2 text-white outline-none ring-1 ring-white/20 focus:ring-blue-400/50"
+        style={{ fontSize, lineHeight: 1.5 }}
       />
       <div className="flex items-center gap-1.5 justify-end">
         <button
@@ -359,9 +373,19 @@ function renderContent(
   // but preserve newlines inside <style> blocks (they're harmless in CSS
   // and injecting <br> tags would corrupt the stylesheet).
   // Also skip newlines that sit between HTML tags (source formatting only).
-  const withBreaks = stripped.replace(/(<style[\s\S]*?<\/style>)|(>\s*)\n(\s*<)|\n/gi, (m, styleBlock, pre, post) =>
-    styleBlock ? styleBlock : pre ? `${pre}${post}` : '<br style="display:block;margin:0.2em 0">',
+  // First, protect newlines inside attribute values (e.g. multi-line style="")
+  // by temporarily replacing them with a placeholder.
+  const ATTR_NL_PLACEHOLDER = "\x00ATTRNL\x00";
+  const attrProtected = stripped.replace(
+    /(<[^>]*?)("[^"]*"|'[^']*')([^>]*>)/g,
+    (_m, before: string, attr: string, after: string) =>
+      before + attr.replace(/\n/g, ATTR_NL_PLACEHOLDER) + after,
   );
+  const withBreaks = attrProtected
+    .replace(/(<style[\s\S]*?<\/style>)|(>\s*)\n(\s*<)|\n/gi, (m, styleBlock, pre, post) =>
+      styleBlock ? styleBlock : pre ? `${pre}${post}` : '<br style="display:block;margin:0.2em 0">',
+    )
+    .replace(new RegExp(ATTR_NL_PLACEHOLDER, "g"), "\n");
 
   // Convert markdown images to <img> before sanitization so DOMPurify validates them.
   // Keep tags minimal (no class/loading) — styling is via .mari-message-content img in CSS

@@ -908,6 +908,7 @@ export function ChatRoleplaySurface({
             <div className="relative z-10 flex-1 overflow-hidden">
               <div
                 ref={scrollRef}
+                data-chat-scroll
                 className={cn(
                   "rpg-chat-messages-mobile mari-messages-scroll relative h-full overflow-y-auto overflow-x-hidden pb-1 pt-4",
                   centerCompact ? "px-3" : "px-3 md:px-[15%]",

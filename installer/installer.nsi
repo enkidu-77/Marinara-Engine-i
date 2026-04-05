@@ -9,6 +9,9 @@
 !include "FileFunc.nsh"
 !include "WinMessages.nsh"
 
+; ── Download plugin (replaces PowerShell Invoke-WebRequest to reduce AV false positives) ──
+!include "inetc.nsh"
+
 ; ── App metadata ──
 !define APP_NAME "Marinara Engine"
 !define APP_VERSION "1.4.8"
@@ -16,6 +19,12 @@
 !define APP_URL "https://github.com/SpicyMarinara/Marinara-Engine"
 !define REPO_URL "https://github.com/SpicyMarinara/Marinara-Engine.git"
 !define DEFAULT_DIR "$LOCALAPPDATA\MarinaraEngine"
+
+; ── Prerequisite download URLs ──
+; Pin to known-good versions so the installer is deterministic and doesn't
+; need PowerShell/GitHub API calls (a major AV false-positive trigger).
+!define GIT_DOWNLOAD_URL "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
+!define NODE_DOWNLOAD_URL "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi"
 
 Name "${APP_NAME}"
 OutFile "Marinara-Engine-Installer-${APP_VERSION}.exe"
@@ -104,16 +113,16 @@ Section "Install" SecInstall
   DetailPrint "═══ Step 1/6: Checking prerequisites ═══"
   DetailPrint ""
   DetailPrint "Looking for Git..."
-  nsExec::ExecToStack 'cmd /c where git'
+  nsExec::ExecToStack 'where git'
   Pop $GIT_OK
   Pop $1 ; discard stdout
   ${If} $GIT_OK != 0
     DetailPrint "Git not found — attempting automatic install..."
     DetailPrint "Downloading Git for Windows (this may take a minute)..."
-    ; Download Git installer via PowerShell
-    nsExec::ExecToLog 'cmd /c powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $$rel = Invoke-RestMethod -Uri ''https://api.github.com/repos/git-for-windows/git/releases/latest'' -UseBasicParsing; $$asset = $$rel.assets | Where-Object { $$_.name -match ''64-bit\.exe$$'' } | Select-Object -First 1; Invoke-WebRequest -Uri $$asset.browser_download_url -OutFile ''$TEMP\git-install.exe'' -UseBasicParsing"'
+    ; Download Git installer via native NSIS inetc plugin (avoids PowerShell AV triggers)
+    inetc::get /CAPTION "Downloading Git for Windows" /BANNER "Please wait..." "${GIT_DOWNLOAD_URL}" "$TEMP\git-install.exe" /END
     Pop $0
-    ${If} $0 != 0
+    ${If} $0 != "OK"
       MessageBox MB_YESNO|MB_ICONEXCLAMATION "\
 Git could not be downloaded automatically.$\r$\n$\r$\n\
 Would you like to open the Git download page to install it manually?" IDYES openGit IDNO abortGit
@@ -125,14 +134,14 @@ Would you like to open the Git download page to install it manually?" IDYES open
         Abort "Installation cancelled — Git is required."
     ${EndIf}
     DetailPrint "Installing Git (this may request admin permissions)..."
-    nsExec::ExecToLog 'cmd /c "$TEMP\git-install.exe" /VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"'
+    nsExec::ExecToLog '"$TEMP\git-install.exe" /VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"'
     Pop $0
     Delete "$TEMP\git-install.exe"
     ; Refresh PATH from registry so we can find the newly installed Git
     ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
     ReadRegStr $2 HKCU "Environment" "Path"
     System::Call 'Kernel32::SetEnvironmentVariable(t "PATH", t "$1;$2")i'
-    nsExec::ExecToStack 'cmd /c where git'
+    nsExec::ExecToStack 'where git'
     Pop $GIT_OK
     Pop $1
     ${If} $GIT_OK != 0
@@ -148,15 +157,16 @@ Please restart your computer and run this installer again."
 
   ; ── Check for Node.js ──
   DetailPrint "Looking for Node.js..."
-  nsExec::ExecToStack 'cmd /c where node'
+  nsExec::ExecToStack 'where node'
   Pop $NODE_OK
   Pop $1
   ${If} $NODE_OK != 0
     DetailPrint "Node.js not found — attempting automatic install..."
     DetailPrint "Downloading Node.js LTS (this may take a minute)..."
-    nsExec::ExecToLog 'cmd /c powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri ''https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi'' -OutFile ''$TEMP\node-install.msi'' -UseBasicParsing"'
+    ; Download Node.js via native NSIS inetc plugin (avoids PowerShell AV triggers)
+    inetc::get /CAPTION "Downloading Node.js LTS" /BANNER "Please wait..." "${NODE_DOWNLOAD_URL}" "$TEMP\node-install.msi" /END
     Pop $0
-    ${If} $0 != 0
+    ${If} $0 != "OK"
       MessageBox MB_YESNO|MB_ICONEXCLAMATION "\
 Node.js could not be downloaded automatically.$\r$\n$\r$\n\
 Would you like to open the Node.js download page to install it manually?" IDYES openNode IDNO abortNode
@@ -168,14 +178,14 @@ Would you like to open the Node.js download page to install it manually?" IDYES 
         Abort "Installation cancelled — Node.js is required."
     ${EndIf}
     DetailPrint "Installing Node.js LTS (this may request admin permissions)..."
-    nsExec::ExecToLog 'cmd /c msiexec /i "$TEMP\node-install.msi" /qb'
+    nsExec::ExecToLog 'msiexec /i "$TEMP\node-install.msi" /qb'
     Pop $0
     Delete "$TEMP\node-install.msi"
     ; Refresh PATH
     ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
     ReadRegStr $2 HKCU "Environment" "Path"
     System::Call 'Kernel32::SetEnvironmentVariable(t "PATH", t "$1;$2")i'
-    nsExec::ExecToStack 'cmd /c where node'
+    nsExec::ExecToStack 'where node'
     Pop $NODE_OK
     Pop $1
     ${If} $NODE_OK != 0
@@ -192,16 +202,18 @@ Please restart your computer and run this installer again."
 
   ; ── Check for pnpm ──
   DetailPrint "Looking for pnpm..."
-  nsExec::ExecToStack 'cmd /c where pnpm'
+  nsExec::ExecToStack 'where pnpm'
   Pop $PNPM_OK
   Pop $1
   ${If} $PNPM_OK != 0
     DetailPrint "Installing pnpm..."
-    nsExec::ExecToLog 'cmd /c npm install -g pnpm'
+    nsExec::ExecToLog 'npm install -g pnpm'
     Pop $0
     ${If} $0 != 0
       DetailPrint "pnpm install via npm failed, trying corepack..."
-      nsExec::ExecToLog 'cmd /c corepack enable && corepack prepare pnpm@latest --activate'
+      nsExec::ExecToLog 'corepack enable'
+      Pop $0
+      nsExec::ExecToLog 'corepack prepare pnpm@latest --activate'
       Pop $0
     ${EndIf}
   ${EndIf}
@@ -214,7 +226,7 @@ Please restart your computer and run this installer again."
   DetailPrint ""
   ${If} ${FileExists} "$INSTDIR\.git\*.*"
     DetailPrint "Existing installation found — pulling latest version..."
-    nsExec::ExecToLog 'cmd /c cd /d "$INSTDIR" && git pull'
+    nsExec::ExecToLog 'git pull'
     Pop $0
     ${If} $0 != 0
       DetailPrint "Warning: git pull failed. Continuing with existing files."
@@ -226,12 +238,12 @@ Please restart your computer and run this installer again."
     DetailPrint "This may take 2-5 minutes depending on your internet speed."
     DetailPrint ""
     ; Clone with --depth 1 for faster initial download, then unshallow
-    nsExec::ExecToLog 'cmd /c git clone --depth 1 "${REPO_URL}" "$INSTDIR\repo-temp" 2>&1'
+    nsExec::ExecToLog 'git clone --depth 1 "${REPO_URL}" "$INSTDIR\repo-temp"'
     Pop $0
     ${If} $0 != 0
       ; Retry without depth limit in case shallow clone failed
       DetailPrint "Shallow clone failed, trying full clone..."
-      nsExec::ExecToLog 'cmd /c git clone "${REPO_URL}" "$INSTDIR\repo-temp" 2>&1'
+      nsExec::ExecToLog 'git clone "${REPO_URL}" "$INSTDIR\repo-temp"'
       Pop $0
       ${If} $0 != 0
         MessageBox MB_OK|MB_ICONSTOP "\
@@ -244,10 +256,10 @@ ${APP_URL}"
     ${EndIf}
     DetailPrint "Moving files into place..."
     ; robocopy returns 0-7 for success, 8+ for errors
-    nsExec::ExecToLog 'cmd /c robocopy "$INSTDIR\repo-temp" "$INSTDIR" /E /MOVE /NFL /NDL /NJH /NJS'
+    nsExec::ExecToLog 'robocopy "$INSTDIR\repo-temp" "$INSTDIR" /E /MOVE /NFL /NDL /NJH /NJS'
     Pop $0
     ; Unshallow so future git pull works
-    nsExec::ExecToLog 'cmd /c cd /d "$INSTDIR" && git fetch --unshallow 2>nul'
+    nsExec::ExecToLog 'git fetch --unshallow'
     Pop $0
     DetailPrint "Download complete."
   ${EndIf}
@@ -257,7 +269,7 @@ ${APP_URL}"
   DetailPrint "═══ Step 3/6: Installing dependencies ═══"
   DetailPrint ""
   DetailPrint "Running pnpm install (this may take 2-5 minutes)..."
-  nsExec::ExecToLog 'cmd /c cd /d "$INSTDIR" && pnpm install 2>&1'
+  nsExec::ExecToLog 'pnpm install'
   Pop $0
   ${If} $0 != 0
     DetailPrint "Warning: pnpm install reported issues."
@@ -267,7 +279,7 @@ This sometimes happens due to network issues.$\r$\n\
 Would you like to retry?" IDYES retryInstall IDNO skipRetryInstall
     retryInstall:
       DetailPrint "Retrying pnpm install..."
-      nsExec::ExecToLog 'cmd /c cd /d "$INSTDIR" && pnpm install 2>&1'
+      nsExec::ExecToLog 'pnpm install'
       Pop $0
     skipRetryInstall:
   ${EndIf}
@@ -278,7 +290,7 @@ Would you like to retry?" IDYES retryInstall IDNO skipRetryInstall
   DetailPrint "═══ Step 4/6: Building the application ═══"
   DetailPrint ""
   DetailPrint "Building ${APP_NAME} (this may take 1-3 minutes)..."
-  nsExec::ExecToLog 'cmd /c cd /d "$INSTDIR" && pnpm build 2>&1'
+  nsExec::ExecToLog 'pnpm build'
   Pop $0
   ${If} $0 != 0
     DetailPrint "Warning: Build reported issues. The app may still work."

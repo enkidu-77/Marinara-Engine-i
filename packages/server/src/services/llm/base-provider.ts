@@ -80,6 +80,10 @@ export interface ChatOptions {
   onResponseParts?: (parts: unknown[]) => void;
   /** OpenRouter: preferred provider for model routing */
   openrouterProvider?: string | null;
+  /** Encrypted reasoning items from a previous Responses API turn to replay for reasoning continuity */
+  encryptedReasoningItems?: unknown[];
+  /** Callback to receive encrypted reasoning items from the current response (store for next turn) */
+  onEncryptedReasoning?: (items: unknown[]) => void;
 }
 
 /** Token usage statistics returned by the model */

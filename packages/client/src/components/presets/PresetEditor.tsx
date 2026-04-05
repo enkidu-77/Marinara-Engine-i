@@ -370,6 +370,11 @@ export function PresetEditor() {
             {/* ── Overview Tab ── */}
             {activeTab === "overview" && (
               <OverviewTab
+                name={localName}
+                onNameChange={(v) => {
+                  setLocalName(v);
+                  markDirty();
+                }}
                 description={localDescription}
                 onDescriptionChange={(v) => {
                   setLocalDescription(v);
@@ -426,6 +431,8 @@ export function PresetEditor() {
 // ═══════════════════════════════════════════════
 
 function OverviewTab({
+  name,
+  onNameChange,
   description,
   onDescriptionChange,
   wrapFormat,
@@ -435,6 +442,8 @@ function OverviewTab({
   sectionCount,
   groupCount,
 }: {
+  name: string;
+  onNameChange: (v: string) => void;
   description: string;
   onDescriptionChange: (v: string) => void;
   wrapFormat: WrapFormat;
@@ -446,6 +455,15 @@ function OverviewTab({
 }) {
   return (
     <>
+      <FieldGroup label="Name" help="The display name for this preset. Used in the Presets panel and chat settings.">
+        <input
+          value={name}
+          onChange={(e) => onNameChange(e.target.value)}
+          placeholder="Preset name…"
+          className="w-full rounded-xl bg-[var(--secondary)] p-3 text-sm text-[var(--foreground)] ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+        />
+      </FieldGroup>
+
       <FieldGroup
         label="Description"
         help="A short summary of what this preset is designed for. Helps you remember its purpose when choosing between presets."

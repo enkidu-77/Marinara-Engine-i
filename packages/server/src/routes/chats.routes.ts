@@ -241,7 +241,27 @@ export async function chatsRoutes(app: FastifyInstance) {
       playerStats: any;
       personaStats: any[];
     }>;
-    let updated = await gameStateStore.updateLatest(req.params.id, fields, manual);
+    // Target the same snapshot the GET endpoint returns — the one for the last
+    // assistant message's active swipe — so edits persist to the row the user
+    // actually sees. Falls back to updateLatest when no messages exist yet.
+    let updated: Awaited<ReturnType<typeof gameStateStore.updateLatest>> = null;
+    const msgs = await storage.listMessages(req.params.id);
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i]!.role === "assistant") {
+        const msg = msgs[i]!;
+        updated = await gameStateStore.updateByMessage(
+          msg.id,
+          msg.activeSwipeIndex,
+          req.params.id,
+          fields,
+          manual,
+        );
+        break;
+      }
+    }
+    if (!updated) {
+      updated = await gameStateStore.updateLatest(req.params.id, fields, manual);
+    }
     // Wipe all manual overrides when explicitly requested
     if (clearOverrides && updated) {
       const { eq } = await import("drizzle-orm");
@@ -888,14 +908,23 @@ export async function chatsRoutes(app: FastifyInstance) {
       await storage.updateMetadata(newChat.id, settingsToKeep);
     }
 
-    // Copy messages from source chat
+    // Copy messages from source chat, using the active swipe's content
     const msgs = await storage.listMessages(req.params.id);
     for (const msg of msgs) {
+      // Resolve the content from the active swipe (may differ from msg.content
+      // if the user swiped to an alternative response)
+      let content = msg.content;
+      if (msg.activeSwipeIndex > 0) {
+        const swipes = await storage.getSwipes(msg.id);
+        const activeSwipe = swipes.find((s: { index: number }) => s.index === msg.activeSwipeIndex);
+        if (activeSwipe) content = activeSwipe.content;
+      }
+
       await storage.createMessage({
         chatId: newChat.id,
         role: msg.role as "user" | "assistant" | "system" | "narrator",
         characterId: msg.characterId,
-        content: msg.content,
+        content,
       });
       // Stop if we hit the specified message
       if (upToMessageId && msg.id === upToMessageId) break;

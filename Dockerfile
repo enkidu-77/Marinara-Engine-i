@@ -28,6 +28,8 @@ COPY packages/server/ packages/server/
 COPY packages/client/ packages/client/
 
 # Build everything: shared → server + client in parallel
+# Increase heap for ARM64 emulation (QEMU) where memory pressure is high
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN pnpm build
 
 # ── Stage 2: Production ──

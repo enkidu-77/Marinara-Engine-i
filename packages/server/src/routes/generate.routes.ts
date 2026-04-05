@@ -118,6 +118,13 @@ export async function generateRoutes(app: FastifyInstance) {
   const regexScriptsStore = createRegexScriptsStorage(app.db);
 
   /**
+   * In-memory cache for OpenAI Responses API encrypted reasoning items.
+   * Keyed by chatId → opaque reasoning items from the last response.
+   * These are replayed on the next turn so the model can continue its reasoning chain.
+   */
+  const encryptedReasoningCache = new Map<string, unknown[]>();
+
+  /**
    * POST /api/generate
    * Streams AI generation via Server-Sent Events.
    */
@@ -345,6 +352,12 @@ export async function generateRoutes(app: FastifyInstance) {
           }
           msg.content = text;
         }
+      }
+
+      // Always collapse 3+ consecutive newlines into a double newline —
+      // these waste tokens and produce messy logs regardless of user regex settings.
+      for (const msg of mappedMessages) {
+        msg.content = msg.content.replace(/\n{3,}/g, "\n\n");
       }
 
       const characterIds: string[] = JSON.parse(chat.characterIds as string);
@@ -2892,15 +2905,14 @@ export async function generateRoutes(app: FastifyInstance) {
       // ── Early exit if client disconnected during knowledge retrieval / injection ──
       if (abortController.signal.aborted) return;
 
-      // Check if tool-use is requested (from chat metadata or input).
-      // Tools are also enabled when agents are active — agents work separately
-      // and may depend on tools (dice rolls, game state, expressions) even if
-      // the user has toggled off the main "tools" setting in chat.
+      // Check if tool-use is requested for the main generation (from chat
+      // metadata or the request body). Agents handle their own tool calls
+      // independently via agent-executor — do NOT enable tools on the main
+      // generation just because agents are active.
       const inputBody = req.body as Record<string, unknown>;
       const enableTools =
         inputBody.enableTools === true ||
-        chatMeta.enableTools === true ||
-        (chatEnableAgents && resolvedAgents.length > 0);
+        chatMeta.enableTools === true;
 
       // Build OpenAI-compatible tool definitions from built-in + custom tools
       let toolDefs: LLMToolDefinition[] | undefined;
@@ -3026,8 +3038,28 @@ export async function generateRoutes(app: FastifyInstance) {
         oocMessages: string[];
         characterId: string | null;
       } | null> => {
+        // Convert mid-prompt system messages to user role.
+        // The assembler enforces SYSTEM → user/assistant alternation, but
+        // post-assembler injections (agents, lorebook depth, author notes,
+        // OOC influences) insert system messages that break this pattern.
+        // Preserve only the leading system block; everything else becomes user.
+        let pastLeadingSystem = false;
+        messagesForGen = messagesForGen.map((m) => {
+          if (!pastLeadingSystem) {
+            if (m.role !== "system") pastLeadingSystem = true;
+            return m;
+          }
+          if (m.role === "system") return { ...m, role: "user" as const };
+          return m;
+        });
+
         // Merge adjacent same-role messages (especially system) before sending to provider
         messagesForGen = mergeAdjacentMessages(messagesForGen as any) as typeof messagesForGen;
+
+        // Collapse 3+ consecutive newlines in all messages to save tokens
+        for (const m of messagesForGen) {
+          m.content = m.content.replace(/\n{3,}/g, "\n\n");
+        }
 
         // Reset per-character accumulators
         fullResponse = "";
@@ -3039,6 +3071,22 @@ export async function generateRoutes(app: FastifyInstance) {
         let usage: LLMUsage | undefined;
         let finishReason: string | undefined;
 
+        // ── SSE keepalive: send periodic comments to prevent proxy timeouts ──
+        // Reasoning models (e.g. GPT-5.4 with xhigh effort) may spend a long time
+        // thinking before the first token arrives. Cloudflare and other reverse
+        // proxies often kill idle connections after ~100s. Sending SSE comments
+        // (`: keepalive`) keeps the connection alive without affecting the client.
+        const keepaliveTimer = setInterval(() => {
+          try {
+            if (!reply.raw.destroyed) {
+              reply.raw.write(": keepalive\n\n");
+            }
+          } catch {
+            // Connection already closed — ignore
+          }
+        }, 15_000);
+
+        try {
         // Emit debug prompt if requested (only for first character to avoid spam)
         if (input.debugMode && targetCharId === respondingCharIds[0]) {
           const debugPayload = {
@@ -3060,17 +3108,30 @@ export async function generateRoutes(app: FastifyInstance) {
             },
           };
           reply.raw.write(`data: ${JSON.stringify({ type: "debug_prompt", data: debugPayload })}\n\n`);
+
+          // Compute effective values that will actually be sent in the request body.
+          // Some providers suppress temperature/topP for certain model+effort combos.
+          const effModel = conn.model.toLowerCase();
+          const tempSuppressed =
+            (conn.provider === "openai" || conn.provider === "openrouter") &&
+            (/^(o1|o3|o4)/.test(effModel) ||
+              (effModel.startsWith("gpt-5") && !!resolvedEffort));
+          const effTemp = tempSuppressed ? "N/A" : temperature;
+          const effTopP = tempSuppressed ? "N/A" : topP;
+
           console.log("\n[Debug] Prompt sent to model (%d messages):", messagesForGen.length);
           console.log(
-            "  Model: %s (%s)  Temp: %s  MaxTokens: %s  TopP: %s  TopK: %s  Thinking: %s  Effort: %s",
+            "  Model: %s (%s)  Temp: %s  MaxTokens: %s  TopP: %s  TopK: %s  Thinking: %s  Effort: %s  Verbosity: %s  Stream: %s",
             conn.model,
             conn.provider,
-            temperature,
+            effTemp,
             maxTokens,
-            topP,
+            effTopP,
             topK || "default",
             showThoughts,
             resolvedEffort ?? "none",
+            verbosity ?? "default",
+            input.streaming,
           );
           for (const m of messagesForGen) {
             console.log("  [%s] %s", m.role.toUpperCase(), m.content);
@@ -3210,8 +3271,10 @@ export async function generateRoutes(app: FastifyInstance) {
                 reasoningEffort: resolvedEffort ?? undefined,
                 verbosity: verbosity ?? undefined,
                 onThinking,
-                onToken,
+                onToken: input.streaming ? onToken : undefined,
                 signal: abortController.signal,
+                encryptedReasoningItems: encryptedReasoningCache.get(input.chatId),
+                onEncryptedReasoning: (items) => encryptedReasoningCache.set(input.chatId, items),
               });
             } catch (err: any) {
               // If the error was caused by an abort, cancel silently and skip post-processing.
@@ -3331,8 +3394,10 @@ export async function generateRoutes(app: FastifyInstance) {
                 reasoningEffort: resolvedEffort ?? undefined,
                 verbosity: verbosity ?? undefined,
                 onThinking,
-                onToken,
+                onToken: input.streaming ? onToken : undefined,
                 signal: abortController.signal,
+                encryptedReasoningItems: encryptedReasoningCache.get(input.chatId),
+                onEncryptedReasoning: (items) => encryptedReasoningCache.set(input.chatId, items),
               });
               if (finalResult.content && fullResponse.length === prevLen) {
                 writeContentChunked(finalResult.content);
@@ -3358,7 +3423,7 @@ export async function generateRoutes(app: FastifyInstance) {
             topK: topK || undefined,
             frequencyPenalty: frequencyPenalty || undefined,
             presencePenalty: presencePenalty || undefined,
-            stream: true,
+            stream: input.streaming,
             enableCaching: conn.enableCaching === "true",
             enableThinking,
             reasoningEffort: resolvedEffort ?? undefined,
@@ -3369,6 +3434,8 @@ export async function generateRoutes(app: FastifyInstance) {
               geminiResponseParts = parts;
             },
             signal: abortController.signal,
+            encryptedReasoningItems: encryptedReasoningCache.get(input.chatId),
+            onEncryptedReasoning: (items) => encryptedReasoningCache.set(input.chatId, items),
           });
           let result = await gen.next();
           while (!result.done) {
@@ -3583,6 +3650,9 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         return { savedMsg, response: fullResponse, commands: parsedCommands, oocMessages, characterId: targetCharId };
+        } finally {
+          clearInterval(keepaliveTimer);
+        }
       };
 
       // ────────────────────────────────────────
@@ -4117,6 +4187,19 @@ export async function generateRoutes(app: FastifyInstance) {
                     }
                   }
                 }
+                // Auto-remove quests that are fully completed (all objectives done)
+                for (let i = quests.length - 1; i >= 0; i--) {
+                  const q = quests[i];
+                  if (
+                    q.completed &&
+                    Array.isArray(q.objectives) &&
+                    q.objectives.length > 0 &&
+                    q.objectives.every((o: any) => o.completed)
+                  ) {
+                    quests.splice(i, 1);
+                  }
+                }
+
                 // Only persist + send if quests actually changed
                 const changed = JSON.stringify(quests) !== JSON.stringify(originalQuests);
                 if (changed) {

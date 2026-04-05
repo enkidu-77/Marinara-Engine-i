@@ -324,6 +324,7 @@ export function useGenerate() {
       try {
         const debugMode = useUIStore.getState().debugMode;
         const userStatus = useUIStore.getState().userStatus;
+        const streaming = isConversationMode ? false : useUIStore.getState().enableStreaming;
 
         // Flush any pending game-state widget edits so the server sees them before committing
         const flushPatch = useGameStateStore.getState().flushPatch;
@@ -331,7 +332,7 @@ export function useGenerate() {
 
         for await (const event of api.streamEvents(
           "/generate",
-          { ...params, debugMode, userStatus },
+          { ...params, debugMode, userStatus, streaming },
           abortController.signal,
         )) {
           switch (event.type) {

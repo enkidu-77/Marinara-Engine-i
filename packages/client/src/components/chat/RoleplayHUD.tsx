@@ -184,6 +184,26 @@ export function RoleplayHUD({
     return () => setFlushPatch(null);
   }, [flushPatch, setFlushPatch]);
 
+  // Flush pending patches on page unload so edits aren't lost on refresh
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      if (patchTimerRef.current) clearTimeout(patchTimerRef.current);
+      const queued = patchQueueRef.current;
+      if (Object.keys(queued).length === 0) return;
+      const payload = { ...queued, manual: true };
+      patchQueueRef.current = {};
+      // keepalive lets the request outlive the page
+      fetch(`/api/chats/${chatId}/game-state`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [chatId]);
+
   const patchPlayerStats = useCallback(
     (field: string, value: unknown) => {
       const current = gameStateRef.current?.playerStats ?? {
@@ -1063,8 +1083,9 @@ function QuestsWidget({
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // Find the first incomplete objective from the first incomplete quest
-  const mainQuest = quests.find((q) => !q.completed);
+  // Find the first incomplete objective from the most recent incomplete quest
+  const incompleteQuests = quests.filter((q) => !q.completed);
+  const mainQuest = incompleteQuests.length > 0 ? incompleteQuests[incompleteQuests.length - 1] : undefined;
   const currentObjective = mainQuest?.objectives.find((o) => !o.completed);
 
   return (
