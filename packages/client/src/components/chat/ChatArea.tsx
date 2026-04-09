@@ -834,7 +834,16 @@ export function ChatArea() {
     if (i === 0 || !messages) return false;
     const prev = messages[i - 1];
     const curr = messages[i];
-    return prev.role === curr.role && prev.characterId === curr.characterId;
+    if (prev.role !== curr.role || prev.characterId !== curr.characterId) return false;
+    // Break grouping when persona changes between consecutive user messages
+    if (prev.role === "user" && curr.role === "user") {
+      const prevExtra = typeof prev.extra === "string" ? JSON.parse(prev.extra) : (prev.extra ?? {});
+      const currExtra = typeof curr.extra === "string" ? JSON.parse(curr.extra) : (curr.extra ?? {});
+      const prevId = prevExtra.personaSnapshot?.personaId;
+      const currId = currExtra.personaSnapshot?.personaId;
+      if (prevId && currId && prevId !== currId) return false;
+    }
+    return true;
   };
 
   // ═══════════════════════════════════════════════

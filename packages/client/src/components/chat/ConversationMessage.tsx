@@ -324,16 +324,22 @@ export const ConversationMessage = memo(function ConversationMessage({
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
 
-  // Character info
-  const charInfo = message.characterId && characterMap ? characterMap.get(message.characterId) : null;
-  const avatarUrl = isUser ? (personaInfo?.avatarUrl ?? null) : (charInfo?.avatarUrl ?? null);
-  const displayName = isUser ? (personaInfo?.name ?? "You") : (charInfo?.name ?? "Assistant");
-  const nameColor = isUser ? personaInfo?.nameColor : charInfo?.nameColor;
-
+  // Parse extra early so we can access persona snapshot
   const extra = useMemo(() => {
-    if (!message.extra) return {};
+    if (!message.extra) return {} as Record<string, any>;
     return typeof message.extra === "string" ? JSON.parse(message.extra) : message.extra;
   }, [message.extra]);
+
+  // Character info
+  const charInfo = message.characterId && characterMap ? characterMap.get(message.characterId) : null;
+
+  // For user messages, prefer per-message persona snapshot (stored when message was sent)
+  // to preserve the correct persona name/avatar even after switching personas.
+  // Fall back to the current personaInfo prop for older messages without snapshots.
+  const msgPersona = isUser && extra.personaSnapshot ? extra.personaSnapshot : null;
+  const avatarUrl = isUser ? (msgPersona?.avatarUrl ?? personaInfo?.avatarUrl ?? null) : (charInfo?.avatarUrl ?? null);
+  const displayName = isUser ? (msgPersona?.name ?? personaInfo?.name ?? "You") : (charInfo?.name ?? "Assistant");
+  const nameColor = isUser ? (msgPersona?.nameColor ?? personaInfo?.nameColor) : charInfo?.nameColor;
 
   // Remove an attachment from this message (keeps it in gallery)
   const qc = useQueryClient();

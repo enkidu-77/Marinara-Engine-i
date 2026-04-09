@@ -693,7 +693,12 @@ export const ChatMessage = memo(function ChatMessage({
 
   // Resolve character info
   const charInfo = message.characterId && characterMap ? characterMap.get(message.characterId) : null;
-  const userName = personaInfo?.name ?? "You";
+
+  // For user messages, prefer per-message persona snapshot (stored when message was sent)
+  // to preserve the correct persona name/avatar even after switching personas.
+  // Fall back to the current personaInfo prop for older messages without snapshots.
+  const msgPersona = isUser && extra.personaSnapshot ? extra.personaSnapshot : null;
+  const userName = msgPersona?.name ?? personaInfo?.name ?? "You";
   const charName = charInfo?.name ?? message.characterId ?? "Assistant";
 
   const displayContent = useMemo(() => {
@@ -705,11 +710,20 @@ export const ChatMessage = memo(function ChatMessage({
   }, [message.content, isUser, isSystem, applyToAIOutput, messageDepth, userName, charName]);
 
   const displayName = isUser ? userName : charName;
-  const avatarUrl = isUser ? (personaInfo?.avatarUrl ?? null) : (charInfo?.avatarUrl ?? null);
+  const avatarUrl = isUser ? (msgPersona?.avatarUrl ?? personaInfo?.avatarUrl ?? null) : (charInfo?.avatarUrl ?? null);
   const avatarCropStyle = isUser ? {} : getAvatarCropStyle(charInfo?.avatarCrop);
 
   // Resolve colors: character colors for assistant, persona colors for user
-  const msgColors = isUser ? personaInfo : charInfo;
+  // Prefer per-message persona snapshot colors over current persona
+  const msgColors = isUser
+    ? msgPersona
+      ? {
+          nameColor: msgPersona.nameColor,
+          dialogueColor: msgPersona.dialogueColor,
+          boxColor: msgPersona.boxColor,
+        }
+      : personaInfo
+    : charInfo;
   const dialogueColor = msgColors?.dialogueColor;
   const boxBgColor = msgColors?.boxColor;
   const msgNameColor = msgColors?.nameColor;

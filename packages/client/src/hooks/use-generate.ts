@@ -215,6 +215,37 @@ export function useGenerate() {
 
       // Optimistically show the user message in the chat immediately
       if (params.userMessage && !params.impersonate) {
+        // Build persona snapshot for per-message persona tracking
+        const cachedPersonas = qc.getQueryData<
+          Array<{
+            id: string;
+            isActive: string | boolean;
+            name: string;
+            avatarPath?: string | null;
+            nameColor?: string;
+            dialogueColor?: string;
+            boxColor?: string;
+          }>
+        >(characterKeys.personas);
+        const activeChat =
+          qc.getQueryData<any>(chatKeys.detail(params.chatId)) ??
+          (qc.getQueryData<any[]>(chatKeys.list()) ?? []).find((c: any) => c.id === params.chatId);
+        const chatPersonaId = activeChat?.personaId as string | null | undefined;
+        const snapshotPersona = cachedPersonas
+          ? ((chatPersonaId ? cachedPersonas.find((p) => p.id === chatPersonaId) : null) ??
+            cachedPersonas.find((p) => p.isActive === "true" || p.isActive === true))
+          : null;
+        const personaSnapshot = snapshotPersona
+          ? {
+              personaId: snapshotPersona.id,
+              name: snapshotPersona.name,
+              avatarUrl: snapshotPersona.avatarPath || null,
+              nameColor: snapshotPersona.nameColor || null,
+              dialogueColor: snapshotPersona.dialogueColor || null,
+              boxColor: snapshotPersona.boxColor || null,
+            }
+          : null;
+
         const optimisticMsg: Message = {
           id: `__optimistic_${Date.now()}`,
           chatId: params.chatId,
@@ -222,7 +253,7 @@ export function useGenerate() {
           characterId: null,
           content: params.userMessage,
           activeSwipeIndex: 0,
-          extra: { displayText: null, isGenerated: false, tokenCount: null, generationInfo: null },
+          extra: { displayText: null, isGenerated: false, tokenCount: null, generationInfo: null, personaSnapshot },
           createdAt: new Date().toISOString(),
         };
         qc.setQueryData<InfiniteData<Message[]>>(chatKeys.messages(params.chatId), (old) => {

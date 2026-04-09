@@ -275,9 +275,21 @@ export function ConversationView({
       const timeTooFar = prev
         ? new Date(msg.createdAt).getTime() - new Date(prev.createdAt).getTime() > TIME_GAP_MS
         : false;
+      // Break grouping when persona changes between consecutive user messages
+      const personaChanged = (() => {
+        if (!prev || prev.role !== "user" || msg.role !== "user") return false;
+        const prevExtra = typeof prev.extra === "string" ? JSON.parse(prev.extra) : (prev.extra ?? {});
+        const currExtra = typeof msg.extra === "string" ? JSON.parse(msg.extra) : (msg.extra ?? {});
+        const prevId = prevExtra.personaSnapshot?.personaId;
+        const currId = currExtra.personaSnapshot?.personaId;
+        // If either message lacks a snapshot, don't break grouping (legacy messages)
+        if (!prevId || !currId) return false;
+        return prevId !== currId;
+      })();
       const grouped =
         !!prev &&
         !timeTooFar &&
+        !personaChanged &&
         prev.role === msg.role &&
         prev.characterId === msg.characterId &&
         getDayKey(prev.createdAt) === day;

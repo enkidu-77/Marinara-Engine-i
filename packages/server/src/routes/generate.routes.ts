@@ -186,6 +186,26 @@ export async function generateRoutes(app: FastifyInstance) {
         await chats.updateMessageExtra(userMsg.id, { attachments: input.attachments });
       }
 
+      // Snapshot persona info for per-message persona tracking
+      if (userMsg?.id) {
+        const snapshotPersonas = await chars.listPersonas();
+        const snapshotPersona =
+          (chat.personaId ? snapshotPersonas.find((p: any) => p.id === chat.personaId) : null) ??
+          snapshotPersonas.find((p: any) => p.isActive === "true");
+        if (snapshotPersona) {
+          await chats.updateMessageExtra(userMsg.id, {
+            personaSnapshot: {
+              personaId: snapshotPersona.id,
+              name: snapshotPersona.name,
+              avatarUrl: snapshotPersona.avatarPath || null,
+              nameColor: snapshotPersona.nameColor || null,
+              dialogueColor: snapshotPersona.dialogueColor || null,
+              boxColor: snapshotPersona.boxColor || null,
+            },
+          });
+        }
+      }
+
       // Mirror user message to Discord (deferred — personaName resolved later)
       pendingUserDiscordMsg = discordWebhookUrl && input.userMessage ? input.userMessage : "";
     }

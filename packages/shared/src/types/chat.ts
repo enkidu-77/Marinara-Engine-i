@@ -139,6 +139,15 @@ export interface MessageExtra {
   spriteExpressions?: Record<string, string> | null;
   /** Per-swipe CYOA choices from the CYOA Choices agent */
   cyoaChoices?: Array<{ label: string; text: string }> | null;
+  /** Snapshot of the persona that was active when this message was sent (user messages only) */
+  personaSnapshot?: {
+    personaId: string;
+    name: string;
+    avatarUrl?: string | null;
+    nameColor?: string | null;
+    dialogueColor?: string | null;
+    boxColor?: string | null;
+  } | null;
 }
 
 /** Metadata about how a message was generated. */
