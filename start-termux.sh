@@ -106,7 +106,11 @@ if [ -d ".git" ]; then
         if git merge --ff-only origin/main 2>/dev/null; then
             NEW_HEAD=$(git rev-parse HEAD 2>/dev/null)
             if [ "$STASHED" = "1" ]; then
-                git stash pop -q 2>/dev/null || true
+                if ! git stash pop -q 2>/dev/null; then
+                    echo "  [WARN] Stash pop conflicted — resetting to clean HEAD"
+                    git checkout -- . 2>/dev/null || true
+                    git stash drop -q 2>/dev/null || true
+                fi
             fi
             if [ "$NEW_HEAD" != "$TARGET_HEAD" ]; then
                 echo "  [WARN] Update did not land on origin/main. Continuing with current version."
@@ -120,11 +124,25 @@ if [ -d ".git" ]; then
         else
             echo "  [WARN] Could not fast-forward to origin/main. Continuing with current version."
             if [ "$STASHED" = "1" ]; then
-                git stash pop -q 2>/dev/null || true
+                if ! git stash pop -q 2>/dev/null; then
+                    echo "  [WARN] Stash pop conflicted — resetting to clean HEAD"
+                    git checkout -- . 2>/dev/null || true
+                    git stash drop -q 2>/dev/null || true
+                fi
             fi
         fi
     fi
 fi
+
+# ── Guard: validate workspace package.json files ──
+# A previous failed stash-pop or interrupted pnpm add can leave conflict markers
+# in package.json files, causing pnpm install to fail with JSON parse errors.
+for _pj in package.json packages/shared/package.json packages/server/package.json packages/client/package.json; do
+    if [ -f "$_pj" ] && ! node -e "JSON.parse(require('fs').readFileSync('$_pj','utf8'))" 2>/dev/null; then
+        echo "  [WARN] $_pj is corrupted — restoring from git"
+        git checkout -- "$_pj" 2>/dev/null || true
+    fi
+done
 
 # ── Detect stale dist (source updated but dist not rebuilt) ──
 if [ -f "packages/shared/dist/constants/defaults.js" ]; then
@@ -173,8 +191,10 @@ if [ -n "$BS3_DIR" ] && [ -f "$BS3_DIR/build/Release/better_sqlite3.node" ] && \
 else
     # --- Try downloading prebuilt binary ---
     if [ -z "$BS3_DIR" ]; then
+        # better-sqlite3 is already declared in optionalDependencies —
+        # just ensure it's installed without rewriting package.json.
         echo "  [..] Installing better-sqlite3..."
-        pnpm --filter @marinara-engine/server add -O better-sqlite3@"^11.0.0" 2>&1 || true
+        pnpm install --filter @marinara-engine/server 2>&1 || true
         BS3_PKG=$(find node_modules -path "*/better-sqlite3/package.json" -not -path "*/.cache/*" 2>/dev/null | head -1)
         [ -n "$BS3_PKG" ] && BS3_DIR=$(dirname "$BS3_PKG")
     fi
@@ -202,9 +222,10 @@ else
 
     if [ "$USE_SQLJS" = "1" ]; then
         echo "  [..] Using sql.js (pure JavaScript SQLite — no compilation needed)"
-        # Ensure sql.js is installed
+        # sql.js is already declared in optionalDependencies —
+        # just ensure it's installed without rewriting package.json.
         if ! node -e "require.resolve('sql.js')" 2>/dev/null; then
-            pnpm --filter @marinara-engine/server add -O sql.js@"^1.12.0" 2>&1 || true
+            pnpm install --filter @marinara-engine/server 2>&1 || true
         fi
         export DATABASE_DRIVER="sql.js"
         echo "  [OK] sql.js ready"
