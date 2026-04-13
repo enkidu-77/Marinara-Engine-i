@@ -188,70 +188,82 @@ function renderWithSpeakerTags(
 }
 
 /**
- * Bold quoted dialogue within a plain text string (no markdown awareness).
- * Used as a second pass after inline markdown has already been applied.
- */
-function boldDialogueInString(text: string, dialogueColor: string | undefined, keyPrefix: string): ReactNode[] {
-  const regex = /(?:"([^"]+)"|«([^»]+)»)/g;
-  const nodes: ReactNode[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  let key = 0;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
-    }
-    const fullMatch = match[0];
-    const innerText = match[1] ?? match[2] ?? "";
-    const openQuote = fullMatch[0];
-    const closeQuote = fullMatch[fullMatch.length - 1];
-
-    nodes.push(
-      <strong
-        key={`${keyPrefix}${key++}`}
-        style={dialogueColor ? { color: dialogueColor } : undefined}
-        className={!dialogueColor ? "text-white" : undefined}
-      >
-        {openQuote}
-        {innerText}
-        {closeQuote}
-      </strong>,
-    );
-    lastIndex = match.index + fullMatch.length;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-  return nodes.length > 0 ? nodes : [text];
-}
-
-/**
  * Highlight quoted dialogue — text in "" or «» gets bold + colored.
  *
  * Single quotes ('') are intentionally excluded because after curly-quote
  * normalization (' → ') they are indistinguishable from apostrophes,
  * causing false positives like "it's nice, isn't it" being partially bolded.
  *
- * Applies inline markdown FIRST, then walks the resulting ReactNode array
- * and only applies dialogue bolding to plain-string leaf nodes. This
- * prevents dialogue matching from breaking code spans, strikethrough,
- * highlights, and other markdown constructs that may contain quotes.
+ * Detects quote pairs on the RAW text first, then applies inline markdown
+ * within each segment. This ensures that markdown syntax inside dialogue
+ * (e.g. "A *long* day") doesn't split the quote across multiple nodes
+ * and prevent dialogue bolding.
+ *
+ * Code spans (`…`), images (![…](…)), and links ([…](…)) are treated as
+ * protected zones — quotes inside them are not matched as dialogue.
  */
 function highlightDialogue(text: string, dialogueColor?: string): ReactNode[] {
-  // Step 1: apply inline markdown so code spans, bold, italic, etc. become React elements
-  const mdNodes = applyInlineMarkdown(text, "m");
+  // Step 1: Find protected zones where quotes should NOT trigger dialogue detection.
+  // Code spans, images, and links may legitimately contain quotation marks.
+  const protectedRanges: Array<[number, number]> = [];
+  const protectedRe = /`[^`\n]+`|!?\[[^\]]*\]\([^)]+\)/g;
+  let pm: RegExpExecArray | null;
+  while ((pm = protectedRe.exec(text)) !== null) {
+    protectedRanges.push([pm.index, pm.index + pm[0].length]);
+  }
+  const isProtected = (pos: number) => protectedRanges.some(([s, e]) => pos >= s && pos < e);
 
-  // Step 2: walk the nodes — only bold dialogue inside plain-string segments
-  let key = 0;
-  const result: ReactNode[] = [];
-  for (const node of mdNodes) {
-    if (typeof node === "string") {
-      result.push(...boldDialogueInString(node, dialogueColor, `d${key++}`));
-    } else {
-      result.push(node);
+  // Step 2: Find quote pairs, skipping any that start inside a protected zone.
+  const quoteRe = /(?:"([^"]+)"|«([^»]+)»)/g;
+  const quotePairs: Array<{ start: number; end: number }> = [];
+  let qm: RegExpExecArray | null;
+  while ((qm = quoteRe.exec(text)) !== null) {
+    if (!isProtected(qm.index)) {
+      quotePairs.push({ start: qm.index, end: qm.index + qm[0].length });
     }
+  }
+
+  // No dialogue quotes found — just apply markdown and return.
+  if (quotePairs.length === 0) {
+    return applyInlineMarkdown(text, "m");
+  }
+
+  // Step 3: Split text into quoted / non-quoted segments and render.
+  const result: ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+
+  for (const q of quotePairs) {
+    // Non-quoted text before this pair — apply markdown only
+    if (q.start > lastIndex) {
+      result.push(...applyInlineMarkdown(text.slice(lastIndex, q.start), `m${key}`));
+    }
+
+    const raw = text.slice(q.start, q.end);
+    const openQuote = raw[0];
+    const closeQuote = raw[raw.length - 1];
+    const inner = raw.slice(1, -1);
+
+    // Apply markdown inside the quoted text, then wrap in dialogue <strong>
+    const innerNodes = applyInlineMarkdown(inner, `mq${key}`);
+    result.push(
+      <strong
+        key={`d${key++}`}
+        style={dialogueColor ? { color: dialogueColor } : undefined}
+        className={!dialogueColor ? "text-white" : undefined}
+      >
+        {openQuote}
+        {innerNodes}
+        {closeQuote}
+      </strong>,
+    );
+
+    lastIndex = q.end;
+  }
+
+  // Remaining text after the last quote pair
+  if (lastIndex < text.length) {
+    result.push(...applyInlineMarkdown(text.slice(lastIndex), `mt${key}`));
   }
 
   return result;
