@@ -92,18 +92,53 @@ export function CharactersPanel() {
   const createMessage = useCreateMessage(activeChat?.id ?? null);
   const createChat = useCreateChat();
   const queryClient = useQueryClient();
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; charId: string; charName: string } | null>(
-    null,
-  );
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    charId: string;
+    charName: string;
+    firstMes?: string;
+    altGreetings?: string[];
+  } | null>(null);
 
   const quickStartFromCharacter = useCallback(
-    (charId: string, charName: string, mode: "roleplay" | "conversation") => {
+    (
+      charId: string,
+      charName: string,
+      mode: "roleplay" | "conversation",
+      firstMes?: string,
+      altGreetings?: string[],
+    ) => {
       const label = mode === "conversation" ? "Conversation" : "Roleplay";
       createChat.mutate(
         { name: charName ? `${charName} — ${label}` : `New ${label}`, mode, characterIds: [charId] },
         {
-          onSuccess: (chat) => {
+          onSuccess: async (chat) => {
             useChatStore.getState().setActiveChatId(chat.id);
+            // Mirror the wizard's roleplay first-message behavior — without this,
+            // a quick-started roleplay would open with no greeting from the character.
+            if (mode === "roleplay" && firstMes?.trim()) {
+              try {
+                const msg = await api.post<{ id: string }>(`/chats/${chat.id}/messages`, {
+                  role: "assistant",
+                  content: firstMes,
+                  characterId: charId,
+                });
+                if (msg?.id && altGreetings?.length) {
+                  for (const greeting of altGreetings) {
+                    if (greeting.trim()) {
+                      await api.post(`/chats/${chat.id}/messages/${msg.id}/swipes`, {
+                        content: greeting,
+                        silent: true,
+                      });
+                    }
+                  }
+                }
+                queryClient.invalidateQueries({ queryKey: chatKeys.messages(chat.id) });
+              } catch {
+                /* swallow — don't block the chat from opening if greeting injection fails */
+              }
+            }
             useChatStore.getState().setShouldOpenSettings(true);
             useChatStore.getState().setShouldOpenWizard(true);
             useChatStore.getState().setShouldOpenWizardInShortcutMode(true);
@@ -111,7 +146,7 @@ export function CharactersPanel() {
         },
       );
     },
-    [createChat],
+    [createChat, queryClient],
   );
 
   const [search, setSearch] = useState("");
@@ -749,7 +784,15 @@ export function CharactersPanel() {
                             onContextMenu={(e) => {
                               if (selectionMode || assigningToGroup) return;
                               e.preventDefault();
-                              setContextMenu({ x: e.clientX, y: e.clientY, charId: memberId, charName: member.name });
+                              const fullMember = parsedCharacters.find((c) => c.id === memberId);
+                              setContextMenu({
+                                x: e.clientX,
+                                y: e.clientY,
+                                charId: memberId,
+                                charName: member.name,
+                                firstMes: fullMember?.parsed?.first_mes as string | undefined,
+                                altGreetings: (fullMember?.parsed?.alternate_greetings ?? []) as string[],
+                              });
                             }}
                             className="group/member flex cursor-pointer items-center gap-2 rounded-lg p-1.5 transition-all hover:bg-[var(--sidebar-accent)]"
                           >
@@ -861,7 +904,14 @@ export function CharactersPanel() {
               onContextMenu={(e) => {
                 if (selectionMode || assigningToGroup) return;
                 e.preventDefault();
-                setContextMenu({ x: e.clientX, y: e.clientY, charId: char.id, charName });
+                setContextMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  charId: char.id,
+                  charName,
+                  firstMes: char.parsed?.first_mes as string | undefined,
+                  altGreetings: (char.parsed?.alternate_greetings ?? []) as string[],
+                });
               }}
               className={cn(
                 "group flex items-center gap-2.5 rounded-xl p-2 transition-all hover:bg-[var(--sidebar-accent)] cursor-pointer",
@@ -1032,7 +1082,14 @@ export function CharactersPanel() {
             {
               label: "Quick Start Roleplay",
               icon: <Wand2 size="0.75rem" />,
-              onSelect: () => quickStartFromCharacter(contextMenu.charId, contextMenu.charName, "roleplay"),
+              onSelect: () =>
+                quickStartFromCharacter(
+                  contextMenu.charId,
+                  contextMenu.charName,
+                  "roleplay",
+                  contextMenu.firstMes,
+                  contextMenu.altGreetings,
+                ),
             },
             {
               label: "Quick Start Conversation",
