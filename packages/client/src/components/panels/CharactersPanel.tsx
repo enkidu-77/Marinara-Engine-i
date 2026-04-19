@@ -533,27 +533,27 @@ export function CharactersPanel() {
       )}
 
       {/* Actions */}
-      <div className="flex gap-1.5">
+      <div className="flex gap-2">
         <button
           onClick={() => openModal("create-character")}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-pink-400 to-purple-500 px-3 py-2 text-xs font-medium text-white shadow-md shadow-pink-500/15 transition-all hover:shadow-lg hover:shadow-pink-500/25 active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-pink-400 to-purple-500 px-3 py-2.5 text-xs font-medium text-white shadow-md shadow-pink-500/15 transition-all hover:shadow-lg hover:shadow-pink-500/25 active:scale-[0.98]"
           title="New"
         >
-          <Plus size="0.75rem" /> <span className="md:hidden">New</span>
+          <Plus size="0.8125rem" /> <span className="md:hidden">New</span>
         </button>
         <button
           onClick={() => openModal("import-character")}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
           title="Import"
         >
-          <Download size="0.75rem" /> <span className="md:hidden">Import</span>
+          <Download size="0.8125rem" /> <span className="md:hidden">Import</span>
         </button>
         <button
           onClick={() => openModal("character-maker")}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
           title="AI Maker"
         >
-          <Sparkles size="0.75rem" /> <span className="md:hidden">Maker</span>
+          <Sparkles size="0.8125rem" /> <span className="md:hidden">Maker</span>
         </button>
         <button
           onClick={() => {
@@ -565,14 +565,14 @@ export function CharactersPanel() {
             }
           }}
           className={cn(
-            "flex flex-1 items-center justify-center gap-1 rounded-xl px-3 py-2 text-xs font-medium transition-all",
+            "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-medium transition-all",
             selectionMode
               ? "bg-[var(--primary)]/15 text-[var(--primary)] ring-1 ring-[var(--primary)]/30"
               : "bg-[var(--secondary)] text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] hover:bg-[var(--accent)]",
           )}
           title="Select"
         >
-          <Check size="0.75rem" />
+          <Check size="0.8125rem" />
           <span className="md:hidden">Select</span>
         </button>
       </div>
@@ -684,7 +684,7 @@ export function CharactersPanel() {
                 >
                   {/* Group header */}
                   <div
-                    className="group flex items-center gap-2.5 rounded-xl p-2 transition-all hover:bg-[var(--sidebar-accent)] cursor-pointer"
+                    className="group relative flex items-center gap-2.5 rounded-xl p-2 transition-all hover:bg-[var(--sidebar-accent)] cursor-pointer"
                     onClick={() => setExpandedGroupId(isExpanded ? null : group.id)}
                   >
                     <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-400 to-purple-600 text-white shadow-sm">
@@ -712,7 +712,7 @@ export function CharactersPanel() {
                         </>
                       )}
                     </div>
-                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-all group-hover:opacity-100 max-md:opacity-100">
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
                       {activeChat && (
                         <button
                           onClick={(e) => {
@@ -869,7 +869,7 @@ export function CharactersPanel() {
       )}
 
       {!isLoading && filteredCharacters.length === 0 && (
-        <div className="flex flex-col items-center gap-2 py-6 text-center">
+        <div className="flex flex-col items-center gap-2 py-8 text-center">
           <div className="animate-float flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-400/20 to-rose-500/20">
             <User size="1.25rem" className="text-[var(--primary)]" />
           </div>
@@ -915,7 +915,7 @@ export function CharactersPanel() {
                 });
               }}
               className={cn(
-                "group flex items-center gap-2.5 rounded-xl p-2 transition-all hover:bg-[var(--sidebar-accent)] cursor-pointer",
+                "group relative flex items-center gap-2.5 rounded-xl p-2 transition-all hover:bg-[var(--sidebar-accent)] cursor-pointer",
                 selectionMode && isBulkSelected && "ring-1 ring-[var(--primary)]/40 bg-[var(--primary)]/8",
                 isSelected && !assigningToGroup && "ring-1 ring-[var(--primary)]/40 bg-[var(--primary)]/5",
                 assigningToGroup && isInTargetGroup && "ring-1 ring-violet-500/50 bg-violet-500/10",
@@ -1021,7 +1021,7 @@ export function CharactersPanel() {
 
               {/* Actions (hidden during group assign mode) */}
               {!assigningToGroup && !selectionMode && (
-                <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-all group-hover:opacity-100 max-md:opacity-100">
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
                   {activeChat && (
                     <button
                       onClick={(e) => {
@@ -1029,10 +1029,10 @@ export function CharactersPanel() {
                         toggleCharacter(char.id);
                       }}
                       className={cn(
-                        "rounded-lg p-1.5 transition-all",
+                        "rounded-lg p-1.5 transition-all active:scale-90",
                         isSelected
                           ? "text-[var(--destructive)] hover:bg-[var(--destructive)]/15"
-                          : "hover:bg-[var(--accent)] text-[var(--primary)]",
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--primary)]/10 hover:text-[var(--primary)]",
                       )}
                       title={isSelected ? "Remove from chat" : "Add to chat"}
                     >
@@ -1048,10 +1048,10 @@ export function CharactersPanel() {
                         },
                       });
                     }}
-                    className="rounded-lg p-1.5 transition-all hover:bg-sky-400/10 active:scale-90"
-                    title="Duplicate character"
+                    className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-sky-400/10 hover:text-sky-400 active:scale-90"
+                    title="Duplicate"
                   >
-                    <Copy size="0.75rem" className="text-sky-400" />
+                    <Copy size="0.75rem" />
                   </button>
                   <button
                     onClick={(e) => {
@@ -1059,8 +1059,8 @@ export function CharactersPanel() {
                       if (!confirm(`Delete "${char.parsed?.name ?? "this character"}"? This cannot be undone.`)) return;
                       deleteCharacter.mutate(char.id);
                     }}
-                    className="rounded-lg p-1.5 transition-all hover:bg-[var(--destructive)]/15"
-                    title="Delete character"
+                    className="rounded-lg p-1.5 transition-all hover:bg-[var(--destructive)]/15 active:scale-90"
+                    title="Delete"
                   >
                     <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
                   </button>

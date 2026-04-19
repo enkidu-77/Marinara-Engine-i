@@ -4,7 +4,6 @@
 import { useState, useEffect } from "react";
 import {
   useConnections,
-  useCreateConnection,
   useDuplicateConnection,
   useDeleteConnection,
   useUpdateConnection,
@@ -16,7 +15,6 @@ import {
   Plus,
   Trash2,
   Link,
-  Loader2,
   Check,
   Shuffle,
   ExternalLink,
@@ -218,7 +216,6 @@ function SidecarCard() {
 
 export function ConnectionsPanel() {
   const { data: connections, isLoading } = useConnections();
-  const createConnection = useCreateConnection();
   const duplicateConnection = useDuplicateConnection();
   const deleteConnection = useDeleteConnection();
   const updateConnection = useUpdateConnection();
@@ -226,19 +223,9 @@ export function ConnectionsPanel() {
 
   const activeConnectionId = activeChat?.connectionId ?? null;
   const openConnectionDetail = useUIStore((s) => s.openConnectionDetail);
+  const openModal = useUIStore((s) => s.openModal);
   const linkApiBannerDismissed = useUIStore((s) => s.linkApiBannerDismissed);
   const dismissLinkApiBanner = useUIStore((s) => s.dismissLinkApiBanner);
-
-  const handleCreate = () => {
-    createConnection.mutate(
-      { name: "New Connection", provider: "openai", apiKey: "" },
-      {
-        onSuccess: (data: any) => {
-          if (data?.id) openConnectionDetail(data.id);
-        },
-      },
-    );
-  };
 
   return (
     <div className="flex flex-col gap-2 p-3">
@@ -246,11 +233,10 @@ export function ConnectionsPanel() {
       <SidecarCard />
 
       <button
-        onClick={handleCreate}
-        disabled={createConnection.isPending}
-        className="flex items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-medium transition-all active:scale-[0.98] bg-gradient-to-r from-sky-400 to-blue-500 text-white shadow-md shadow-sky-400/15 hover:shadow-lg hover:shadow-sky-400/25 disabled:opacity-50"
+        onClick={() => openModal("create-connection")}
+        className="flex items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-medium transition-all active:scale-[0.98] bg-gradient-to-r from-sky-400 to-blue-500 text-white shadow-md shadow-sky-400/15 hover:shadow-lg hover:shadow-sky-400/25"
       >
-        {createConnection.isPending ? <Loader2 size="0.8125rem" className="animate-spin" /> : <Plus size="0.8125rem" />}
+        <Plus size="0.8125rem" />
         Add Connection
       </button>
 
@@ -319,7 +305,7 @@ export function ConnectionsPanel() {
               key={conn.id}
               onClick={() => openConnectionDetail(conn.id)}
               className={cn(
-                "group flex cursor-pointer items-center gap-3 rounded-xl p-2.5 transition-all hover:bg-[var(--sidebar-accent)]",
+                "group relative flex cursor-pointer items-center gap-3 rounded-xl p-2.5 transition-all hover:bg-[var(--sidebar-accent)]",
                 isSelected && `ring-1 ${colors.ring} bg-[var(--sidebar-accent)]/50`,
               )}
             >
@@ -350,7 +336,7 @@ export function ConnectionsPanel() {
                   {conn.provider} • {conn.model || "No model set"}
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-0.5">
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -360,11 +346,11 @@ export function ConnectionsPanel() {
                     "rounded-lg p-1.5 transition-all active:scale-90",
                     inRandomPool
                       ? "bg-amber-400/15 text-amber-400"
-                      : "text-[var(--muted-foreground)] opacity-0 group-hover:opacity-100 max-md:opacity-100 hover:bg-amber-400/10 hover:text-amber-400",
+                      : "text-[var(--muted-foreground)] hover:bg-amber-400/10 hover:text-amber-400",
                   )}
                   title={inRandomPool ? "In random pool (click to remove)" : "Add to random pool"}
                 >
-                  <Shuffle size="0.8125rem" />
+                  <Shuffle size="0.75rem" />
                 </button>
                 <button
                   onClick={(e) => {
@@ -375,19 +361,21 @@ export function ConnectionsPanel() {
                       },
                     });
                   }}
-                  className="rounded-lg p-1.5 text-[var(--muted-foreground)] opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-all hover:bg-sky-400/10 hover:text-sky-400 active:scale-90"
-                  title="Duplicate connection"
+                  className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-sky-400/10 hover:text-sky-400 active:scale-90"
+                  title="Duplicate"
                 >
-                  <Copy size="0.8125rem" />
+                  <Copy size="0.75rem" />
                 </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (!confirm(`Delete "${conn.name}"? This cannot be undone.`)) return;
                     deleteConnection.mutate(conn.id);
                   }}
-                  className="rounded-lg p-1.5 opacity-0 transition-all hover:bg-[var(--destructive)]/15 group-hover:opacity-100 max-md:opacity-100 active:scale-90"
+                  className="rounded-lg p-1.5 transition-all hover:bg-[var(--destructive)]/15 active:scale-90"
+                  title="Delete"
                 >
-                  <Trash2 size="0.8125rem" className="text-[var(--destructive)]" />
+                  <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
                 </button>
               </div>
             </div>

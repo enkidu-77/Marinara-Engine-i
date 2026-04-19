@@ -41,6 +41,12 @@ const ImportPersonaModal = lazy(() =>
 const PersonaMakerModal = lazy(() =>
   import("../modals/PersonaMakerModal").then((module) => ({ default: module.PersonaMakerModal })),
 );
+const CreateConnectionModal = lazy(() =>
+  import("../modals/CreateConnectionModal").then((module) => ({ default: module.CreateConnectionModal })),
+);
+const CreatePersonaModal = lazy(() =>
+  import("../modals/CreatePersonaModal").then((module) => ({ default: module.CreatePersonaModal })),
+);
 
 export function ModalRenderer() {
   const modal = useUIStore((s) => s.modal);
@@ -83,6 +89,12 @@ export function ModalRenderer() {
       break;
     case "persona-maker":
       content = <PersonaMakerModal open onClose={closeModal} />;
+      break;
+    case "create-connection":
+      content = <CreateConnectionModal open onClose={closeModal} />;
+      break;
+    case "create-persona":
+      content = <CreatePersonaModal open onClose={closeModal} />;
       break;
     case "st-bulk-import":
       content = <STBulkImportModal open onClose={closeModal} />;

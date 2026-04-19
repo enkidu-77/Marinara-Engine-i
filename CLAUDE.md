@@ -40,3 +40,8 @@ Android-specific rule:
 - When changing version numbers, bump root `package.json` first, then run `pnpm version:sync -- --android-version-code <next-code>`.
 - Run `pnpm version:check` before tagging or publishing.
 - Keep `CONTRIBUTING.md` authoritative. Add Claude-specific notes here only when they are operationally useful and not already covered there.
+
+## Frontend Changes
+
+- **Read `packages/client/.instructions.md` before editing any client code.** It is the authoritative reference for architecture, patterns, conventions, and common-mistake avoidance.
+- Validate with `pnpm check` (TypeScript + ESLint). There is no automated test suite.

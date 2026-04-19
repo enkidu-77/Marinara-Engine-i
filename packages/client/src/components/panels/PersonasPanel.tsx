@@ -5,7 +5,6 @@ import { useState, useRef, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import {
   usePersonas,
-  useCreatePersona,
   useDeletePersona,
   useActivatePersona,
   useUploadPersonaAvatar,
@@ -21,7 +20,6 @@ import {
   Plus,
   Trash2,
   User,
-  Loader2,
   Pencil,
   Camera,
   Star,
@@ -71,7 +69,6 @@ function estimateTokens(p: PersonaRow): number {
 
 export function PersonasPanel() {
   const { data: personas, isLoading } = usePersonas();
-  const createPersona = useCreatePersona();
   const deletePersona = useDeletePersona();
   const duplicatePersona = useDuplicatePersona();
   const updatePersona = useUpdatePersona();
@@ -107,7 +104,7 @@ export function PersonasPanel() {
   const isActive = (p: PersonaRow) => p.isActive === true || p.isActive === "true";
 
   const handleCreate = () => {
-    createPersona.mutate({ name: "New Persona", description: "" });
+    openModal("create-persona");
   };
 
   const handleAvatarClick = (e: React.MouseEvent, id: string) => {
@@ -420,29 +417,28 @@ export function PersonasPanel() {
       )}
 
       {/* Actions */}
-      <div className="flex gap-1.5">
+      <div className="flex gap-2">
         <button
           onClick={handleCreate}
-          disabled={createPersona.isPending}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 px-3 py-2 text-xs font-medium text-white shadow-md shadow-emerald-400/15 transition-all hover:shadow-lg hover:shadow-emerald-400/25 active:scale-[0.98] disabled:opacity-50"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 px-3 py-2.5 text-xs font-medium text-white shadow-md shadow-emerald-400/15 transition-all hover:shadow-lg hover:shadow-emerald-400/25 active:scale-[0.98]"
           title="New"
         >
-          {createPersona.isPending ? <Loader2 size="0.75rem" className="animate-spin" /> : <Plus size="0.75rem" />}
+          <Plus size="0.8125rem" />
           <span className="md:hidden">New</span>
         </button>
         <button
           onClick={() => openModal("import-persona")}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
           title="Import"
         >
-          <Download size="0.75rem" /> <span className="md:hidden">Import</span>
+          <Download size="0.8125rem" /> <span className="md:hidden">Import</span>
         </button>
         <button
           onClick={() => openModal("persona-maker")}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
           title="AI Maker"
         >
-          <Sparkles size="0.75rem" /> <span className="md:hidden">Maker</span>
+          <Sparkles size="0.8125rem" /> <span className="md:hidden">Maker</span>
         </button>
         <button
           onClick={() => {
@@ -453,14 +449,14 @@ export function PersonasPanel() {
             }
           }}
           className={cn(
-            "flex flex-1 items-center justify-center gap-1 rounded-xl px-3 py-2 text-xs font-medium transition-all",
+            "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-medium transition-all",
             selectionMode
               ? "bg-emerald-400/15 text-emerald-400 ring-1 ring-emerald-400/30"
               : "bg-[var(--secondary)] text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] hover:bg-[var(--accent)]",
           )}
           title="Select"
         >
-          <Download size="0.75rem" />
+          <Check size="0.8125rem" />
           <span className="md:hidden">Select</span>
         </button>
       </div>
@@ -728,7 +724,7 @@ export function PersonasPanel() {
             <div
               key={persona.id}
               className={cn(
-                "group flex items-center gap-3 rounded-xl p-2.5 transition-all hover:bg-[var(--sidebar-accent)] cursor-pointer",
+                "group relative flex items-center gap-3 rounded-xl p-2.5 transition-all hover:bg-[var(--sidebar-accent)] cursor-pointer",
                 selectionMode && isBulkSelected && "ring-1 ring-emerald-400/40 bg-emerald-400/8",
                 active && "ring-1 ring-emerald-400/40 bg-emerald-400/5",
                 assigningToGroup && isInTargetGroup && "ring-1 ring-violet-500/50 bg-violet-500/10",
@@ -807,29 +803,19 @@ export function PersonasPanel() {
 
               {/* Actions */}
               {!selectionMode && (
-                <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 max-md:opacity-100">
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--sidebar)] px-1 py-0.5 opacity-0 shadow-sm ring-1 ring-[var(--border)] transition-opacity group-hover:opacity-100 max-md:opacity-100">
                   {!active && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         activatePersona.mutate(persona.id);
                       }}
-                      className="rounded-lg p-1.5 text-emerald-400 transition-colors hover:bg-emerald-400/10"
+                      className="rounded-lg p-1.5 text-emerald-400 transition-all active:scale-90 hover:bg-emerald-400/10"
                       title="Set as active"
                     >
-                      <Star size="0.8125rem" />
+                      <Star size="0.75rem" />
                     </button>
                   )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openPersonaDetail(persona.id);
-                    }}
-                    className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-                    title="Edit"
-                  >
-                    <Pencil size="0.8125rem" />
-                  </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -839,10 +825,10 @@ export function PersonasPanel() {
                         },
                       });
                     }}
-                    className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-sky-400/10 hover:text-sky-400"
+                    className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all active:scale-90 hover:bg-sky-400/10 hover:text-sky-400"
                     title="Duplicate"
                   >
-                    <Copy size="0.8125rem" />
+                    <Copy size="0.75rem" />
                   </button>
                   <button
                     onClick={(e) => {
@@ -850,10 +836,10 @@ export function PersonasPanel() {
                       if (!confirm(`Delete "${persona.name}"? This cannot be undone.`)) return;
                       deletePersona.mutate(persona.id);
                     }}
-                    className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/10 hover:text-[var(--destructive)]"
+                    className="rounded-lg p-1.5 transition-all hover:bg-[var(--destructive)]/15 active:scale-90"
                     title="Delete"
                   >
-                    <Trash2 size="0.8125rem" />
+                    <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
                   </button>
                 </div>
               )}
