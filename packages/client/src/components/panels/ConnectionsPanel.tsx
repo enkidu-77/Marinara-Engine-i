@@ -49,12 +49,29 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+function formatRuntimeVariantLabel(variant: string | null): string | null {
+  if (!variant) return null;
+  return variant.replace(/-/g, " ");
+}
+
 function SidecarCard() {
-  const { status, config, modelDownloaded, modelSize, setShowDownloadModal, updateConfig, deleteModel, fetchStatus } =
-    useSidecarStore();
+  const {
+    status,
+    config,
+    modelDownloaded,
+    modelDisplayName,
+    modelSize,
+    startupError,
+    failedRuntimeVariant,
+    setShowDownloadModal,
+    updateConfig,
+    deleteModel,
+    fetchStatus,
+  } = useSidecarStore();
   const isDownloaded = modelDownloaded;
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const activeModelName = isDownloaded ? config.modelPath?.split("/").pop() ?? null : null;
+  const activeModelName = isDownloaded ? modelDisplayName : null;
+  const backendLabel = config.backend === "mlx" ? "MLX" : "GGUF";
 
   // Fetch status on mount (handles HMR store resets and initial load)
   useEffect(() => {
@@ -71,7 +88,7 @@ function SidecarCard() {
           <div className="text-sm font-medium">Local Model</div>
           <div className="text-[0.6875rem] text-[var(--muted-foreground)]">
             {isDownloaded
-              ? `${activeModelName ?? "Model"}${modelSize ? ` • ${formatBytes(modelSize)}` : ""}${
+              ? `${activeModelName ?? "Model"} • ${backendLabel}${modelSize ? ` • ${formatBytes(modelSize)}` : ""}${
                   status === "starting_server"
                     ? " • Starting"
                     : status === "server_error"
@@ -168,6 +185,28 @@ function SidecarCard() {
               />
             </div>
             <span className="text-xs text-[var(--muted-foreground)]">Use for game scene analysis</span>
+          </button>
+        </div>
+      )}
+      {status === "server_error" && (
+        <div className="mt-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
+          <div className="text-[0.6875rem] font-medium text-amber-200">Local runtime unavailable</div>
+          <div className="mt-1 text-[0.6875rem] text-[var(--muted-foreground)]/75">
+            {startupError ?? "Marinara will keep running without the local model until you retry."}
+          </div>
+          {failedRuntimeVariant && (
+            <div className="mt-1 text-[0.6875rem] text-[var(--muted-foreground)]/60">
+              Runtime: {formatRuntimeVariantLabel(failedRuntimeVariant)}
+            </div>
+          )}
+          <button
+            onClick={() => {
+              fetchStatus();
+              setShowDownloadModal(true);
+            }}
+            className="mt-2 rounded-lg bg-amber-500/15 px-2.5 py-1 text-[0.6875rem] font-medium text-amber-200 transition-colors hover:bg-amber-500/25"
+          >
+            Open Local AI Model
           </button>
         </div>
       )}

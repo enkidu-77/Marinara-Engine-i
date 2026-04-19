@@ -1,6 +1,6 @@
 // ──────────────────────────────────────────────
 // Sidecar Store — Client state for the local
-// llama-server runtime + GGUF model manager
+// runtime + model manager across GGUF and MLX
 // ──────────────────────────────────────────────
 
 import { create } from "zustand";
@@ -8,6 +8,8 @@ import type {
   SidecarConfig,
   SidecarCustomModelEntry,
   SidecarDownloadProgress,
+  SidecarModelInfo,
+  SidecarRuntimeDiagnostics,
   SidecarRuntimeInfo,
   SidecarStatus,
   SidecarStatusResponse,
@@ -20,10 +22,17 @@ interface SidecarState {
   status: SidecarStatus;
   config: SidecarConfig;
   modelDownloaded: boolean;
+  modelDisplayName: string | null;
   runtime: SidecarRuntimeInfo;
   inferenceReady: boolean;
   modelSize: number | null;
   logPath: string | null;
+  startupError: string | null;
+  failedRuntimeVariant: string | null;
+  runtimeDiagnostics: SidecarRuntimeDiagnostics | null;
+  platform: string;
+  arch: string;
+  curatedModels: SidecarModelInfo[];
   downloadProgress: SidecarDownloadProgress | null;
   customModels: SidecarCustomModelEntry[];
   customModelsLoading: boolean;
@@ -33,12 +42,14 @@ interface SidecarState {
 
   fetchStatus: () => Promise<void>;
   startDownload: (quantization: SidecarQuantization) => Promise<void>;
-  startCustomDownload: (repo: string, modelPath: string) => Promise<void>;
+  startCustomDownload: (repo: string, modelPath?: string) => Promise<void>;
   listHuggingFaceModels: (repo: string) => Promise<SidecarCustomModelEntry[]>;
   clearCustomModels: () => void;
   cancelDownload: () => Promise<void>;
   deleteModel: () => Promise<void>;
   unloadModel: () => Promise<void>;
+  restartRuntime: () => Promise<void>;
+  reinstallRuntime: () => Promise<void>;
   updateConfig: (
     partial: Partial<Pick<SidecarConfig, "useForTrackers" | "useForGameScene" | "contextSize" | "gpuLayers">>,
   ) => Promise<void>;
@@ -156,10 +167,17 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
   status: "not_downloaded",
   config: { ...SIDECAR_DEFAULT_CONFIG },
   modelDownloaded: false,
-  runtime: { installed: false, build: null, variant: null },
+  modelDisplayName: null,
+  runtime: { installed: false, build: null, variant: null, backend: null },
   inferenceReady: false,
   modelSize: null,
   logPath: null,
+  startupError: null,
+  failedRuntimeVariant: null,
+  runtimeDiagnostics: null,
+  platform: "",
+  arch: "",
+  curatedModels: [],
   downloadProgress: null,
   customModels: [],
   customModelsLoading: false,
@@ -174,10 +192,17 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         status: response.status,
         config: response.config,
         modelDownloaded: response.modelDownloaded,
+        modelDisplayName: response.modelDisplayName,
         runtime: response.runtime,
         inferenceReady: response.inferenceReady,
         modelSize: response.modelSize,
         logPath: response.logPath,
+        startupError: response.startupError ?? null,
+        failedRuntimeVariant: response.failedRuntimeVariant ?? null,
+        runtimeDiagnostics: response.runtimeDiagnostics ?? null,
+        platform: response.platform,
+        arch: response.arch,
+        curatedModels: response.curatedModels,
       };
       set(nextState);
 
@@ -195,6 +220,8 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
   startDownload: async (quantization) => {
     set({
       status: "downloading_model",
+      startupError: null,
+      failedRuntimeVariant: null,
       downloadProgress: {
         phase: "model",
         status: "downloading",
@@ -223,6 +250,8 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
   startCustomDownload: async (repo, modelPath) => {
     set({
       status: "downloading_model",
+      startupError: null,
+      failedRuntimeVariant: null,
       downloadProgress: {
         phase: "model",
         status: "downloading",
@@ -233,7 +262,12 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     });
 
     try {
-      await consumeDownloadStream("/api/sidecar/download/custom", { repo, modelPath }, set, get);
+      await consumeDownloadStream(
+        "/api/sidecar/download/custom",
+        modelPath ? { repo, modelPath } : { repo },
+        set,
+        get,
+      );
     } catch (error) {
       set({
         downloadProgress: {
@@ -283,8 +317,12 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         status: "not_downloaded",
         config: { ...SIDECAR_DEFAULT_CONFIG },
         modelDownloaded: false,
+        modelDisplayName: null,
         inferenceReady: false,
         modelSize: null,
+        startupError: null,
+        failedRuntimeVariant: null,
+        runtimeDiagnostics: null,
       });
       await get().fetchStatus();
     } catch {
@@ -299,6 +337,57 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     } catch {
       // Best-effort unload.
     }
+  },
+
+  restartRuntime: async () => {
+    set({
+      status: "starting_server",
+      startupError: null,
+      failedRuntimeVariant: null,
+      downloadProgress: null,
+    });
+
+    try {
+      await api.post("/sidecar/restart");
+    } catch {
+      // Best-effort: fetchStatus will surface the latest sidecar error.
+    }
+
+    await get().fetchStatus();
+  },
+
+  reinstallRuntime: async () => {
+    set({
+      status: "downloading_runtime",
+      startupError: null,
+      failedRuntimeVariant: null,
+      downloadProgress: {
+        phase: "runtime",
+        status: "downloading",
+        downloaded: 0,
+        total: 0,
+        speed: 0,
+        label: "Reinstalling local runtime",
+      },
+    });
+
+    try {
+      await api.post("/sidecar/reinstall");
+    } catch (error) {
+      set({
+        downloadProgress: {
+          phase: "runtime",
+          status: "error",
+          downloaded: 0,
+          total: 0,
+          speed: 0,
+          error: error instanceof Error ? error.message : "Failed to reinstall the local runtime",
+          label: "Reinstall local runtime",
+        },
+      });
+    }
+
+    await get().fetchStatus();
   },
 
   updateConfig: async (partial) => {

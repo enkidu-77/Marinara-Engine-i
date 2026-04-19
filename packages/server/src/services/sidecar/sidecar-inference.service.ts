@@ -275,12 +275,12 @@ export async function runTrackerPrompt(systemPrompt: string, userPrompt: string)
 }
 
 export async function isInferenceAvailable(): Promise<boolean> {
-  if (!sidecarModelService.getModelFilePath() || !sidecarModelService.isEnabled()) {
+  if (!sidecarModelService.getConfiguredModelRef() || !sidecarModelService.isEnabled()) {
     return false;
   }
 
   try {
-    await sidecarProcessService.syncForCurrentConfig();
+    await sidecarProcessService.syncForCurrentConfig({ suppressKnownFailure: true });
   } catch {
     return false;
   }

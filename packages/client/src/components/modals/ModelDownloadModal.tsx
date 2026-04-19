@@ -2,13 +2,13 @@
 // Model Download Modal
 //
 // Handles curated Gemma downloads plus BYO
-// HuggingFace GGUF selection for the local
-// llama-server sidecar runtime.
+// HuggingFace model selection for the local
+// sidecar runtime.
 // ──────────────────────────────────────────────
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { BrainCircuit, Check, Download, HardDrive, Loader2, Search, Server, X, Zap } from "lucide-react";
-import { SIDECAR_MODELS, type SidecarQuantization } from "@marinara-engine/shared";
+import type { SidecarBackend, SidecarQuantization } from "@marinara-engine/shared";
 import { Modal } from "../ui/Modal.js";
 import { useSidecarStore } from "../../stores/sidecar.store.js";
 
@@ -28,14 +28,33 @@ function formatSpeed(bytesPerSec: number): string {
   return `${formatBytes(bytesPerSec)}/s`;
 }
 
+function formatQuantizationLabel(quantization: SidecarQuantization | null, backend: SidecarBackend): string {
+  if (backend === "mlx") {
+    return quantization === "q4_k_m" ? "4-bit" : "8-bit";
+  }
+  return quantization?.toUpperCase() ?? "Curated";
+}
+
+function formatRuntimeVariantLabel(variant: string | null): string | null {
+  if (!variant) return null;
+  return variant.replace(/-/g, " ");
+}
+
 export function ModelDownloadModal({ open, onClose }: Props) {
   const {
     status,
     config,
     modelDownloaded,
+    modelDisplayName,
     runtime,
     inferenceReady,
     logPath,
+    startupError,
+    failedRuntimeVariant,
+    runtimeDiagnostics,
+    platform,
+    arch,
+    curatedModels,
     downloadProgress,
     customModels,
     customModelsLoading,
@@ -46,20 +65,28 @@ export function ModelDownloadModal({ open, onClose }: Props) {
     clearCustomModels,
     cancelDownload,
     unloadModel,
+    restartRuntime,
+    reinstallRuntime,
+    updateConfig,
     markPrompted,
     fetchStatus,
   } = useSidecarStore();
 
+  const isAppleSilicon = platform === "darwin" && arch === "arm64";
+  const defaultCustomRepo = isAppleSilicon ? "mlx-community/gemma-4-e2b-it-4bit" : "unsloth/gemma-4-E2B-it-GGUF";
   const [selectedQuant, setSelectedQuant] = useState<SidecarQuantization>("q8_0");
-  const [repoInput, setRepoInput] = useState(config.customModelRepo ?? "unsloth/gemma-4-E2B-it-GGUF");
+  const [repoInput, setRepoInput] = useState(config.customModelRepo ?? "");
   const [selectedCustomPath, setSelectedCustomPath] = useState("");
 
+  const activeBackend = runtime.backend ?? config.backend;
+  const isSystemRuntime = runtime.source === "system";
+  const canReinstallRuntime = !isSystemRuntime;
+  const selectedPreset = curatedModels.find((model) => model.quantization === selectedQuant) ?? curatedModels[0] ?? null;
+  const selectedCustomEntry = customModels.find((entry) => entry.path === selectedCustomPath) ?? customModels[0] ?? null;
+  const isCustomRepoValidated = selectedCustomEntry?.path === repoInput.trim();
   const isDownloading = downloadProgress?.status === "downloading";
   const hasModel = modelDownloaded;
-  const activeModelName = useMemo(
-    () => (hasModel ? config.modelPath?.split("/").pop() ?? null : null),
-    [config.modelPath, hasModel],
-  );
+  const activeModelName = hasModel ? modelDisplayName : null;
   const shouldAutoStart = config.useForTrackers || config.useForGameScene;
   const isPreparingServer =
     hasModel &&
@@ -78,8 +105,16 @@ export function ModelDownloadModal({ open, onClose }: Props) {
     void fetchStatus();
     if (config.customModelRepo) {
       setRepoInput(config.customModelRepo);
+    } else {
+      setRepoInput(defaultCustomRepo);
     }
-  }, [open, config.customModelRepo, fetchStatus, clearCustomModels]);
+  }, [open, config.customModelRepo, defaultCustomRepo, fetchStatus, clearCustomModels]);
+
+  useEffect(() => {
+    if (curatedModels.length > 0 && !curatedModels.some((model) => model.quantization === selectedQuant)) {
+      setSelectedQuant(curatedModels[0]!.quantization);
+    }
+  }, [curatedModels, selectedQuant]);
 
   useEffect(() => {
     if (customModels.length > 0 && !customModels.some((entry) => entry.path === selectedCustomPath)) {
@@ -91,18 +126,26 @@ export function ModelDownloadModal({ open, onClose }: Props) {
   const progressPercent = progress && progress.total > 0 ? Math.round((progress.downloaded / progress.total) * 100) : 0;
   const setupLabel =
     progress?.phase === "runtime"
-      ? `Downloading llama.cpp runtime${progress.label ? ` (${progress.label})` : ""}...`
+      ? activeBackend === "mlx"
+        ? `Preparing MLX runtime${progress.label ? ` (${progress.label})` : ""}...`
+        : `Downloading local runtime${progress.label ? ` (${progress.label})` : ""}...`
       : progress?.phase === "model"
         ? `Downloading model${progress.label ? ` (${progress.label})` : ""}...`
-        : isPreparingServer
+      : isPreparingServer
           ? "Starting local runtime..."
           : "Setting up local runtime...";
   const setupDescription =
     progress?.phase === "model"
-      ? "Downloading your selected GGUF and preparing it for local use."
+      ? isAppleSilicon
+        ? "Saving your selected MLX repo and preparing it for local use."
+        : "Downloading your selected GGUF and preparing it for local use."
       : progress?.phase === "runtime"
-        ? "Downloading the official llama.cpp runtime for this device."
-        : "Loading the model and starting the local llama-server. This can take a few seconds.";
+        ? activeBackend === "mlx"
+          ? "Downloading a private uv bootstrap and creating an isolated MLX environment inside Marinara's sidecar runtime folder."
+          : "Downloading the official local runtime for this device."
+        : activeBackend === "mlx"
+          ? "Starting the MLX server and populating Marinara's local model cache. The first run can take a few minutes."
+          : "Loading the model and starting the local sidecar server. This can take a few seconds.";
   const runtimeStatusLabel = canFinish
     ? "Ready"
     : isSetupBusy
@@ -110,7 +153,9 @@ export function ModelDownloadModal({ open, onClose }: Props) {
       : status === "server_error"
         ? "Setup error"
         : runtime.installed
-          ? "Installed"
+          ? isSystemRuntime
+            ? "Using system runtime"
+            : "Installed"
           : "Not downloaded yet";
 
   const handleSkip = () => {
@@ -124,9 +169,9 @@ export function ModelDownloadModal({ open, onClose }: Props) {
   };
 
   const handleCustomDownload = () => {
-    if (!repoInput.trim() || !selectedCustomPath) return;
+    if (!repoInput.trim()) return;
     markPrompted();
-    void startCustomDownload(repoInput.trim(), selectedCustomPath);
+    void startCustomDownload(repoInput.trim(), isAppleSilicon ? undefined : selectedCustomPath);
   };
 
   const handleListModels = async () => {
@@ -156,12 +201,13 @@ export function ModelDownloadModal({ open, onClose }: Props) {
           </div>
           <div className="text-sm text-[var(--muted-foreground)]">
             <p>
-              Marinara Engine can run a local llama.cpp sidecar for trackers, scene analysis, and game-state helpers
-              without spending main-model tokens.
+              Marinara Engine can run a local sidecar for trackers, scene analysis, and game-state helpers without
+              spending main-model tokens.
             </p>
             <p className="mt-1.5 text-xs text-[var(--muted-foreground)]/70">
-              Runtime downloads are automatic per platform. You can use the curated Gemma 4 presets or any GGUF hosted
-              on HuggingFace.
+              {isAppleSilicon
+                ? "On Apple Silicon Macs, curated Gemma presets use MLX-native models. Marinara downloads its own private uv bootstrap automatically and keeps the MLX runtime inside its sidecar folder. Custom HuggingFace models on this path must also be MLX-native repos."
+                : "Runtime downloads are automatic per platform. You can use the curated Gemma 4 presets or any GGUF hosted on HuggingFace."}
             </p>
           </div>
         </div>
@@ -176,8 +222,10 @@ export function ModelDownloadModal({ open, onClose }: Props) {
                 <div className="text-sm font-medium text-green-300">{activeModelName ?? "Model Installed"}</div>
                 <div className="text-xs text-[var(--muted-foreground)]/70">
                   {config.customModelRepo
-                    ? `Custom model from ${config.customModelRepo}`
-                    : `${config.quantization?.toUpperCase() ?? "Curated"} Gemma 4 preset`}
+                    ? config.backend === "mlx"
+                      ? `Custom MLX repo: ${config.customModelRepo}`
+                      : `Custom GGUF from ${config.customModelRepo}`
+                    : `${formatQuantizationLabel(config.quantization, config.backend)} Gemma 4 ${config.backend === "mlx" ? "MLX" : "GGUF"} preset`}
                 </div>
               </div>
             </div>
@@ -193,7 +241,7 @@ export function ModelDownloadModal({ open, onClose }: Props) {
             <span>Status: {runtimeStatusLabel}</span>
             {isSetupBusy && (
               <span>
-                Setup in progress. Marinara is still downloading the runtime or starting the local llama-server.
+                Setup in progress. Marinara is still preparing the runtime or starting the local sidecar server.
               </span>
             )}
             {runtime.installed && (
@@ -201,9 +249,49 @@ export function ModelDownloadModal({ open, onClose }: Props) {
                 Runtime build: {runtime.build} • {runtime.variant}
               </span>
             )}
+            {isSystemRuntime && runtime.systemPath && <span>Using system llama-server: {runtime.systemPath}</span>}
             {status === "server_error" && logPath && <span>Log: {logPath}</span>}
           </div>
         </div>
+
+        {status === "server_error" && (
+          <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
+            <div className="text-sm font-medium text-amber-200">Local runtime failed to start</div>
+            <div className="mt-1 text-xs text-[var(--muted-foreground)]/85">
+              Marinara will keep working without the local model until you retry or change settings.
+            </div>
+            <div className="mt-3 flex flex-col gap-1 text-xs text-[var(--muted-foreground)]/75">
+              {failedRuntimeVariant && <span>Runtime: {formatRuntimeVariantLabel(failedRuntimeVariant)}</span>}
+              {startupError && <span>Error: {startupError}</span>}
+              <span>Open this panel to retry startup, switch models, or temporarily disable local helpers.</span>
+              {logPath && <span>Log: {logPath}</span>}
+            </div>
+            <div className="mt-3 flex gap-2 max-sm:flex-col">
+              <button
+                onClick={() => void restartRuntime()}
+                className="flex items-center justify-center gap-2 rounded-xl bg-amber-500/15 px-4 py-2.5 text-sm font-medium text-amber-200 transition-colors hover:bg-amber-500/25"
+              >
+                <Loader2 size="0.875rem" />
+                Retry Startup
+              </button>
+              {canReinstallRuntime && (
+                <button
+                  onClick={() => void reinstallRuntime()}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-amber-500/20 px-4 py-2.5 text-sm text-amber-100 transition-colors hover:bg-amber-500/10"
+                >
+                  <Download size="0.875rem" />
+                  Reinstall Runtime
+                </button>
+              )}
+              <button
+                onClick={() => void updateConfig({ useForTrackers: false, useForGameScene: false })}
+                className="flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm text-[var(--muted-foreground)] transition-colors hover:bg-[var(--secondary)]"
+              >
+                Continue Without Local AI
+              </button>
+            </div>
+          </div>
+        )}
 
         {isSetupBusy && (
           <div className="rounded-xl border border-purple-400/25 bg-purple-500/5 p-4">
@@ -249,11 +337,11 @@ export function ModelDownloadModal({ open, onClose }: Props) {
           <>
             <div className="flex flex-col gap-2">
               <span className="text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]/60">
-                Curated Gemma 4 Presets
+                {isAppleSilicon ? "Curated Gemma 4 Presets for Apple Silicon" : "Curated Gemma 4 Presets"}
               </span>
-              {SIDECAR_MODELS.map((model) => (
+              {curatedModels.map((model) => (
                 <label
-                  key={model.quantization}
+                  key={`${model.backend}-${model.quantization}`}
                   className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors ${
                     selectedQuant === model.quantization
                       ? "border-purple-400/50 bg-purple-500/5"
@@ -300,22 +388,34 @@ export function ModelDownloadModal({ open, onClose }: Props) {
               ))}
               <button
                 onClick={handleCuratedDownload}
-                className="mt-1 flex items-center justify-center gap-2 rounded-xl bg-purple-500/15 px-4 py-2.5 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-500/25"
+                disabled={!selectedPreset}
+                className="mt-1 flex items-center justify-center gap-2 rounded-xl bg-purple-500/15 px-4 py-2.5 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-500/25 disabled:opacity-50"
               >
                 <Zap size="0.875rem" />
-                {hasModel ? "Switch to Curated Model" : "Download Curated Model"}
+                {hasModel ? "Switch to Curated Preset" : "Use Curated Preset"}
               </button>
             </div>
 
             <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/50 p-3">
               <div className="text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]/60">
-                Use Your Own Model From HuggingFace
+                {isAppleSilicon ? "Use Your Own MLX Model From HuggingFace" : "Use Your Own Model From HuggingFace"}
+              </div>
+              <div className="mt-2 text-xs text-[var(--muted-foreground)]/70">
+                {isAppleSilicon
+                  ? "Enter an MLX-native HuggingFace repo. Marinara will validate it, then let the MLX runtime pull and cache it locally on first startup."
+                  : "Enter a GGUF repo on HuggingFace, list the available files, and choose the one you want to download."}
               </div>
               <div className="mt-3 flex flex-col gap-2">
                 <div className="flex gap-2 max-sm:flex-col">
                   <input
                     value={repoInput}
-                    onChange={(event) => setRepoInput(event.target.value)}
+                    onChange={(event) => {
+                      setRepoInput(event.target.value);
+                      if (customModels.length > 0 || customModelsError) {
+                        clearCustomModels();
+                        setSelectedCustomPath("");
+                      }
+                    }}
                     placeholder="owner/repo"
                     className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 text-sm outline-none transition-colors focus:border-purple-400/50"
                   />
@@ -325,7 +425,7 @@ export function ModelDownloadModal({ open, onClose }: Props) {
                     className="flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] px-4 py-2 text-sm text-[var(--foreground)] transition-colors hover:bg-[var(--secondary)] disabled:opacity-50"
                   >
                     {customModelsLoading ? <Loader2 size="0.875rem" className="animate-spin" /> : <Search size="0.875rem" />}
-                    List Models
+                    {isAppleSilicon ? "Validate Repo" : "List Models"}
                   </button>
                 </div>
 
@@ -335,7 +435,18 @@ export function ModelDownloadModal({ open, onClose }: Props) {
                   </div>
                 )}
 
-                {customModels.length > 0 && (
+                {isAppleSilicon && selectedCustomEntry && (
+                  <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3">
+                    <div className="text-sm font-medium text-emerald-300">{selectedCustomEntry.filename}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[var(--muted-foreground)]/75">
+                      {selectedCustomEntry.quantizationLabel && <span>{selectedCustomEntry.quantizationLabel}</span>}
+                      {selectedCustomEntry.sizeBytes && <span>{formatBytes(selectedCustomEntry.sizeBytes)}</span>}
+                      <span>MLX repo validated</span>
+                    </div>
+                  </div>
+                )}
+
+                {!isAppleSilicon && customModels.length > 0 && (
                   <>
                     <select
                       value={selectedCustomPath}
@@ -359,6 +470,17 @@ export function ModelDownloadModal({ open, onClose }: Props) {
                       {hasModel ? "Switch to Selected GGUF" : "Download Selected GGUF"}
                     </button>
                   </>
+                )}
+
+                {isAppleSilicon && (
+                  <button
+                    onClick={handleCustomDownload}
+                    disabled={!repoInput.trim() || customModelsLoading || !isCustomRepoValidated}
+                    className="flex items-center justify-center gap-2 rounded-xl bg-sky-500/15 px-4 py-2.5 text-sm font-medium text-sky-300 transition-colors hover:bg-sky-500/25 disabled:opacity-50"
+                  >
+                    <Download size="0.875rem" />
+                    {hasModel ? "Switch to Validated MLX Repo" : "Use Validated MLX Repo"}
+                  </button>
                 )}
               </div>
             </div>
@@ -398,6 +520,34 @@ export function ModelDownloadModal({ open, onClose }: Props) {
             </>
           )}
         </div>
+
+        {runtimeDiagnostics && (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/50 p-3">
+            <div className="text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]/60">Diagnostics</div>
+            <div className="mt-2 flex flex-col gap-1 text-xs text-[var(--muted-foreground)]/75">
+              {runtimeDiagnostics.gpuVendors.length > 0 && (
+                <span>Detected GPU vendors: {runtimeDiagnostics.gpuVendors.join(", ")}</span>
+              )}
+              <span>
+                Backend hints:
+                {runtimeDiagnostics.preferCuda ? " CUDA" : ""}
+                {runtimeDiagnostics.preferHip ? " HIP" : ""}
+                {runtimeDiagnostics.preferRocm ? " ROCm" : ""}
+                {runtimeDiagnostics.preferSycl ? " SYCL" : ""}
+                {runtimeDiagnostics.preferVulkan ? " Vulkan" : ""}
+                {!runtimeDiagnostics.preferCuda &&
+                !runtimeDiagnostics.preferHip &&
+                !runtimeDiagnostics.preferRocm &&
+                !runtimeDiagnostics.preferSycl &&
+                !runtimeDiagnostics.preferVulkan
+                  ? " none"
+                  : ""}
+              </span>
+              {runtimeDiagnostics.systemLlamaPath && <span>System llama-server: {runtimeDiagnostics.systemLlamaPath}</span>}
+              {runtimeDiagnostics.launchCommand && <span>Last launch command: {runtimeDiagnostics.launchCommand}</span>}
+            </div>
+          </div>
+        )}
 
         {!hasModel && !isSetupBusy && (
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/50 p-3">
