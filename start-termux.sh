@@ -72,34 +72,41 @@ fi
 
 # ── Check pnpm ──
 PNPM_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).packageManager?.split('@')[1] || '10.30.3'")
-PNPM_USE_COREPACK=0
+PNPM_RUNNER="pnpm"
 
 run_pnpm() {
-    if [ "$PNPM_USE_COREPACK" = "1" ]; then
-        corepack pnpm "$@"
+    if [ "$PNPM_RUNNER" = "corepack" ]; then
+        corepack "pnpm@${PNPM_VERSION}" "$@"
+    elif [ "$PNPM_RUNNER" = "npx" ]; then
+        npx --yes "pnpm@${PNPM_VERSION}" "$@"
     else
         pnpm "$@"
     fi
 }
 
 if command -v corepack &> /dev/null; then
-    corepack enable >/dev/null 2>&1 || true
     echo "  [..] Aligning pnpm to ${PNPM_VERSION} via Corepack..."
-    if corepack prepare "pnpm@${PNPM_VERSION}" --activate >/dev/null 2>&1; then
-        PNPM_USE_COREPACK=1
-    else
-        echo "  [WARN] Corepack could not activate pnpm ${PNPM_VERSION} - falling back to npm..."
-        npm install -g "pnpm@${PNPM_VERSION}" >/dev/null
-    fi
-else
-    CURRENT_PNPM_VERSION=$(pnpm -v 2>/dev/null || true)
-    if [ -z "$CURRENT_PNPM_VERSION" ] || [ "$CURRENT_PNPM_VERSION" != "$PNPM_VERSION" ]; then
-        echo "  [..] Aligning pnpm to ${PNPM_VERSION}..."
-        npm install -g "pnpm@${PNPM_VERSION}" >/dev/null
+    CURRENT_PNPM_VERSION=$(corepack "pnpm@${PNPM_VERSION}" --version 2>/dev/null || true)
+    if [ "$CURRENT_PNPM_VERSION" = "$PNPM_VERSION" ]; then
+        PNPM_RUNNER="corepack"
     fi
 fi
 
-CURRENT_PNPM_VERSION=$(run_pnpm --version 2>/dev/null || true)
+if [ "$PNPM_RUNNER" = "pnpm" ]; then
+    CURRENT_PNPM_VERSION=$(pnpm --version 2>/dev/null || true)
+    if [ "$CURRENT_PNPM_VERSION" != "$PNPM_VERSION" ]; then
+        CURRENT_PNPM_VERSION=""
+    fi
+fi
+
+if [ -z "$CURRENT_PNPM_VERSION" ]; then
+    echo "  [..] Using temporary pnpm ${PNPM_VERSION} via npx..."
+    CURRENT_PNPM_VERSION=$(npx --yes "pnpm@${PNPM_VERSION}" --version 2>/dev/null || true)
+    if [ "$CURRENT_PNPM_VERSION" = "$PNPM_VERSION" ]; then
+        PNPM_RUNNER="npx"
+    fi
+fi
+
 if [ -z "$CURRENT_PNPM_VERSION" ] || [ "$CURRENT_PNPM_VERSION" != "$PNPM_VERSION" ]; then
     echo "  [ERROR] Failed to make pnpm ${PNPM_VERSION} available."
     exit 1

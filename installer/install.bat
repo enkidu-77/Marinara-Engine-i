@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+cd /d "%~dp0\.."
 title Marinara Engine - Installer
 color 0A
 
@@ -67,7 +68,8 @@ node -v
 
 set "PNPM_VERSION=10.30.3"
 for /f "usebackq delims=" %%i in (`node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).packageManager?.split('@')[1] || '10.30.3'"`) do set "PNPM_VERSION=%%i"
-set "PNPM_USE_COREPACK="
+set "PNPM_RUNNER=pnpm"
+set "CURRENT_PNPM_VERSION="
 
 :: -- Git --
 where git >nul 2>&1
@@ -100,36 +102,45 @@ echo  [OK] Git installed successfully
 :git_ok
 echo  [OK] Git found
 
-:: -- Install pnpm if needed --
+:: -- Resolve pinned pnpm without changing global state --
 where corepack >nul 2>&1
-if not errorlevel 1 goto :install_pnpm_corepack
+if not errorlevel 1 (
+    echo  [..] Aligning pnpm to %PNPM_VERSION% via Corepack...
+    for /f "usebackq delims=" %%i in (`corepack pnpm@%PNPM_VERSION% --version 2^>nul`) do set "CURRENT_PNPM_VERSION=%%i"
+    if /I "!CURRENT_PNPM_VERSION!"=="%PNPM_VERSION%" (
+        set "PNPM_RUNNER=corepack"
+    ) else (
+        set "CURRENT_PNPM_VERSION="
+    )
+)
 
-where pnpm >nul 2>&1
-if errorlevel 1 goto :install_pnpm_npm
-for /f "usebackq delims=" %%i in (`pnpm -v`) do set "CURRENT_PNPM_VERSION=%%i"
-if /I "%CURRENT_PNPM_VERSION%"=="%PNPM_VERSION%" goto :pnpm_ok
+if not defined CURRENT_PNPM_VERSION (
+    where pnpm >nul 2>&1
+    if not errorlevel 1 (
+        for /f "usebackq delims=" %%i in (`pnpm --version 2^>nul`) do set "CURRENT_PNPM_VERSION=%%i"
+        if /I not "!CURRENT_PNPM_VERSION!"=="%PNPM_VERSION%" (
+            set "CURRENT_PNPM_VERSION="
+        )
+    )
+)
 
-:install_pnpm_npm
-echo  [..] Installing pnpm %PNPM_VERSION%...
-call npm install -g pnpm@%PNPM_VERSION%
-if errorlevel 1 (
-    set "INSTALL_ERROR=Failed to install pnpm %PNPM_VERSION%. Please run: npm install -g pnpm@%PNPM_VERSION%"
+if not defined CURRENT_PNPM_VERSION (
+    echo  [..] Using temporary pnpm %PNPM_VERSION% via npx...
+    for /f "usebackq delims=" %%i in (`npx --yes pnpm@%PNPM_VERSION% --version 2^>nul`) do set "CURRENT_PNPM_VERSION=%%i"
+    if /I "!CURRENT_PNPM_VERSION!"=="%PNPM_VERSION%" (
+        set "PNPM_RUNNER=npx"
+    ) else (
+        set "CURRENT_PNPM_VERSION="
+    )
+)
+
+if not defined CURRENT_PNPM_VERSION (
+    set "INSTALL_ERROR=Failed to start pnpm %PNPM_VERSION% via Corepack or npx."
     goto :fatal
 )
-goto :pnpm_ok
-
-:install_pnpm_corepack
-echo  [..] Aligning pnpm to %PNPM_VERSION% via Corepack...
-corepack enable >nul 2>&1
-call corepack prepare pnpm@%PNPM_VERSION% --activate
-if errorlevel 1 (
-    echo  [WARN] Corepack could not activate pnpm %PNPM_VERSION% - falling back to npm...
-    goto :install_pnpm_npm
-)
-set "PNPM_USE_COREPACK=1"
 
 :pnpm_ok
-echo  [OK] pnpm %PNPM_VERSION% ready
+echo  [OK] pnpm !CURRENT_PNPM_VERSION! ready
 
 :: -- Clone repository --
 echo.
@@ -212,10 +223,14 @@ pause
 goto :eof
 
 :run_pnpm
-if defined PNPM_USE_COREPACK (
-    call corepack pnpm %*
+if /I "%PNPM_RUNNER%"=="corepack" (
+    call corepack pnpm@%PNPM_VERSION% %*
 ) else (
-    call pnpm %*
+    if /I "%PNPM_RUNNER%"=="npx" (
+        call npx --yes pnpm@%PNPM_VERSION% %*
+    ) else (
+        call pnpm %*
+    )
 )
 exit /b %errorlevel%
 

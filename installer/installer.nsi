@@ -95,7 +95,7 @@ Future updates: Open Settings in the app and click $\"Check for Updates$\"."
 Var GIT_OK
 Var NODE_OK
 Var PNPM_OK
-Var COREPACK_OK
+Var PNPM_RUNNER
 
 Function LaunchApp
   ExecShell "" "$INSTDIR\start.bat"
@@ -217,35 +217,32 @@ Please restart your computer and run this installer again."
 
   ; ── Check for pnpm ──
   DetailPrint "Ensuring pnpm ${PNPM_VERSION}..."
+  StrCpy $PNPM_RUNNER ""
   nsExec::ExecToStack 'where corepack'
-  Pop $COREPACK_OK
+  Pop $0
   Pop $1
-  ${If} $COREPACK_OK == 0
-    DetailPrint "Using Corepack to activate pnpm ${PNPM_VERSION}..."
-    nsExec::ExecToLog 'cmd /c corepack enable'
-    Pop $0
-    nsExec::ExecToLog 'cmd /c corepack prepare pnpm@${PNPM_VERSION} --activate'
-    Pop $0
-    ${If} $0 != 0
-      MessageBox MB_OK|MB_ICONSTOP "pnpm ${PNPM_VERSION} could not be prepared via Corepack.$\r$\n$\r$\nPlease install Node.js 20+ and run the installer again."
-      Abort
-    ${EndIf}
-    nsExec::ExecToStack 'cmd /c corepack pnpm --version'
+  ${If} $0 == 0
+    DetailPrint "Trying pinned pnpm ${PNPM_VERSION} via Corepack..."
+    nsExec::ExecToStack 'cmd /c corepack pnpm@${PNPM_VERSION} --version'
     Pop $PNPM_OK
     Pop $1
-  ${Else}
-    DetailPrint "Corepack not found — installing pnpm ${PNPM_VERSION} globally..."
-    nsExec::ExecToLog 'cmd /c npm install -g pnpm@${PNPM_VERSION}'
-    Pop $0
-    ${If} $0 != 0
-      MessageBox MB_OK|MB_ICONSTOP "pnpm ${PNPM_VERSION} could not be installed.$\r$\n$\r$\nPlease install pnpm ${PNPM_VERSION} manually or update Node.js to a build that includes Corepack."
-      Abort
+    ${If} $PNPM_OK == 0
+      StrCpy $PNPM_RUNNER "corepack"
     ${EndIf}
-    nsExec::ExecToStack 'cmd /c pnpm --version'
-    Pop $PNPM_OK
-    Pop $1
   ${EndIf}
-  ${If} $PNPM_OK != 0
+  ${If} $PNPM_RUNNER == ""
+    DetailPrint "Falling back to temporary pnpm ${PNPM_VERSION} via npx..."
+    nsExec::ExecToStack 'cmd /c npx --yes pnpm@${PNPM_VERSION} --version'
+    Pop $PNPM_OK
+    Pop $1
+    ${If} $PNPM_OK == 0
+      StrCpy $PNPM_RUNNER "npx"
+    ${Else}
+      MessageBox MB_OK|MB_ICONSTOP "pnpm ${PNPM_VERSION} could not be started via Corepack or npx.$\r$\n$\r$\nPlease install Node.js 20+ and run the installer again."
+      Abort
+    ${EndIf}
+  ${EndIf}
+  ${If} $PNPM_RUNNER == ""
     MessageBox MB_OK|MB_ICONSTOP "pnpm ${PNPM_VERSION} is still unavailable after setup.$\r$\n$\r$\nPlease restart your computer and run the installer again."
     Abort
   ${EndIf}
@@ -301,11 +298,11 @@ ${APP_URL}"
   DetailPrint "═══ Step 3/6: Installing dependencies ═══"
   DetailPrint ""
   DetailPrint "Running pnpm install (this may take 2-5 minutes)..."
-  ${If} $COREPACK_OK == 0
-    nsExec::ExecToLog 'cmd /c corepack pnpm install'
+  ${If} $PNPM_RUNNER == "corepack"
+    nsExec::ExecToLog 'cmd /c corepack pnpm@${PNPM_VERSION} install'
     Pop $0
   ${Else}
-    nsExec::ExecToLog 'cmd /c pnpm install'
+    nsExec::ExecToLog 'cmd /c npx --yes pnpm@${PNPM_VERSION} install'
     Pop $0
   ${EndIf}
   ${If} $0 != 0
@@ -316,11 +313,11 @@ This sometimes happens due to network issues.$\r$\n\
 Would you like to retry?" IDYES retryInstall IDNO skipRetryInstall
     retryInstall:
       DetailPrint "Retrying pnpm install..."
-      ${If} $COREPACK_OK == 0
-        nsExec::ExecToLog 'cmd /c corepack pnpm install'
+      ${If} $PNPM_RUNNER == "corepack"
+        nsExec::ExecToLog 'cmd /c corepack pnpm@${PNPM_VERSION} install'
         Pop $0
       ${Else}
-        nsExec::ExecToLog 'cmd /c pnpm install'
+        nsExec::ExecToLog 'cmd /c npx --yes pnpm@${PNPM_VERSION} install'
         Pop $0
       ${EndIf}
     skipRetryInstall:
@@ -332,11 +329,11 @@ Would you like to retry?" IDYES retryInstall IDNO skipRetryInstall
   DetailPrint "═══ Step 4/6: Building the application ═══"
   DetailPrint ""
   DetailPrint "Building ${APP_NAME} (this may take 1-3 minutes)..."
-  ${If} $COREPACK_OK == 0
-    nsExec::ExecToLog 'cmd /c corepack pnpm build'
+  ${If} $PNPM_RUNNER == "corepack"
+    nsExec::ExecToLog 'cmd /c corepack pnpm@${PNPM_VERSION} build'
     Pop $0
   ${Else}
-    nsExec::ExecToLog 'cmd /c pnpm build'
+    nsExec::ExecToLog 'cmd /c npx --yes pnpm@${PNPM_VERSION} build'
     Pop $0
   ${EndIf}
   ${If} $0 != 0

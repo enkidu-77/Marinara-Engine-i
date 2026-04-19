@@ -4,7 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import { APP_VERSION } from "@marinara-engine/shared";
 import { execFile } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { promisify } from "util";
 import { getMonorepoRoot } from "../config/runtime-config.js";
@@ -20,6 +20,7 @@ const GITHUB_RELEASE_BY_TAG_API = (tag: string) => `${GITHUB_API_BASE}/releases/
 const UPDATE_REMOTE = "origin";
 const UPDATE_BRANCH = "main";
 const UPDATE_REF = `${UPDATE_REMOTE}/${UPDATE_BRANCH}`;
+const DEFAULT_PNPM_VERSION = "10.30.3";
 
 // ── Cached release info (15-min TTL) ──
 let cachedRelease: {
@@ -159,6 +160,65 @@ function buildRequestHeaders() {
     Accept: "application/vnd.github.v3+json",
     "User-Agent": `MarinaraEngine/${APP_VERSION}`,
   };
+}
+
+function getPinnedPnpmVersion(root: string): string {
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf-8")) as {
+      packageManager?: string;
+    };
+    return pkg.packageManager?.split("@")[1] || DEFAULT_PNPM_VERSION;
+  } catch {
+    return DEFAULT_PNPM_VERSION;
+  }
+}
+
+type PnpmRunner = {
+  command: string;
+  prefixArgs: string[];
+};
+
+async function resolvePinnedPnpmRunner(root: string): Promise<PnpmRunner> {
+  const pnpmVersion = getPinnedPnpmVersion(root);
+  const shell = process.platform === "win32";
+
+  try {
+    const { stdout } = await execFileAsync("corepack", [`pnpm@${pnpmVersion}`, "--version"], {
+      cwd: root,
+      timeout: 20_000,
+      shell,
+    });
+    if (stdout.trim() === pnpmVersion) {
+      return { command: "corepack", prefixArgs: [`pnpm@${pnpmVersion}`] };
+    }
+  } catch {
+    // Fall through to npx.
+  }
+
+  try {
+    const { stdout } = await execFileAsync("npx", ["--yes", `pnpm@${pnpmVersion}`, "--version"], {
+      cwd: root,
+      timeout: 60_000,
+      shell,
+    });
+    if (stdout.trim() === pnpmVersion) {
+      return { command: "npx", prefixArgs: ["--yes", `pnpm@${pnpmVersion}`] };
+    }
+  } catch {
+    // Fall through to the final error below.
+  }
+
+  throw new Error(`Could not start pnpm ${pnpmVersion} via Corepack or npx.`);
+}
+
+async function runPinnedPnpm(root: string, args: string[], timeout: number) {
+  const runner = await resolvePinnedPnpmRunner(root);
+  await execFileAsync(runner.command, [...runner.prefixArgs, ...args], {
+    cwd: root,
+    timeout,
+    shell: process.platform === "win32",
+  });
+  return { runner, pnpmVersion: getPinnedPnpmVersion(root) };
 }
 
 async function resolveLatestReleaseFromGitHub(signal: AbortSignal) {
@@ -359,7 +419,6 @@ export async function updatesRoutes(app: FastifyInstance) {
 
         // If the commit we're running matches HEAD and version matches, truly up to date
         if (sourceCommit && currentCommitHash && sourceCommit === currentCommitHash) {
-          const { readFileSync } = await import("fs");
           try {
             const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf-8"));
             if ((pkg.version as string) === APP_VERSION) {
@@ -373,19 +432,10 @@ export async function updatesRoutes(app: FastifyInstance) {
       }
 
       // Step 2: pnpm install
-      // shell: true is required on Windows where pnpm is a .cmd file
-      await execFileAsync("pnpm", ["install", "--frozen-lockfile"], {
-        cwd: root,
-        timeout: 120_000,
-        shell: true,
-      });
+      await runPinnedPnpm(root, ["install", "--frozen-lockfile"], 120_000);
 
       // Step 3: Rebuild all packages
-      await execFileAsync("pnpm", ["build"], {
-        cwd: root,
-        timeout: 300_000,
-        shell: true,
-      });
+      await runPinnedPnpm(root, ["build"], 300_000);
 
       // Step 4: Signal exit so the user can relaunch with the new version.
       // Send response first, then schedule exit.
@@ -403,9 +453,10 @@ export async function updatesRoutes(app: FastifyInstance) {
       return result;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      const pnpmVersion = getPinnedPnpmVersion(root);
       return reply.status(500).send({
         error: `Update failed: ${message}`,
-        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} ${UPDATE_BRANCH} && git merge --ff-only ${UPDATE_REF} && pnpm install && pnpm build`,
+        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} ${UPDATE_BRANCH} && git merge --ff-only ${UPDATE_REF} && npx --yes pnpm@${pnpmVersion} install --frozen-lockfile && npx --yes pnpm@${pnpmVersion} build`,
       });
     }
   });
