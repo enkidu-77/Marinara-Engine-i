@@ -417,28 +417,28 @@ export function PersonasPanel() {
       )}
 
       {/* Actions */}
-      <div className="flex gap-1.5">
+      <div className="flex gap-2">
         <button
           onClick={handleCreate}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 px-3 py-2 text-xs font-medium text-white shadow-md shadow-emerald-400/15 transition-all hover:shadow-lg hover:shadow-emerald-400/25 active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 px-3 py-2.5 text-xs font-medium text-white shadow-md shadow-emerald-400/15 transition-all hover:shadow-lg hover:shadow-emerald-400/25 active:scale-[0.98]"
           title="New"
         >
-          <Plus size="0.75rem" />
+          <Plus size="0.8125rem" />
           <span className="md:hidden">New</span>
         </button>
         <button
           onClick={() => openModal("import-persona")}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
           title="Import"
         >
-          <Download size="0.75rem" /> <span className="md:hidden">Import</span>
+          <Download size="0.8125rem" /> <span className="md:hidden">Import</span>
         </button>
         <button
           onClick={() => openModal("persona-maker")}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
           title="AI Maker"
         >
-          <Sparkles size="0.75rem" /> <span className="md:hidden">Maker</span>
+          <Sparkles size="0.8125rem" /> <span className="md:hidden">Maker</span>
         </button>
         <button
           onClick={() => {
@@ -449,14 +449,14 @@ export function PersonasPanel() {
             }
           }}
           className={cn(
-            "flex flex-1 items-center justify-center gap-1 rounded-xl px-3 py-2 text-xs font-medium transition-all",
+            "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-medium transition-all",
             selectionMode
               ? "bg-emerald-400/15 text-emerald-400 ring-1 ring-emerald-400/30"
               : "bg-[var(--secondary)] text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] hover:bg-[var(--accent)]",
           )}
           title="Select"
         >
-          <Check size="0.75rem" />
+          <Check size="0.8125rem" />
           <span className="md:hidden">Select</span>
         </button>
       </div>

@@ -11,19 +11,7 @@ import {
 import { useChatStore } from "../../stores/chat.store";
 import { useUIStore } from "../../stores/ui.store";
 import { useSidecarStore } from "../../stores/sidecar.store";
-import {
-  Plus,
-  Trash2,
-  Link,
-  Check,
-  Shuffle,
-  ExternalLink,
-  X,
-  Copy,
-  BrainCircuit,
-  Download,
-  Trash,
-} from "lucide-react";
+import { Plus, Trash2, Link, Check, Shuffle, ExternalLink, X, Copy, BrainCircuit, Download, Trash } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 /** Provider → gradient color pair for connection icons. */
@@ -314,7 +302,7 @@ export function ConnectionsPanel() {
                     });
                   }}
                   className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-all hover:bg-sky-400/10 hover:text-sky-400 active:scale-90"
-                  title="Duplicate connection"
+                  title="Duplicate"
                 >
                   <Copy size="0.75rem" />
                 </button>

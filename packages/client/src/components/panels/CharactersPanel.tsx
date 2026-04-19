@@ -533,27 +533,27 @@ export function CharactersPanel() {
       )}
 
       {/* Actions */}
-      <div className="flex gap-1.5">
+      <div className="flex gap-2">
         <button
           onClick={() => openModal("create-character")}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-pink-400 to-purple-500 px-3 py-2 text-xs font-medium text-white shadow-md shadow-pink-500/15 transition-all hover:shadow-lg hover:shadow-pink-500/25 active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-pink-400 to-purple-500 px-3 py-2.5 text-xs font-medium text-white shadow-md shadow-pink-500/15 transition-all hover:shadow-lg hover:shadow-pink-500/25 active:scale-[0.98]"
           title="New"
         >
-          <Plus size="0.75rem" /> <span className="md:hidden">New</span>
+          <Plus size="0.8125rem" /> <span className="md:hidden">New</span>
         </button>
         <button
           onClick={() => openModal("import-character")}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
           title="Import"
         >
-          <Download size="0.75rem" /> <span className="md:hidden">Import</span>
+          <Download size="0.8125rem" /> <span className="md:hidden">Import</span>
         </button>
         <button
           onClick={() => openModal("character-maker")}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-xs font-medium text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] transition-all hover:bg-[var(--accent)] active:scale-[0.98]"
           title="AI Maker"
         >
-          <Sparkles size="0.75rem" /> <span className="md:hidden">Maker</span>
+          <Sparkles size="0.8125rem" /> <span className="md:hidden">Maker</span>
         </button>
         <button
           onClick={() => {
@@ -565,14 +565,14 @@ export function CharactersPanel() {
             }
           }}
           className={cn(
-            "flex flex-1 items-center justify-center gap-1 rounded-xl px-3 py-2 text-xs font-medium transition-all",
+            "flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-medium transition-all",
             selectionMode
               ? "bg-[var(--primary)]/15 text-[var(--primary)] ring-1 ring-[var(--primary)]/30"
               : "bg-[var(--secondary)] text-[var(--secondary-foreground)] ring-1 ring-[var(--border)] hover:bg-[var(--accent)]",
           )}
           title="Select"
         >
-          <Check size="0.75rem" />
+          <Check size="0.8125rem" />
           <span className="md:hidden">Select</span>
         </button>
       </div>
@@ -869,7 +869,7 @@ export function CharactersPanel() {
       )}
 
       {!isLoading && filteredCharacters.length === 0 && (
-        <div className="flex flex-col items-center gap-2 py-6 text-center">
+        <div className="flex flex-col items-center gap-2 py-8 text-center">
           <div className="animate-float flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-400/20 to-rose-500/20">
             <User size="1.25rem" className="text-[var(--primary)]" />
           </div>
@@ -1060,7 +1060,7 @@ export function CharactersPanel() {
                       deleteCharacter.mutate(char.id);
                     }}
                     className="rounded-lg p-1.5 transition-all hover:bg-[var(--destructive)]/15 active:scale-90"
-                    title="Delete character"
+                    title="Delete"
                   >
                     <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
                   </button>
