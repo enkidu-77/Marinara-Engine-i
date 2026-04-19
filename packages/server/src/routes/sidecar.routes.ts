@@ -1,10 +1,12 @@
 // ──────────────────────────────────────────────
-// Sidecar Routes — Model management & inference
+// Sidecar Routes — Runtime, model management,
+// and localhost llama-server inference
 // ──────────────────────────────────────────────
 
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import { z } from "zod";
 import { sidecarModelService } from "../services/sidecar/sidecar-model.service.js";
+import { sidecarRuntimeService } from "../services/sidecar/sidecar-runtime.service.js";
 import {
   analyzeScene,
   isInferenceAvailable,
@@ -12,50 +14,72 @@ import {
   runTrackerPrompt,
   unloadModel,
 } from "../services/sidecar/sidecar-inference.service.js";
+import { sidecarProcessService } from "../services/sidecar/sidecar-process.service.js";
 import {
   buildSceneAnalyzerSystemPrompt,
   buildSceneAnalyzerUserPrompt,
   type SceneAnalyzerContext,
 } from "../services/sidecar/scene-analyzer.js";
 import { postProcessSceneResult, type PostProcessContext } from "../services/sidecar/scene-postprocess.js";
-import { scoreMusic, scoreAmbient, type GameActiveState } from "@marinara-engine/shared";
-import type { SidecarQuantization } from "@marinara-engine/shared";
+import {
+  scoreAmbient,
+  scoreMusic,
+  type GameActiveState,
+  type SidecarDownloadProgress,
+  type SidecarQuantization,
+} from "@marinara-engine/shared";
+
+const quantizationSchema = z.enum(["q8_0", "q4_k_m"]);
+const hfRepoSchema = z.string().trim().regex(/^[^/\s]+\/[^/\s]+$/, "Repository must be in owner/repo format");
 
 export const sidecarRoutes: FastifyPluginAsync = async (app) => {
-  // ── Status ──
-  app.get("/status", async () => {
-    const status = sidecarModelService.getStatus();
-    const inferenceReady = await isInferenceAvailable();
-    return { ...status, inferenceReady };
+  app.addHook("onClose", async () => {
+    await sidecarProcessService.stop();
   });
 
-  // ── Update Config ──
+  app.get("/status", async () => {
+    void sidecarProcessService.syncForCurrentConfig().catch((error) => {
+      console.error("[sidecar] Background sync from /status failed:", error);
+    });
+
+    const status = sidecarModelService.getStatus();
+    return {
+      ...status,
+      inferenceReady: sidecarProcessService.isReady(),
+    };
+  });
+
   const configSchema = z.object({
     useForTrackers: z.boolean().optional(),
     useForGameScene: z.boolean().optional(),
     contextSize: z.number().int().min(512).max(32768).optional(),
-    gpuLayers: z.number().int().min(-1).max(256).optional(),
+    gpuLayers: z.number().int().min(-1).max(1024).optional(),
   });
 
   app.patch("/config", async (req) => {
     const body = configSchema.parse(req.body);
     const config = sidecarModelService.updateConfig(body);
+    void sidecarProcessService.syncForCurrentConfig().catch((error) => {
+      console.error("[sidecar] Background sync from /config failed:", error);
+    });
     return { config };
   });
 
-  // ── Download Model (SSE progress stream) ──
-  app.post<{
-    Body: { quantization: SidecarQuantization };
-  }>("/download", async (req, reply) => {
-    const { quantization } = req.body;
-    if (!quantization || !["q8_0", "q4_k_m"].includes(quantization)) {
-      return reply.status(400).send({ error: "Invalid quantization. Must be q8_0 or q4_k_m." });
-    }
+  const listCustomModelsSchema = z.object({
+    repo: hfRepoSchema,
+  });
 
-    // Hijack the response so Fastify doesn't try to finalize it
-    await reply.hijack();
+  app.post("/models/list-huggingface", async (req) => {
+    const body = listCustomModelsSchema.parse(req.body);
+    const models = await sidecarModelService.listHuggingFaceModels(body.repo);
+    return { models };
+  });
 
-    // Set up SSE response
+  async function handleDownloadSse(
+    reply: FastifyReply,
+    task: () => Promise<void>,
+  ): Promise<void> {
+    reply.hijack();
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
@@ -66,44 +90,80 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
       reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
     };
 
-    try {
-      await sidecarModelService.download(quantization, (progress) => {
+    let lastProgressPhase: SidecarDownloadProgress["phase"] | undefined;
+    let lastProgressLabel: string | undefined;
+    const listener = (progress: SidecarDownloadProgress) => {
+      lastProgressPhase = progress.phase;
+      lastProgressLabel = progress.label;
+      if (progress.status === "downloading") {
         sendEvent(progress);
-      });
-      sendEvent({ status: "complete" });
-    } catch (err) {
+      }
+    };
+    sidecarModelService.addProgressListener(listener);
+
+    try {
+      await task();
+      sendEvent({ done: true });
+    } catch (error) {
       sendEvent({
         status: "error",
-        error: err instanceof Error ? err.message : "Download failed",
+        phase: lastProgressPhase,
+        label: lastProgressLabel,
+        error: error instanceof Error ? error.message : "Download failed",
       });
     } finally {
+      sidecarModelService.removeProgressListener(listener);
       reply.raw.end();
     }
+  }
+
+  app.post<{
+    Body: { quantization: SidecarQuantization };
+  }>("/download", async (req, reply) => {
+    const { quantization } = z.object({ quantization: quantizationSchema }).parse(req.body);
+    await handleDownloadSse(reply, async () => {
+      await sidecarModelService.download(quantization);
+      await sidecarProcessService.syncForCurrentConfig();
+    });
   });
 
-  // ── Cancel Download ──
+  app.post<{
+    Body: { repo: string; modelPath: string };
+  }>("/download/custom", async (req, reply) => {
+    const body = z
+      .object({
+        repo: hfRepoSchema,
+        modelPath: z.string().min(1),
+      })
+      .parse(req.body);
+
+    await handleDownloadSse(reply, async () => {
+      await sidecarModelService.downloadCustomModel(body.repo, body.modelPath);
+      await sidecarProcessService.syncForCurrentConfig();
+    });
+  });
+
   app.post("/download/cancel", async () => {
     sidecarModelService.cancelDownload();
+    sidecarRuntimeService.cancelInstall();
     return { ok: true };
   });
 
-  // ── Delete Model ──
   app.delete("/model", async (_req, reply) => {
     if (isInferenceBusy()) {
-      return reply.status(409).send({ error: "Cannot delete model while inference is in progress" });
+      return reply.status(409).send({ error: "Cannot delete the sidecar model while inference is in progress" });
     }
-    await unloadModel();
+
+    await sidecarProcessService.stop();
     sidecarModelService.deleteModel();
     return { ok: true };
   });
 
-  // ── Unload Model (free RAM without deleting file) ──
   app.post("/unload", async () => {
     await unloadModel();
     return { ok: true };
   });
 
-  // ── Scene Analysis (game mode) ──
   const sceneBodySchema = z.object({
     narration: z.string().max(16000),
     playerAction: z.string().max(4000).optional(),
@@ -126,82 +186,61 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
     const body = sceneBodySchema.parse(req.body);
     const available = await isInferenceAvailable();
     if (!available) {
-      return reply.status(503).send({ error: "Sidecar model not available" });
+      return reply.status(503).send({ error: "Sidecar model is not available" });
     }
 
     const bgTags = body.context.availableBackgrounds ?? [];
     const sfxTags = body.context.availableSfx ?? [];
-    console.log(`[scene-analysis] Available: ${bgTags.length} bg, ${sfxTags.length} sfx`);
 
     const sceneCtx = body.context as SceneAnalyzerContext;
     const systemPrompt = buildSceneAnalyzerSystemPrompt(sceneCtx);
     const userPrompt = buildSceneAnalyzerUserPrompt(body.narration, body.playerAction, sceneCtx);
 
-    console.log("[scene-analysis] === SYSTEM PROMPT ===");
-    console.log(systemPrompt);
-    console.log("[scene-analysis] === USER PROMPT ===");
-    console.log(userPrompt);
-    console.log("[scene-analysis] === END PROMPTS ===");
-
     try {
       const raw = await analyzeScene(systemPrompt, userPrompt);
 
-      // Post-process: fuzzy-match prose → real tags, normalise expressions,
-      // and filter widget updates to valid IDs.
       const widgets = (body.context.activeWidgets ?? []) as { id?: string }[];
       const ppCtx: PostProcessContext = {
         availableBackgrounds: bgTags,
         availableSfx: sfxTags,
-        validWidgetIds: new Set(widgets.map((w) => w.id).filter(Boolean) as string[]),
+        validWidgetIds: new Set(widgets.map((widget) => widget.id).filter(Boolean) as string[]),
         characterNames: body.context.characterNames ?? [],
       };
       const result = postProcessSceneResult(raw, ppCtx);
 
-      // ── Dynamic music & ambient scoring ──
-      // Read available tags from server-side manifest.
       const { getAssetManifest } = await import("../services/game/asset-manifest.service.js");
-      const assetManifest = getAssetManifest();
-      const allAssetKeys = Object.keys(assetManifest.assets ?? {});
-      const serverMusicTags = allAssetKeys.filter((k: string) => k.startsWith("music:"));
-      const serverAmbientTags = allAssetKeys.filter((k: string) => k.startsWith("ambient:"));
+      const manifest = getAssetManifest();
+      const assetKeys = Object.keys(manifest.assets ?? {});
+      const musicTags = assetKeys.filter((key) => key.startsWith("music:"));
+      const ambientTags = assetKeys.filter((key) => key.startsWith("ambient:"));
 
       const scoredMusic = scoreMusic({
         state: (body.context.currentState as GameActiveState) ?? "exploration",
         weather: result.weather ?? body.context.currentWeather ?? null,
         timeOfDay: result.timeOfDay ?? body.context.currentTimeOfDay ?? null,
         currentMusic: body.context.currentMusic ?? null,
-        availableMusic: serverMusicTags,
+        availableMusic: musicTags,
       });
-      if (scoredMusic) {
-        result.music = scoredMusic;
-      } else if (result.music) {
-        result.music = null;
-      }
+      result.music = scoredMusic ?? null;
 
       const scoredAmbient = scoreAmbient({
         state: (body.context.currentState as GameActiveState) ?? "exploration",
         weather: result.weather ?? body.context.currentWeather ?? null,
         timeOfDay: result.timeOfDay ?? body.context.currentTimeOfDay ?? null,
         currentAmbient: body.context.currentAmbient ?? null,
-        availableAmbient: serverAmbientTags,
+        availableAmbient: ambientTags,
         background: result.background ?? body.context.currentBackground,
       });
-      if (scoredAmbient) {
-        result.ambient = scoredAmbient;
-      } else if (result.ambient) {
-        result.ambient = null;
-      }
+      result.ambient = scoredAmbient ?? null;
 
-      console.log("[scene-analysis] Post-processed result:", JSON.stringify(result, null, 2));
       return { result };
-    } catch (err) {
+    } catch (error) {
       return reply.status(500).send({
-        error: err instanceof Error ? err.message : "Scene analysis failed",
+        error: error instanceof Error ? error.message : "Scene analysis failed",
       });
     }
   });
 
-  // ── Tracker Inference (roleplay mode) ──
   const trackerBodySchema = z.object({
     systemPrompt: z.string().max(16000),
     userPrompt: z.string().max(16000),
@@ -211,15 +250,15 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
     const body = trackerBodySchema.parse(req.body);
     const available = await isInferenceAvailable();
     if (!available) {
-      return reply.status(503).send({ error: "Sidecar model not available" });
+      return reply.status(503).send({ error: "Sidecar model is not available" });
     }
 
     try {
       const result = await runTrackerPrompt(body.systemPrompt, body.userPrompt);
       return { result };
-    } catch (err) {
+    } catch (error) {
       return reply.status(500).send({
-        error: err instanceof Error ? err.message : "Tracker inference failed",
+        error: error instanceof Error ? error.message : "Tracker inference failed",
       });
     }
   });

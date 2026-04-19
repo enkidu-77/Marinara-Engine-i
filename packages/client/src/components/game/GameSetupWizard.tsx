@@ -87,7 +87,7 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
 
   const sidecarStatus = useSidecarStore((s) => s.status);
   const sidecarConfig = useSidecarStore((s) => s.config);
-  const sidecarAvailable = sidecarStatus === "downloaded" || sidecarStatus === "loading" || sidecarStatus === "ready";
+  const sidecarAvailable = !!sidecarConfig.modelPath && sidecarStatus !== "not_downloaded";
 
   // Fetch sidecar status on mount so the dropdown is populated without visiting Connections first
   useEffect(() => {

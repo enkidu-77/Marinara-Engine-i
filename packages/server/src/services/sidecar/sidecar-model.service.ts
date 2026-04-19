@@ -1,40 +1,77 @@
 // ──────────────────────────────────────────────
 // Sidecar Local Model — Model Lifecycle Service
 //
-// Manages downloading, loading, and unloading the
-// local Gemma GGUF model. Persists config to a
-// JSON file in data/models/.
+// Owns the persisted sidecar config plus GGUF
+// download/list/delete flows for curated and
+// custom HuggingFace models.
 // ──────────────────────────────────────────────
 
-import { existsSync, mkdirSync, statSync, createWriteStream, readFileSync, writeFileSync, unlinkSync } from "fs";
-import { dirname, join, resolve } from "path";
-import { pipeline as streamPipeline } from "stream/promises";
-import { Readable } from "stream";
-import { fileURLToPath } from "url";
+import { basename, join, relative, resolve, sep } from "path";
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import {
   SIDECAR_DEFAULT_CONFIG,
   SIDECAR_MODELS,
   type SidecarConfig,
+  type SidecarCustomModelEntry,
   type SidecarDownloadProgress,
   type SidecarQuantization,
-  type SidecarRuntimeInfo,
   type SidecarStatus,
   type SidecarStatusResponse,
 } from "@marinara-engine/shared";
 import { getDataDir } from "../../utils/data-dir.js";
+import { downloadFileWithProgress, fetchJson, isAbortError } from "./sidecar-download.js";
+import { sidecarRuntimeService } from "./sidecar-runtime.service.js";
 
-/** Directory where model files and config are stored. */
-const MODELS_DIR = join(getDataDir(), "models");
-const CONFIG_PATH = join(MODELS_DIR, "sidecar-config.json");
-const RUNTIME_INFO_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../data/models/sidecar-runtime-info.json",
-);
+export const MODELS_DIR = join(getDataDir(), "models");
+export const CUSTOM_MODELS_DIR = join(MODELS_DIR, "custom");
+export const CONFIG_PATH = join(MODELS_DIR, "sidecar-config.json");
+export const LEGACY_RUNTIME_STAMP_PATH = join(MODELS_DIR, "sidecar-runtime-stamp.txt");
 
-/** Event callbacks for download progress. */
 type ProgressCallback = (progress: SidecarDownloadProgress) => void;
 
-/** Singleton state for the sidecar model lifecycle. */
+interface HuggingFaceTreeEntry {
+  type?: string;
+  path?: string;
+  size?: number;
+  lfs?: { size?: number };
+}
+
+function normalizeRepoPath(repo: string): string {
+  return repo.trim().replace(/^\/+|\/+$/g, "");
+}
+
+function isValidRepoPath(repo: string): boolean {
+  return /^[^/\s]+\/[^/\s]+$/.test(repo);
+}
+
+function buildHuggingFaceDownloadUrl(repo: string, modelPath: string): string {
+  const encodedPath = modelPath
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `https://huggingface.co/${repo}/resolve/main/${encodedPath}`;
+}
+
+function slugifyRepo(repo: string): string {
+  return repo.replace(/[^A-Za-z0-9._-]+/g, "__");
+}
+
+function extractQuantizationLabel(filename: string): string | null {
+  const stem = basename(filename, ".gguf");
+  const match = stem.match(/(?:^|[-_.])(IQ\d+(?:_[A-Z0-9]+)*|Q\d+(?:_[A-Z0-9]+)*)(?:$|[-_.])/i);
+  return match?.[1]?.toUpperCase() ?? null;
+}
+
+function ensureWithinModelsDir(targetPath: string): string {
+  const resolvedRoot = resolve(MODELS_DIR);
+  const resolvedTarget = resolve(targetPath);
+  if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(resolvedRoot + sep)) {
+    throw new Error("Resolved model path escaped the sidecar models directory");
+  }
+  return resolvedTarget;
+}
+
 class SidecarModelService {
   private config: SidecarConfig;
   private status: SidecarStatus = "not_downloaded";
@@ -43,51 +80,109 @@ class SidecarModelService {
 
   constructor() {
     mkdirSync(MODELS_DIR, { recursive: true });
+    mkdirSync(CUSTOM_MODELS_DIR, { recursive: true });
     this.config = this.loadConfig();
     this.status = this.detectStatus();
   }
 
-  // ── Config Persistence ──
-
   private loadConfig(): SidecarConfig {
+    let nextConfig: SidecarConfig = { ...SIDECAR_DEFAULT_CONFIG };
+    let shouldRewrite = false;
+
     try {
       if (existsSync(CONFIG_PATH)) {
-        const raw = readFileSync(CONFIG_PATH, "utf-8");
-        return { ...SIDECAR_DEFAULT_CONFIG, ...JSON.parse(raw) };
+        const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as Partial<SidecarConfig>;
+        nextConfig = { ...SIDECAR_DEFAULT_CONFIG, ...raw };
+
+        // v1.5.x configs only tracked the curated quantization. Migrate them to an explicit modelPath.
+        if (!nextConfig.modelPath && nextConfig.quantization) {
+          const curated = SIDECAR_MODELS.find((model) => model.quantization === nextConfig.quantization);
+          nextConfig.modelPath = curated?.filename ?? null;
+          shouldRewrite = true;
+        }
+
+        if (nextConfig.modelPath && !this.isSafeRelativeModelPath(nextConfig.modelPath)) {
+          nextConfig.modelPath = null;
+          nextConfig.quantization = null;
+          nextConfig.customModelRepo = null;
+          shouldRewrite = true;
+        }
       }
     } catch {
-      // Corrupted config → reset
+      shouldRewrite = true;
+      nextConfig = { ...SIDECAR_DEFAULT_CONFIG };
     }
-    return { ...SIDECAR_DEFAULT_CONFIG };
+
+    if (shouldRewrite) {
+      this.writeConfig(nextConfig);
+    }
+
+    return nextConfig;
+  }
+
+  private writeConfig(config: SidecarConfig): void {
+    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
   }
 
   private saveConfig(): void {
-    writeFileSync(CONFIG_PATH, JSON.stringify(this.config, null, 2), "utf-8");
+    this.writeConfig(this.config);
   }
 
   private detectStatus(): SidecarStatus {
-    if (!this.config.quantization) return "not_downloaded";
-    const path = this.getModelPath(this.config.quantization);
-    if (path && existsSync(path)) return "downloaded";
-    return "not_downloaded";
+    return this.getModelFilePath() ? "downloaded" : "not_downloaded";
   }
 
-  // ── Public Getters ──
+  private isSafeRelativeModelPath(modelPath: string): boolean {
+    try {
+      const resolved = this.resolveModelPath(modelPath);
+      const rel = relative(resolve(MODELS_DIR), resolved);
+      return rel !== "" && !rel.startsWith("..") && !rel.split(/[\\/]/).includes("..");
+    } catch {
+      return false;
+    }
+  }
+
+  private resolveModelPath(modelPath: string): string {
+    return ensureWithinModelsDir(join(MODELS_DIR, modelPath));
+  }
+
+  private emitProgress(progress: SidecarDownloadProgress, inline?: ProgressCallback): void {
+    inline?.(progress);
+    for (const listener of this.progressListeners) {
+      listener(progress);
+    }
+  }
+
+  private buildModelErrorProgress(error: unknown): SidecarDownloadProgress {
+    return {
+      phase: "model",
+      status: "error",
+      downloaded: 0,
+      total: 0,
+      speed: 0,
+      error: error instanceof Error ? error.message : "Model download failed",
+    };
+  }
 
   getStatus(): SidecarStatusResponse {
-    const modelPath = this.config.quantization ? this.getModelPath(this.config.quantization) : null;
+    const modelPath = this.getModelFilePath();
     let modelSize: number | null = null;
-    if (modelPath && existsSync(modelPath)) {
+
+    if (modelPath) {
       try {
         modelSize = statSync(modelPath).size;
-      } catch {}
+      } catch {
+        modelSize = null;
+      }
     }
+
     return {
       status: this.status,
       config: { ...this.config },
-      runtimeInfo: this.getRuntimeInfo(),
-      modelDownloaded: modelPath !== null && existsSync(modelPath),
+      modelDownloaded: modelPath !== null,
       modelSize,
+      runtime: sidecarRuntimeService.getStatus(),
+      logPath: sidecarRuntimeService.getLogPath(),
     };
   }
 
@@ -95,218 +190,264 @@ class SidecarModelService {
     return { ...this.config };
   }
 
+  isEnabled(): boolean {
+    return this.config.useForTrackers || this.config.useForGameScene;
+  }
+
   getModelFilePath(): string | null {
-    if (!this.config.quantization) return null;
-    const p = this.getModelPath(this.config.quantization);
-    return p && existsSync(p) ? p : null;
+    if (!this.config.modelPath) return null;
+    const resolved = this.resolveModelPath(this.config.modelPath);
+    return existsSync(resolved) ? resolved : null;
+  }
+
+  getModelRelativePath(): string | null {
+    return this.getModelFilePath() ? this.config.modelPath : null;
   }
 
   isReady(): boolean {
-    return this.status === "ready" || this.status === "downloaded";
+    return this.status === "ready" || this.status === "downloaded" || this.status === "starting_server";
   }
 
-  // ── Config Updates ──
-
   updateConfig(
-    partial: Partial<Pick<SidecarConfig, "useForTrackers" | "useForGameScene" | "contextSize" | "gpuLayers">>,
+    partial: Partial<
+      Pick<SidecarConfig, "useForTrackers" | "useForGameScene" | "contextSize" | "gpuLayers">
+    >,
   ): SidecarConfig {
-    Object.assign(this.config, partial);
+    this.config = { ...this.config, ...partial };
     this.saveConfig();
+    if (this.status === "not_downloaded" && this.getModelFilePath()) {
+      this.status = "downloaded";
+    }
     return { ...this.config };
   }
 
-  // ── Download ──
-
   async download(quantization: SidecarQuantization, onProgress?: ProgressCallback): Promise<void> {
-    const modelInfo = SIDECAR_MODELS.find((m) => m.quantization === quantization);
-    if (!modelInfo) throw new Error(`Unknown quantization: ${quantization}`);
+    const modelInfo = SIDECAR_MODELS.find((model) => model.quantization === quantization);
+    if (!modelInfo) {
+      throw new Error(`Unknown sidecar quantization: ${quantization}`);
+    }
 
-    if (this.status === "downloading") throw new Error("Download already in progress");
-
-    this.status = "downloading";
-    this.downloadAbort = new AbortController();
-
-    const destPath = this.getModelPath(quantization)!;
-    const tempPath = destPath + ".download";
-
-    try {
-      const res = await fetch(modelInfo.downloadUrl, {
-        signal: this.downloadAbort.signal,
-        headers: { "User-Agent": "MarinaraEngine/1.0" },
-      });
-
-      if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
-      if (!res.body) throw new Error("No response body");
-
-      const total = parseInt(res.headers.get("content-length") || "0", 10);
-      let downloaded = 0;
-      let lastReportTime = Date.now();
-      let lastReportBytes = 0;
-
-      const reader = res.body.getReader();
-      const ws = createWriteStream(tempPath);
-
-      const readable = new Readable({
-        async read() {
-          try {
-            const { done, value } = await reader.read();
-            if (done) {
-              this.push(null);
-              return;
-            }
-            downloaded += value.byteLength;
-
-            // Report progress at most 4 times per second
-            const now = Date.now();
-            if (now - lastReportTime >= 250) {
-              const elapsed = (now - lastReportTime) / 1000;
-              const speed = elapsed > 0 ? (downloaded - lastReportBytes) / elapsed : 0;
-              const progress: SidecarDownloadProgress = {
-                status: "downloading",
-                downloaded,
-                total,
-                speed,
-              };
-              this.emit("download-progress", progress);
-              onProgress?.(progress);
-              for (const listener of sidecarModelService.progressListeners) {
-                listener(progress);
-              }
-              lastReportTime = now;
-              lastReportBytes = downloaded;
-            }
-
-            this.push(value);
-          } catch (err) {
-            this.destroy(err as Error);
-          }
-        },
-      });
-
-      await streamPipeline(readable, ws);
-
-      // Rename temp → final
-      const { renameSync } = await import("fs");
-      renameSync(tempPath, destPath);
-
-      // Update config
-      this.config.quantization = quantization;
+    const relativePath = modelInfo.filename;
+    const destination = this.resolveModelPath(relativePath);
+    if (existsSync(destination)) {
+      this.config = {
+        ...this.config,
+        modelPath: relativePath,
+        quantization,
+        customModelRepo: null,
+      };
       this.saveConfig();
       this.status = "downloaded";
+      this.emitProgress(
+        {
+          phase: "model",
+          status: "complete",
+          downloaded: modelInfo.sizeBytes,
+          total: modelInfo.sizeBytes,
+          speed: 0,
+          label: modelInfo.label,
+        },
+        onProgress,
+      );
+      return;
+    }
 
-      const completeProgress: SidecarDownloadProgress = {
-        status: "complete",
-        downloaded: total || downloaded,
-        total: total || downloaded,
-        speed: 0,
-      };
-      onProgress?.(completeProgress);
-      for (const listener of this.progressListeners) {
-        listener(completeProgress);
-      }
-    } catch (err) {
-      // Clean up partial download
+    await this.downloadModelFile(
+      {
+        url: modelInfo.downloadUrl,
+        relativePath,
+        label: modelInfo.label,
+      },
+      onProgress,
+    );
+
+    this.config = {
+      ...this.config,
+      modelPath: relativePath,
+      quantization,
+      customModelRepo: null,
+    };
+    this.saveConfig();
+    this.status = "downloaded";
+  }
+
+  async listHuggingFaceModels(repoInput: string): Promise<SidecarCustomModelEntry[]> {
+    const repo = normalizeRepoPath(repoInput);
+    if (!isValidRepoPath(repo)) {
+      throw new Error("Repository must be in owner/repo format");
+    }
+
+    const entries = await this.fetchRepoTree(repo);
+    const ggufEntries = entries.filter((entry) => entry.type === "file" && entry.path?.toLowerCase().endsWith(".gguf"));
+    if (ggufEntries.length === 0) {
+      return [];
+    }
+
+    return ggufEntries
+      .map((entry) => {
+        const path = entry.path!;
+        return {
+          path,
+          filename: basename(path),
+          sizeBytes: entry.size ?? entry.lfs?.size ?? null,
+          quantizationLabel: extractQuantizationLabel(path),
+          downloadUrl: buildHuggingFaceDownloadUrl(repo, path),
+        } satisfies SidecarCustomModelEntry;
+      })
+      .sort((a, b) => a.filename.localeCompare(b.filename));
+  }
+
+  async downloadCustomModel(
+    repoInput: string,
+    modelPath: string,
+    onProgress?: ProgressCallback,
+  ): Promise<SidecarCustomModelEntry> {
+    const repo = normalizeRepoPath(repoInput);
+    if (!isValidRepoPath(repo)) {
+      throw new Error("Repository must be in owner/repo format");
+    }
+
+    const models = await this.listHuggingFaceModels(repo);
+    const selected = models.find((entry) => entry.path === modelPath || entry.filename === modelPath);
+    if (!selected) {
+      throw new Error("Selected GGUF was not found in that repository");
+    }
+
+    const relativePath = join("custom", `${slugifyRepo(repo)}__${selected.filename}`).replace(/\\/g, "/");
+    const destination = this.resolveModelPath(relativePath);
+    if (!existsSync(destination)) {
+      await this.downloadModelFile(
+        {
+          url: selected.downloadUrl,
+          relativePath,
+          label: selected.filename,
+        },
+        onProgress,
+      );
+    } else {
+      this.emitProgress(
+        {
+          phase: "model",
+          status: "complete",
+          downloaded: selected.sizeBytes ?? 0,
+          total: selected.sizeBytes ?? 0,
+          speed: 0,
+          label: selected.filename,
+        },
+        onProgress,
+      );
+    }
+
+    this.config = {
+      ...this.config,
+      modelPath: relativePath,
+      quantization: null,
+      customModelRepo: repo,
+    };
+    this.saveConfig();
+    this.status = "downloaded";
+    return selected;
+  }
+
+  private async fetchRepoTree(repo: string): Promise<HuggingFaceTreeEntry[]> {
+    const attempts = [
+      `https://huggingface.co/api/models/${repo}/tree/main?recursive=1`,
+      `https://huggingface.co/api/models/${repo}/tree/master?recursive=1`,
+    ];
+
+    let lastError: unknown;
+    for (const url of attempts) {
       try {
-        if (existsSync(tempPath)) unlinkSync(tempPath);
-      } catch {}
+        return await fetchJson<HuggingFaceTreeEntry[]>(url);
+      } catch (error) {
+        lastError = error;
+      }
+    }
 
+    throw lastError instanceof Error ? lastError : new Error("Failed to load HuggingFace repository tree");
+  }
+
+  private async downloadModelFile(
+    input: { url: string; relativePath: string; label: string },
+    onProgress?: ProgressCallback,
+  ): Promise<void> {
+    if (this.downloadAbort) {
+      throw new Error("Another sidecar download is already in progress");
+    }
+
+    this.status = "downloading_model";
+    this.downloadAbort = new AbortController();
+    const destination = this.resolveModelPath(input.relativePath);
+
+    try {
+      await downloadFileWithProgress({
+        url: input.url,
+        destPath: destination,
+        signal: this.downloadAbort.signal,
+        progress: {
+          phase: "model",
+          label: input.label,
+        },
+        onProgress: (progress) => this.emitProgress(progress, onProgress),
+      });
+    } catch (error) {
       this.status = this.detectStatus();
-
-      const error = err instanceof Error ? err.message : "Unknown download error";
-      if (error.includes("abort")) {
+      if (isAbortError(error)) {
         throw new Error("Download cancelled");
       }
 
-      const errorProgress: SidecarDownloadProgress = {
-        status: "error",
-        downloaded: 0,
-        total: 0,
-        speed: 0,
-        error,
-      };
-      onProgress?.(errorProgress);
-      for (const listener of this.progressListeners) {
-        listener(errorProgress);
-      }
-      throw err;
+      const progress = this.buildModelErrorProgress(error);
+      this.emitProgress(progress, onProgress);
+      throw error;
     } finally {
       this.downloadAbort = null;
     }
   }
 
   cancelDownload(): void {
-    if (this.downloadAbort) {
-      this.downloadAbort.abort();
-      this.downloadAbort = null;
-    }
+    this.downloadAbort?.abort();
+    this.downloadAbort = null;
   }
 
-  // ── Delete Model ──
-
   deleteModel(): void {
-    if (this.config.quantization) {
-      const p = this.getModelPath(this.config.quantization);
-      if (p && existsSync(p)) {
-        unlinkSync(p);
-      }
+    const modelPath = this.getModelFilePath();
+    if (modelPath && existsSync(modelPath)) {
+      unlinkSync(modelPath);
     }
-    this.config.quantization = null;
+
+    this.config = {
+      ...this.config,
+      modelPath: null,
+      quantization: null,
+      customModelRepo: null,
+    };
     this.saveConfig();
     this.status = "not_downloaded";
   }
 
-  // ── Progress Listeners (for SSE) ──
-
-  addProgressListener(cb: ProgressCallback): void {
-    this.progressListeners.add(cb);
+  addProgressListener(callback: ProgressCallback): void {
+    this.progressListeners.add(callback);
   }
 
-  removeProgressListener(cb: ProgressCallback): void {
-    this.progressListeners.delete(cb);
+  removeProgressListener(callback: ProgressCallback): void {
+    this.progressListeners.delete(callback);
   }
 
-  // ── Internals ──
-
-  setStatus(s: SidecarStatus): void {
-    this.status = s;
+  setStatus(status: SidecarStatus): void {
+    this.status = status;
   }
 
-  private getModelPath(quant: SidecarQuantization): string | null {
-    const info = SIDECAR_MODELS.find((m) => m.quantization === quant);
-    if (!info) return null;
-    const filename = `gemma-4-E2B-it-${quant.toUpperCase()}.gguf`;
-    return join(MODELS_DIR, filename);
+  emitExternalProgress(progress: SidecarDownloadProgress): void {
+    this.emitProgress(progress);
   }
 
-  private getRuntimeInfo(): SidecarRuntimeInfo | null {
+  clearLegacyRuntimeStamp(): void {
     try {
-      if (!existsSync(RUNTIME_INFO_PATH)) return null;
-
-      const raw = readFileSync(RUNTIME_INFO_PATH, "utf-8");
-      const parsed = JSON.parse(raw) as Partial<SidecarRuntimeInfo>;
-      const validStates = new Set(["ready", "fallback", "failed"]);
-      const validBackends = new Set(["gpu", "cpu", "unknown"]);
-      const validReasons = new Set(["manual_cpu", "missing_gpu_toolchain", "build_failed", "unknown"]);
-
-      if (
-        typeof parsed?.message !== "string" ||
-        typeof parsed?.updatedAt !== "string" ||
-        !validStates.has(String(parsed.state)) ||
-        !validBackends.has(String(parsed.backend)) ||
-        !validReasons.has(String(parsed.reason))
-      ) {
-        return null;
+      if (existsSync(LEGACY_RUNTIME_STAMP_PATH)) {
+        unlinkSync(LEGACY_RUNTIME_STAMP_PATH);
       }
-
-      return {
-        state: parsed.state as SidecarRuntimeInfo["state"],
-        backend: parsed.backend as SidecarRuntimeInfo["backend"],
-        reason: parsed.reason as SidecarRuntimeInfo["reason"],
-        message: parsed.message,
-        updatedAt: parsed.updatedAt,
-      };
     } catch {
-      return null;
+      // Best-effort cleanup for v1.5.x build stamp residue.
     }
   }
 }

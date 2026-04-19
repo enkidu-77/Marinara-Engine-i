@@ -31,8 +31,7 @@
     "db:push": "pnpm --filter @marinara-engine/server db:push",
     "db:generate": "pnpm --filter @marinara-engine/server db:generate",
     "db:migrate": "pnpm --filter @marinara-engine/server db:migrate",
-    "clean": "pnpm -r --if-present run clean && node ./scripts/clean-workspace.mjs",
-    "sidecar:build": "node ./scripts/build-sidecar-runtime.mjs"
+    "clean": "pnpm -r --if-present run clean && node ./scripts/clean-workspace.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.27.3",
@@ -42,7 +41,6 @@
     "onlyBuiltDependencies": [
       "better-sqlite3",
       "esbuild",
-      "node-llama-cpp",
       "sharp"
     ],
     "overrides": {

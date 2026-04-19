@@ -155,50 +155,6 @@ if not exist "packages\client\dist" (
     call pnpm build:client
 )
 
-:: Sidecar (local model) - rebuild native addon if missing or stale
-set "SIDECAR_RUNTIME_STAMP=packages\server\data\models\sidecar-runtime-stamp.txt"
-set "SIDECAR_RUNTIME_FAILURE_STAMP=packages\server\data\models\sidecar-runtime-failed-stamp.txt"
-set "SIDECAR_RUNTIME_BUILD_ID=gemma4-runtime-v1"
-if exist "packages\server\data\models\sidecar-config.json" (
-    set "SIDECAR_MODEL_FOUND="
-    for /f "delims=" %%F in ('dir /b "packages\server\data\models\*.gguf" 2^>nul') do set "SIDECAR_MODEL_FOUND=1"
-    if defined SIDECAR_MODEL_FOUND (
-        set "NEED_SIDECAR_BUILD="
-        set "SKIP_SIDECAR_RETRY="
-        set "LLAMA_ADDON_FOUND="
-        set "CURRENT_SIDECAR_FAILURE_STAMP="
-        for /f "delims=" %%F in ('dir /s /b "node_modules\.pnpm\*llama-addon.node" 2^>nul') do set "LLAMA_ADDON_FOUND=1"
-        if exist "%SIDECAR_RUNTIME_FAILURE_STAMP%" set /p CURRENT_SIDECAR_FAILURE_STAMP=<"%SIDECAR_RUNTIME_FAILURE_STAMP%"
-        if not defined LLAMA_ADDON_FOUND (
-            if /I "!CURRENT_SIDECAR_FAILURE_STAMP!"=="%SIDECAR_RUNTIME_BUILD_ID%" (
-                set "SKIP_SIDECAR_RETRY=1"
-                echo  [WARN] Sidecar addon rebuild already failed for this runtime version. Skipping automatic retry.
-                echo  [WARN] Run pnpm sidecar:build after fixing your local toolchain to try again.
-            ) else (
-                set "NEED_SIDECAR_BUILD=1"
-            )
-        )
-        if not defined NEED_SIDECAR_BUILD if not defined SKIP_SIDECAR_RETRY (
-            set "CURRENT_SIDECAR_STAMP="
-            if exist "%SIDECAR_RUNTIME_STAMP%" set /p CURRENT_SIDECAR_STAMP=<"%SIDECAR_RUNTIME_STAMP%"
-            if /I not "!CURRENT_SIDECAR_STAMP!"=="%SIDECAR_RUNTIME_BUILD_ID%" set "NEED_SIDECAR_BUILD=1"
-        )
-        if defined NEED_SIDECAR_BUILD (
-            echo  [..] Rebuilding sidecar runtime for Gemma 4 support ^(may take a few minutes^)...
-            call pnpm sidecar:build
-            if errorlevel 1 (
-                >"%SIDECAR_RUNTIME_FAILURE_STAMP%" echo %SIDECAR_RUNTIME_BUILD_ID%
-                echo  [WARN] Sidecar addon build failed. The local Gemma model may not load until this succeeds.
-                echo  [WARN] Automatic retries are disabled until the runtime version changes or you rerun pnpm sidecar:build manually.
-            ) else (
-                >"%SIDECAR_RUNTIME_STAMP%" echo %SIDECAR_RUNTIME_BUILD_ID%
-                if exist "%SIDECAR_RUNTIME_FAILURE_STAMP%" del /q "%SIDECAR_RUNTIME_FAILURE_STAMP%" >nul 2>&1
-                echo  [OK] Sidecar addon ready
-            )
-        )
-    )
-)
-
 :: Database migrations are handled automatically at server startup by runMigrations()
 
 :: Load .env if present (respects user overrides)

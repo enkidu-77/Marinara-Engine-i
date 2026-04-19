@@ -24,6 +24,7 @@ import { basename, join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getBuildCommit, getBuildLabel } from "./config/build-info.js";
 import { getCorsConfig, getLogLevel, getNodeEnv } from "./config/runtime-config.js";
+import { sidecarProcessService } from "./services/sidecar/sidecar-process.service.js";
 
 const REVALIDATE_FILES = new Set(["index.html"]);
 const NO_STORE_FILES = new Set(["manifest.json", "sw.js", "registerSW.js"]);
@@ -89,6 +90,11 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
 
   // ── Routes ──
   await registerRoutes(app);
+
+  // ── Sidecar bootstrap (background) ──
+  void sidecarProcessService.syncForCurrentConfig().catch((error) => {
+    app.log.warn({ err: error }, "sidecar bootstrap failed");
+  });
 
   // ── Serve client build in production ──
   const __dirname = dirname(fileURLToPath(import.meta.url));

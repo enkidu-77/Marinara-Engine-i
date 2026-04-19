@@ -23,7 +23,6 @@ import {
   BrainCircuit,
   Download,
   Trash,
-  AlertTriangle,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
@@ -51,12 +50,11 @@ function formatBytes(bytes: number): string {
 }
 
 function SidecarCard() {
-  const { status, config, modelSize, runtimeInfo, setShowDownloadModal, updateConfig, deleteModel, fetchStatus } =
+  const { status, config, modelDownloaded, modelSize, setShowDownloadModal, updateConfig, deleteModel, fetchStatus } =
     useSidecarStore();
-  const isDownloaded = status === "downloaded" || status === "ready" || status === "loading";
+  const isDownloaded = modelDownloaded;
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const runtimeNotice =
-    runtimeInfo && (runtimeInfo.state !== "ready" || runtimeInfo.reason === "manual_cpu") ? runtimeInfo : null;
+  const activeModelName = isDownloaded ? config.modelPath?.split("/").pop() ?? null : null;
 
   // Fetch status on mount (handles HMR store resets and initial load)
   useEffect(() => {
@@ -73,7 +71,15 @@ function SidecarCard() {
           <div className="text-sm font-medium">Local Model</div>
           <div className="text-[0.6875rem] text-[var(--muted-foreground)]">
             {isDownloaded
-              ? `Gemma 4 E2B • ${config.quantization?.toUpperCase()}${modelSize ? ` • ${formatBytes(modelSize)}` : ""}`
+              ? `${activeModelName ?? "Model"}${modelSize ? ` • ${formatBytes(modelSize)}` : ""}${
+                  status === "starting_server"
+                    ? " • Starting"
+                    : status === "server_error"
+                      ? " • Error"
+                      : status === "ready"
+                        ? " • Ready"
+                        : ""
+                }`
               : "Not downloaded"}
           </div>
         </div>
@@ -118,51 +124,6 @@ function SidecarCard() {
           </button>
         )}
       </div>
-
-      {runtimeNotice && (
-        <div
-          className={cn(
-            "mt-2.5 rounded-xl border p-2.5",
-            runtimeNotice.state === "failed"
-              ? "border-amber-400/25 bg-amber-400/10"
-              : runtimeNotice.state === "fallback"
-                ? "border-sky-400/25 bg-sky-400/10"
-                : "border-[var(--border)] bg-[var(--secondary)]/40",
-          )}
-        >
-          <div className="flex items-start gap-2">
-            <AlertTriangle
-              size="0.875rem"
-              className={cn(
-                "mt-0.5 shrink-0",
-                runtimeNotice.state === "failed"
-                  ? "text-amber-300"
-                  : runtimeNotice.state === "fallback"
-                    ? "text-sky-300"
-                    : "text-[var(--muted-foreground)]",
-              )}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium">
-                {runtimeNotice.state === "failed"
-                  ? "Local Gemma is unavailable"
-                  : runtimeNotice.state === "fallback"
-                    ? "Local Gemma fell back to CPU"
-                    : "Local Gemma is using CPU only"}
-              </div>
-              <p className="mt-0.5 text-[0.6875rem] leading-relaxed text-[var(--muted-foreground)]">
-                {runtimeNotice.message}
-              </p>
-              {runtimeNotice.state === "failed" && (
-                <p className="mt-1 text-[0.6875rem] leading-relaxed text-[var(--muted-foreground)]">
-                  Marinara still works without the local model. Only the optional Gemma sidecar is affected.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Toggles (only when model is downloaded) */}
       {isDownloaded && (
         <div className="mt-2.5 flex flex-col gap-1.5 border-t border-purple-400/10 pt-2.5">

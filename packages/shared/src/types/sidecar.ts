@@ -10,28 +10,18 @@
 export type SidecarQuantization = "q8_0" | "q4_k_m";
 
 /** Current lifecycle state of the sidecar model. */
-export type SidecarStatus = "not_downloaded" | "downloading" | "downloaded" | "loading" | "ready" | "error";
+export type SidecarStatus =
+  | "not_downloaded"
+  | "downloading_runtime"
+  | "downloading_model"
+  | "downloaded"
+  | "starting_server"
+  | "ready"
+  | "server_error";
 
-/** Recent native-runtime build state for the sidecar addon. */
-export type SidecarRuntimeState = "ready" | "fallback" | "failed";
-
-/** Effective backend mode for the built sidecar runtime. */
-export type SidecarRuntimeBackend = "gpu" | "cpu" | "unknown";
-
-/** Why the current runtime note exists. */
-export type SidecarRuntimeReason = "manual_cpu" | "missing_gpu_toolchain" | "build_failed" | "unknown";
-
-/** Optional runtime note emitted by the launcher/build wrapper. */
-export interface SidecarRuntimeInfo {
-  state: SidecarRuntimeState;
-  backend: SidecarRuntimeBackend;
-  reason: SidecarRuntimeReason;
-  message: string;
-  updatedAt: string;
-}
-
-/** Progress info while downloading the model GGUF. */
+/** Progress info while downloading the runtime or model assets. */
 export interface SidecarDownloadProgress {
+  phase: "runtime" | "model";
   status: "downloading" | "complete" | "error";
   /** Bytes downloaded so far. */
   downloaded: number;
@@ -39,14 +29,20 @@ export interface SidecarDownloadProgress {
   total: number;
   /** Download speed in bytes/second. */
   speed: number;
+  /** Optional display label for the thing being downloaded. */
+  label?: string;
   /** Error message if status is "error". */
   error?: string;
 }
 
 /** Persisted sidecar configuration stored server-side. */
 export interface SidecarConfig {
-  /** Which quantization variant is downloaded/active. Null if none. */
+  /** Active model file path, relative to data/models. Null if none. */
+  modelPath: string | null;
+  /** Which curated quantization variant is downloaded/active. Null for BYO models. */
   quantization: SidecarQuantization | null;
+  /** HuggingFace repo for BYO models, e.g. "unsloth/gemma-4-E2B-it-GGUF". */
+  customModelRepo: string | null;
   /** Whether to use the sidecar for tracker agents in roleplay mode. */
   useForTrackers: boolean;
   /** Whether to use the sidecar for game scene analysis (backgrounds, music, widgets, etc.). */
@@ -57,6 +53,12 @@ export interface SidecarConfig {
   gpuLayers: number;
 }
 
+export interface SidecarRuntimeInfo {
+  installed: boolean;
+  build: string | null;
+  variant: string | null;
+}
+
 /** Server response for sidecar status endpoint. */
 export interface SidecarStatusResponse {
   status: SidecarStatus;
@@ -65,8 +67,10 @@ export interface SidecarStatusResponse {
   modelDownloaded: boolean;
   /** Model file size in bytes (if downloaded). */
   modelSize: number | null;
-  /** Optional runtime build note for the native llama.cpp addon. */
-  runtimeInfo: SidecarRuntimeInfo | null;
+  /** Installed llama.cpp runtime info. */
+  runtime: SidecarRuntimeInfo;
+  /** Absolute log path for the spawned llama-server process. */
+  logPath: string | null;
 }
 
 // ── Scene Analysis Output ──
@@ -138,6 +142,8 @@ export interface SidecarModelInfo {
   quantization: SidecarQuantization;
   /** Display name, e.g. "Gemma 4 E2B — Q8" */
   label: string;
+  /** Final GGUF filename on disk. */
+  filename: string;
   /** Approximate file size in bytes. */
   sizeBytes: number;
   /** Approximate RAM needed at runtime. */
@@ -148,9 +154,19 @@ export interface SidecarModelInfo {
   sha256?: string;
 }
 
+export interface SidecarCustomModelEntry {
+  path: string;
+  filename: string;
+  sizeBytes: number | null;
+  quantizationLabel: string | null;
+  downloadUrl: string;
+}
+
 /** Default sidecar configuration. */
 export const SIDECAR_DEFAULT_CONFIG: SidecarConfig = {
+  modelPath: null,
   quantization: null,
+  customModelRepo: null,
   useForTrackers: false,
   useForGameScene: true,
   contextSize: 8192,
@@ -162,6 +178,7 @@ export const SIDECAR_MODELS: SidecarModelInfo[] = [
   {
     quantization: "q8_0",
     label: "Gemma 4 E2B — Q8 (Best Quality)",
+    filename: "gemma-4-E2B-it-Q8_0.gguf",
     sizeBytes: 5_400_000_000,
     ramBytes: 5_800_000_000,
     downloadUrl: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q8_0.gguf",
@@ -169,6 +186,7 @@ export const SIDECAR_MODELS: SidecarModelInfo[] = [
   {
     quantization: "q4_k_m",
     label: "Gemma 4 E2B — Q4_K_M (Smaller, Faster)",
+    filename: "gemma-4-E2B-it-Q4_K_M.gguf",
     sizeBytes: 3_200_000_000,
     ramBytes: 3_600_000_000,
     downloadUrl: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf",

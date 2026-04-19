@@ -98,6 +98,7 @@ import {
 import { getMoraleTier, formatMoraleContext } from "../services/game/morale.service.js";
 import type { GameNpc } from "@marinara-engine/shared";
 import { sidecarModelService } from "../services/sidecar/sidecar-model.service.js";
+import { isInferenceAvailable as isSidecarInferenceAvailable } from "../services/sidecar/sidecar-inference.service.js";
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
@@ -2258,7 +2259,7 @@ export async function generateRoutes(app: FastifyInstance) {
         // Determine if a separate scene model handles bg/music/sfx/widgets
         const sceneConnectionId = (setupConfig?.sceneConnectionId as string) || null;
         const sidecarCfg = sidecarModelService.getConfig();
-        const sidecarHandlesScene = sidecarCfg.useForGameScene && sidecarModelService.isReady();
+        const sidecarHandlesScene = sidecarCfg.useForGameScene && (await isSidecarInferenceAvailable());
         const hasSceneModel = !!sceneConnectionId || sidecarHandlesScene;
 
         // Approximate turn number: count user messages in the chat (each user message ≈ 1 turn)
