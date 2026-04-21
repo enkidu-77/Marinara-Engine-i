@@ -98,8 +98,12 @@ function getRuntimePreferenceOptions(platform: string, arch: string): SidecarRun
 function ResponseBlock({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="mb-1 text-[0.6875rem] font-medium uppercase tracking-wider text-[var(--muted-foreground)]/60">{label}</div>
-      <div className="rounded-lg bg-[var(--secondary)] p-3 text-sm leading-relaxed text-[var(--foreground)]">{value}</div>
+      <div className="mb-1 text-[0.6875rem] font-medium uppercase tracking-wider text-[var(--muted-foreground)]/60">
+        {label}
+      </div>
+      <div className="rounded-lg bg-[var(--secondary)] p-3 text-sm leading-relaxed text-[var(--foreground)]">
+        {value}
+      </div>
     </div>
   );
 }
@@ -154,18 +158,17 @@ export function ModelDownloadModal({ open, onClose }: Props) {
   const activeBackend = runtime.backend ?? config.backend;
   const isSystemRuntime = runtime.source === "system";
   const canReinstallRuntime = !isSystemRuntime;
-  const selectedPreset = curatedModels.find((model) => model.quantization === selectedQuant) ?? curatedModels[0] ?? null;
-  const selectedCustomEntry = customModels.find((entry) => entry.path === selectedCustomPath) ?? customModels[0] ?? null;
+  const selectedPreset =
+    curatedModels.find((model) => model.quantization === selectedQuant) ?? curatedModels[0] ?? null;
+  const selectedCustomEntry =
+    customModels.find((entry) => entry.path === selectedCustomPath) ?? customModels[0] ?? null;
   const isCustomRepoValidated = selectedCustomEntry?.path === repoInput.trim();
   const isDownloading = downloadProgress?.status === "downloading";
   const hasModel = modelDownloaded;
   const activeModelName = hasModel ? modelDisplayName : null;
   const shouldAutoStart = config.useForTrackers || config.useForGameScene;
   const isPreparingServer =
-    hasModel &&
-    shouldAutoStart &&
-    !inferenceReady &&
-    (status === "starting_server" || status === "downloaded");
+    hasModel && shouldAutoStart && !inferenceReady && (status === "starting_server" || status === "downloaded");
   const isSetupBusy = isDownloading || status === "downloading_runtime" || isPreparingServer;
   const canFinish = status === "ready" && inferenceReady;
   const runtimePreferenceOptions = getRuntimePreferenceOptions(platform, arch);
@@ -221,7 +224,7 @@ export function ModelDownloadModal({ open, onClose }: Props) {
         : `Downloading local runtime${progress.label ? ` (${progress.label})` : ""}...`
       : progress?.phase === "model"
         ? `Downloading model${progress.label ? ` (${progress.label})` : ""}...`
-      : isPreparingServer
+        : isPreparingServer
           ? "Starting local runtime..."
           : "Setting up local runtime...";
   const setupDescription =
@@ -430,7 +433,11 @@ export function ModelDownloadModal({ open, onClose }: Props) {
                 disabled={!hasModel || !runtime.installed || testMessagePending}
                 className="flex items-center justify-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {testMessagePending ? <Loader2 size="0.875rem" className="animate-spin" /> : <MessageSquare size="0.875rem" />}
+                {testMessagePending ? (
+                  <Loader2 size="0.875rem" className="animate-spin" />
+                ) : (
+                  <MessageSquare size="0.875rem" />
+                )}
                 Send Test Message
               </button>
             </div>
@@ -726,7 +733,9 @@ export function ModelDownloadModal({ open, onClose }: Props) {
                   />
                   <div
                     className={`h-4 w-4 shrink-0 rounded-full border-2 transition-colors ${
-                      selectedQuant === model.quantization ? "border-purple-400 bg-purple-400" : "border-[var(--border)]"
+                      selectedQuant === model.quantization
+                        ? "border-purple-400 bg-purple-400"
+                        : "border-[var(--border)]"
                     }`}
                   >
                     {selectedQuant === model.quantization && (
@@ -792,7 +801,11 @@ export function ModelDownloadModal({ open, onClose }: Props) {
                     disabled={!repoInput.trim() || customModelsLoading}
                     className="flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] px-4 py-2 text-sm text-[var(--foreground)] transition-colors hover:bg-[var(--secondary)] disabled:opacity-50"
                   >
-                    {customModelsLoading ? <Loader2 size="0.875rem" className="animate-spin" /> : <Search size="0.875rem" />}
+                    {customModelsLoading ? (
+                      <Loader2 size="0.875rem" className="animate-spin" />
+                    ) : (
+                      <Search size="0.875rem" />
+                    )}
                     {isAppleSilicon ? "Validate Repo" : "List Models"}
                   </button>
                 </div>

@@ -33,6 +33,7 @@ import {
   ImageDown,
 } from "lucide-react";
 import { cn, generateClientId } from "../../lib/utils";
+import { showAlertDialog, showConfirmDialog } from "../../lib/app-dialogs";
 import { extractColorsFromImage } from "../../lib/avatar-color-extraction";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { ColorPicker } from "../ui/ColorPicker";
@@ -206,7 +207,16 @@ export function PersonaEditor() {
 
   const handleDelete = async () => {
     if (!personaId) return;
-    if (!confirm("Are you sure you want to delete this persona?")) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Persona",
+        message: "Are you sure you want to delete this persona?",
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     await deletePersona.mutateAsync(personaId);
     closeDetail();
   };
@@ -564,7 +574,16 @@ function PersonaSpritesTab({
   };
 
   const handleDelete = async (expression: string) => {
-    if (!confirm(`Delete sprite for "${expression}"?`)) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Sprite",
+        message: `Delete sprite for "${expression}"?`,
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     await deleteSprite.mutateAsync({ characterId: personaId, expression });
   };
 
@@ -603,7 +622,11 @@ function PersonaSpritesTab({
         }
 
         if (successCount === 0) {
-          alert("No sprites were exported. Please try again.");
+          await showAlertDialog({
+            title: "Export Failed",
+            message: "No sprites were exported. Please try again.",
+            tone: "destructive",
+          });
         }
       } finally {
         setExporting(false);
@@ -943,7 +966,7 @@ function PersonaColorsTab({
         onChange={(v) => updateField("dialogueColor", v)}
         label="Dialogue Highlight Color"
         helpText={
-          'Text inside quotation marks ("", \u201c\u201d, \u00ab\u00bb) will be automatically bold and colored with this.'
+          'Text inside quotation marks ("", \u201c\u201d, \u00ab\u00bb) will be automatically colored with this, and can also be bolded from Settings.'
         }
       />
 
@@ -964,7 +987,7 @@ function PersonaColorsTab({
           </li>
           <li>
             &bull; <strong className="text-[var(--foreground)]">Dialogue color</strong> — All text inside double quotes
-            is automatically bold and colored with this value.
+            is automatically colored with this value, and can optionally be bolded from Settings.
           </li>
           <li>
             &bull; <strong className="text-[var(--foreground)]">Box color</strong> — Sets the background color of your

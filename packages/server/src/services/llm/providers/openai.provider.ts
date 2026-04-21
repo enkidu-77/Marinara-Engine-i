@@ -21,6 +21,16 @@ import {
 const RESPONSES_ONLY_PREFIXES = ["gpt-5.4-pro", "gpt-5.4-mini", "codex-"];
 const RESPONSES_ONLY_SUFFIXES = ["-codex", "-codex-max", "-codex-mini"];
 
+type ChatCompletionsUsagePayload = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+    cache_write_tokens?: number;
+  };
+};
+
 /**
  * Handles OpenAI, OpenRouter, Mistral, Cohere, and any OpenAI-compatible endpoint.
  */
@@ -115,6 +125,31 @@ export class OpenAIProvider extends BaseLLMProvider {
   private useResponsesAPI(model: string): boolean {
     const m = model.toLowerCase();
     return RESPONSES_ONLY_PREFIXES.some((p) => m.startsWith(p)) || RESPONSES_ONLY_SUFFIXES.some((s) => m.endsWith(s));
+  }
+
+  private shouldUseOpenRouterPromptCaching(options: ChatOptions): boolean {
+    return (
+      this.baseUrl.includes("openrouter.ai") &&
+      !!options.enableCaching &&
+      options.model.toLowerCase().includes("claude")
+    );
+  }
+
+  private applyOpenRouterPromptCaching(body: Record<string, unknown>, options: ChatOptions): void {
+    if (!this.shouldUseOpenRouterPromptCaching(options)) return;
+    body.cache_control = { type: "ephemeral" };
+    console.log("[OpenAI] Enabling OpenRouter prompt caching for model=%s", options.model);
+  }
+
+  private static extractChatCompletionsUsage(usage: ChatCompletionsUsagePayload | undefined): LLMUsage | undefined {
+    if (!usage) return undefined;
+    return {
+      promptTokens: usage.prompt_tokens ?? 0,
+      completionTokens: usage.completion_tokens ?? 0,
+      totalTokens: usage.total_tokens ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
+      cachedPromptTokens: usage.prompt_tokens_details?.cached_tokens,
+      cacheWritePromptTokens: usage.prompt_tokens_details?.cache_write_tokens,
+    };
   }
 
   /**
@@ -236,6 +271,8 @@ export class OpenAIProvider extends BaseLLMProvider {
       body.provider = { order: [openrouterProvider] };
     }
 
+    this.applyOpenRouterPromptCaching(body, options);
+
     // Force response format (e.g. JSON mode)
     if (options.responseFormat) {
       body.response_format = options.responseFormat;
@@ -258,7 +295,7 @@ export class OpenAIProvider extends BaseLLMProvider {
     if (!effectiveStream) {
       const json = (await response.json()) as {
         choices: Array<{ message: Record<string, unknown> & { content: string | unknown[] } }>;
-        usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+        usage?: ChatCompletionsUsagePayload;
       };
       const msg = json.choices[0]?.message;
       const reasoning = OpenAIProvider.extractReasoning(msg);
@@ -273,14 +310,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       } else {
         yield (msg?.content as string) ?? "";
       }
-      if (json.usage) {
-        return {
-          promptTokens: json.usage.prompt_tokens,
-          completionTokens: json.usage.completion_tokens,
-          totalTokens: json.usage.total_tokens,
-        };
-      }
-      return;
+      return OpenAIProvider.extractChatCompletionsUsage(json.usage);
     }
 
     // Stream SSE response
@@ -323,15 +353,11 @@ export class OpenAIProvider extends BaseLLMProvider {
           try {
             const parsed = JSON.parse(data) as {
               choices: Array<{ delta: Record<string, unknown> & { content?: string | unknown[] } }>;
-              usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+              usage?: ChatCompletionsUsagePayload;
             };
             // Capture usage from the final chunk (OpenAI sends it with stream_options)
             if (parsed.usage) {
-              streamUsage = {
-                promptTokens: parsed.usage.prompt_tokens,
-                completionTokens: parsed.usage.completion_tokens,
-                totalTokens: parsed.usage.total_tokens,
-              };
+              streamUsage = OpenAIProvider.extractChatCompletionsUsage(parsed.usage);
             }
             const delta = parsed.choices[0]?.delta;
             const reasoning = OpenAIProvider.extractReasoning(delta);
@@ -425,6 +451,8 @@ export class OpenAIProvider extends BaseLLMProvider {
       body.provider = { order: [openrouterProvider] };
     }
 
+    this.applyOpenRouterPromptCaching(body, options);
+
     // Force response format (e.g. JSON mode)
     if (options.responseFormat) {
       body.response_format = options.responseFormat;
@@ -454,7 +482,7 @@ export class OpenAIProvider extends BaseLLMProvider {
           };
           finish_reason: string;
         }>;
-        usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+        usage?: ChatCompletionsUsagePayload;
       };
 
       const choice = json.choices[0];
@@ -471,13 +499,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       } else {
         resolvedContent = (choice?.message?.content as string) ?? null;
       }
-      const usage: LLMUsage | undefined = json.usage
-        ? {
-            promptTokens: json.usage.prompt_tokens,
-            completionTokens: json.usage.completion_tokens,
-            totalTokens: json.usage.total_tokens,
-          }
-        : undefined;
+      const usage = OpenAIProvider.extractChatCompletionsUsage(json.usage);
       return {
         content: resolvedContent,
         toolCalls: choice?.message?.tool_calls ?? [],
@@ -530,15 +552,11 @@ export class OpenAIProvider extends BaseLLMProvider {
               };
               finish_reason?: string;
             }>;
-            usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+            usage?: ChatCompletionsUsagePayload;
           };
 
           if (parsed.usage) {
-            streamUsage = {
-              promptTokens: parsed.usage.prompt_tokens,
-              completionTokens: parsed.usage.completion_tokens,
-              totalTokens: parsed.usage.total_tokens,
-            };
+            streamUsage = OpenAIProvider.extractChatCompletionsUsage(parsed.usage);
           }
 
           const choice = parsed.choices[0];

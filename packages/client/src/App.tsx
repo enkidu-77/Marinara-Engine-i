@@ -7,6 +7,7 @@ import { APP_VERSION } from "@marinara-engine/shared";
 import { AppShell } from "./components/layout/AppShell";
 import { CustomThemeInjector } from "./components/layout/CustomThemeInjector";
 import { ModelDownloadModal } from "./components/modals/ModelDownloadModal";
+import { AppDialogRenderer } from "./components/ui/AppDialogRenderer";
 import { Toaster } from "sonner";
 import { useUIStore } from "./stores/ui.store";
 import { useSidecarStore } from "./stores/sidecar.store";
@@ -194,6 +195,7 @@ export function App() {
           <LazyModalRenderer />
         </Suspense>
       )}
+      <AppDialogRenderer />
       <Toaster
         position="bottom-right"
         theme={theme}

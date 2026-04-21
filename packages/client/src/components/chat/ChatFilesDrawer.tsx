@@ -3,6 +3,7 @@
 // Like SillyTavern's "Manage chat files" feature
 // ──────────────────────────────────────────────
 import { X, Plus, Trash2, FileText, MessageSquare, Download } from "lucide-react";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { cn } from "../../lib/utils";
 import { useChatGroup, useCreateChat, useDeleteChat, useDeleteChatGroup, useExportChat } from "../../hooks/use-chats";
 import { useChatStore } from "../../stores/chat.store";
@@ -52,8 +53,17 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
     onClose();
   };
 
-  const handleDelete = (chatId: string) => {
-    if (!confirm("Delete this chat file? Messages will be lost.")) return;
+  const handleDelete = async (chatId: string) => {
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Chat File",
+        message: "Delete this chat file? Messages will be lost.",
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     deleteChat.mutate(chatId);
     if (chatId === activeChatId && chatFiles.length > 1) {
       const next = chatFiles.find((c) => c.id !== chatId);
@@ -226,8 +236,17 @@ export function ChatFilesDrawer({ chat, open, onClose }: ChatFilesDrawerProps) {
         {/* Delete all branches */}
         <div className="border-t border-[var(--border)] px-4 py-3">
           <button
-            onClick={() => {
-              if (!confirm(`Delete all ${chatFiles.length} branches? This cannot be undone.`)) return;
+            onClick={async () => {
+              if (
+                !(await showConfirmDialog({
+                  title: "Delete All Branches",
+                  message: `Delete all ${chatFiles.length} branches? This cannot be undone.`,
+                  confirmLabel: "Delete All",
+                  tone: "destructive",
+                }))
+              ) {
+                return;
+              }
               deleteChatGroup.mutate(groupId);
               setActiveChatId(null);
               onClose();

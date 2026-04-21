@@ -215,6 +215,8 @@ export interface GenerationInfo {
   temperature: number | null;
   tokensPrompt: number | null;
   tokensCompletion: number | null;
+  tokensCachedPrompt?: number | null;
+  tokensCacheWritePrompt?: number | null;
   durationMs: number | null;
   finishReason: string | null;
 }

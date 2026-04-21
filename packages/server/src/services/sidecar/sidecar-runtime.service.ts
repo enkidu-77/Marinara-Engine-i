@@ -276,7 +276,9 @@ class SidecarRuntimeService {
       preferVulkan:
         current?.preferVulkan ??
         (process.platform === "linux"
-          ? ["/usr/lib/libvulkan.so", "/usr/lib64/libvulkan.so", "/usr/lib/x86_64-linux-gnu/libvulkan.so.1"].some((path) => existsSync(path))
+          ? ["/usr/lib/libvulkan.so", "/usr/lib64/libvulkan.so", "/usr/lib/x86_64-linux-gnu/libvulkan.so.1"].some(
+              (path) => existsSync(path),
+            )
           : false),
       systemLlamaPath: current?.systemLlamaPath ?? null,
       launchCommand: current?.launchCommand ?? null,
@@ -416,9 +418,7 @@ class SidecarRuntimeService {
       }
 
       const isBundledArtifact =
-        /^llama-/i.test(entry.name) ||
-        /\.(extract|zip)$/i.test(entry.name) ||
-        entry.name.endsWith(".tar.gz");
+        /^llama-/i.test(entry.name) || /\.(extract|zip)$/i.test(entry.name) || entry.name.endsWith(".tar.gz");
       if (isBundledArtifact || entry.isDirectory()) {
         rmSync(fullPath, { recursive: true, force: true });
       }
@@ -619,7 +619,9 @@ class SidecarRuntimeService {
     const preferCuda = arch === "x64" && hasNvidia;
     const preferHip = platform === "win32" && arch === "x64" && hasAmd;
     const preferRocm =
-      platform === "linux" && arch === "x64" && (hasAmd || (await commandSucceeds("rocm-smi")) || existsSync("/opt/rocm"));
+      platform === "linux" &&
+      arch === "x64" &&
+      (hasAmd || (await commandSucceeds("rocm-smi")) || existsSync("/opt/rocm"));
     const preferSycl = platform === "win32" && arch === "x64" && hasIntel;
     const preferVulkan = await this.detectVulkanSupport(platform);
     const systemLlamaPath = await this.detectSystemLlamaPath();
@@ -742,9 +744,7 @@ class SidecarRuntimeService {
             ["where", "llama-server.exe"],
             ["where", "llama-server"],
           ]
-        : [
-            ["which", "llama-server"],
-          ];
+        : [["which", "llama-server"]];
 
     for (const [command, target] of candidates) {
       try {
@@ -779,7 +779,11 @@ class SidecarRuntimeService {
 
   private createSystemInstall(systemPath: string, capabilities: RuntimeCapabilities | null): SidecarRuntimeInstall {
     const gpuCapable = capabilities
-      ? capabilities.preferCuda || capabilities.preferHip || capabilities.preferRocm || capabilities.preferSycl || capabilities.preferVulkan
+      ? capabilities.preferCuda ||
+        capabilities.preferHip ||
+        capabilities.preferRocm ||
+        capabilities.preferSycl ||
+        capabilities.preferVulkan
       : false;
 
     return {
@@ -813,20 +817,21 @@ class SidecarRuntimeService {
       return null;
     }
 
-    const capabilities: RuntimeCapabilities | null =
-      this.diagnosticsCache?.value
-        ? {
-            platform: process.platform,
-            arch: process.arch,
-            gpuVendors: diagnostics.gpuVendors.filter((vendor): vendor is GpuVendor => vendor === "nvidia" || vendor === "amd" || vendor === "intel"),
-            preferCuda: diagnostics.preferCuda,
-            preferHip: diagnostics.preferHip,
-            preferRocm: diagnostics.preferRocm,
-            preferSycl: diagnostics.preferSycl,
-            preferVulkan: diagnostics.preferVulkan,
-            systemLlamaPath: diagnostics.systemLlamaPath,
-          }
-        : null;
+    const capabilities: RuntimeCapabilities | null = this.diagnosticsCache?.value
+      ? {
+          platform: process.platform,
+          arch: process.arch,
+          gpuVendors: diagnostics.gpuVendors.filter(
+            (vendor): vendor is GpuVendor => vendor === "nvidia" || vendor === "amd" || vendor === "intel",
+          ),
+          preferCuda: diagnostics.preferCuda,
+          preferHip: diagnostics.preferHip,
+          preferRocm: diagnostics.preferRocm,
+          preferSycl: diagnostics.preferSycl,
+          preferVulkan: diagnostics.preferVulkan,
+          systemLlamaPath: diagnostics.systemLlamaPath,
+        }
+      : null;
     return this.createSystemInstall(systemPath, capabilities);
   }
 

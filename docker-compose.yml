@@ -12,6 +12,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATA_DIR=/app/data
+      - AUTO_CREATE_DEFAULT_CONNECTION=${AUTO_CREATE_DEFAULT_CONNECTION:-true}
     restart: unless-stopped
 
 volumes:

@@ -298,12 +298,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     });
 
     try {
-      await consumeDownloadStream(
-        "/api/sidecar/download/custom",
-        modelPath ? { repo, modelPath } : { repo },
-        set,
-        get,
-      );
+      await consumeDownloadStream("/api/sidecar/download/custom", modelPath ? { repo, modelPath } : { repo }, set, get);
     } catch (error) {
       set({
         downloadProgress: {

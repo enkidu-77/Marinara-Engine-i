@@ -578,6 +578,9 @@ type RoleplaySurfaceProps = {
   wizardOpen: boolean;
   peekPromptData: PeekPromptData | null;
   deleteDialogMessageId: string | null;
+  deleteDialogCanDeleteSwipe: boolean;
+  deleteDialogActiveSwipeIndex: number;
+  deleteDialogSwipeCount: number;
   multiSelectMode: boolean;
   selectedMessageIds: Set<string>;
   groupChatMode?: string;
@@ -614,6 +617,7 @@ type RoleplaySurfaceProps = {
   onExpressionChange: (characterId: string, expression: string) => void;
   onSpritePlacementChange: (characterId: string, placement: SpritePlacement) => void;
   onDeleteConfirm: () => void;
+  onDeleteSwipe: () => void;
   onDeleteMore: () => void;
   onCloseDeleteDialog: () => void;
   onBulkDelete: () => void;
@@ -665,6 +669,9 @@ export function ChatRoleplaySurface({
   wizardOpen,
   peekPromptData,
   deleteDialogMessageId,
+  deleteDialogCanDeleteSwipe,
+  deleteDialogActiveSwipeIndex,
+  deleteDialogSwipeCount,
   multiSelectMode,
   selectedMessageIds,
   groupChatMode,
@@ -701,6 +708,7 @@ export function ChatRoleplaySurface({
   onExpressionChange,
   onSpritePlacementChange,
   onDeleteConfirm,
+  onDeleteSwipe,
   onDeleteMore,
   onCloseDeleteDialog,
   onBulkDelete,
@@ -1090,6 +1098,9 @@ export function ChatRoleplaySurface({
         wizardOpen={wizardOpen}
         peekPromptData={peekPromptData}
         deleteDialogMessageId={deleteDialogMessageId}
+        deleteDialogCanDeleteSwipe={deleteDialogCanDeleteSwipe}
+        deleteDialogActiveSwipeIndex={deleteDialogActiveSwipeIndex}
+        deleteDialogSwipeCount={deleteDialogSwipeCount}
         multiSelectMode={multiSelectMode}
         selectedMessageCount={selectedMessageIds.size}
         sceneSettings={{
@@ -1105,6 +1116,7 @@ export function ChatRoleplaySurface({
         onWizardFinish={onWizardFinish}
         onClosePeekPrompt={onClosePeekPrompt}
         onDeleteConfirm={onDeleteConfirm}
+        onDeleteSwipe={onDeleteSwipe}
         onDeleteMore={onDeleteMore}
         onCloseDeleteDialog={onCloseDeleteDialog}
         onBulkDelete={onBulkDelete}

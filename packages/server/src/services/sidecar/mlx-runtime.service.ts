@@ -58,14 +58,10 @@ function readInstalledVersion(): string | null {
   }
 
   try {
-    return execFileSync(
-      VENV_PYTHON,
-      ["-c", "import importlib.metadata; print(importlib.metadata.version('mlx-lm'))"],
-      {
-        encoding: "utf-8",
-        timeout: 5_000,
-      },
-    ).trim();
+    return execFileSync(VENV_PYTHON, ["-c", "import importlib.metadata; print(importlib.metadata.version('mlx-lm'))"], {
+      encoding: "utf-8",
+      timeout: 5_000,
+    }).trim();
   } catch {
     return null;
   }
@@ -246,7 +242,9 @@ class MlxRuntimeService {
 
             if (!response.ok) {
               const raw = await response.text().catch(() => "");
-              throw new Error(`Failed to download the uv installer: HTTP ${response.status} ${raw || response.statusText}`.trim());
+              throw new Error(
+                `Failed to download the uv installer: HTTP ${response.status} ${raw || response.statusText}`.trim(),
+              );
             }
 
             const text = await response.text();
@@ -287,7 +285,9 @@ class MlxRuntimeService {
       }
 
       throw new Error(
-        error instanceof Error ? `Failed to bootstrap uv for the MLX runtime.\n${error.message}` : "Failed to bootstrap uv for the MLX runtime.",
+        error instanceof Error
+          ? `Failed to bootstrap uv for the MLX runtime.\n${error.message}`
+          : "Failed to bootstrap uv for the MLX runtime.",
       );
     }
 

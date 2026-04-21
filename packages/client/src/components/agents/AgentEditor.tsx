@@ -4,6 +4,7 @@
 // ──────────────────────────────────────────────
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useUIStore } from "../../stores/ui.store";
+import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useAgentConfigs, useUpdateAgent, useCreateAgent, type AgentConfigRow } from "../../hooks/use-agents";
 import { useConnections } from "../../hooks/use-connections";
 import { useCustomTools, type CustomToolRow } from "../../hooks/use-custom-tools";
@@ -374,7 +375,16 @@ export function AgentEditor() {
 
   const handleDelete = async () => {
     if (!dbConfig) return;
-    if (!confirm("Delete this custom agent? This cannot be undone.")) return;
+    if (
+      !(await showConfirmDialog({
+        title: "Delete Agent",
+        message: "Delete this custom agent? This cannot be undone.",
+        confirmLabel: "Delete",
+        tone: "destructive",
+      }))
+    ) {
+      return;
+    }
     await deleteAgent.mutateAsync(dbConfig.id);
     closeAgentDetail();
   };

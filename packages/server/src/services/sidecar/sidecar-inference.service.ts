@@ -121,10 +121,15 @@ function extractJsonPayload<T>(raw: string): T {
   }
 }
 
-function extractChoiceContent(choice: {
-  delta?: { content?: unknown; reasoning_content?: unknown };
-  message?: { content?: unknown; reasoning_content?: unknown };
-} | null | undefined): { content: string; reasoning: string } {
+function extractChoiceContent(
+  choice:
+    | {
+        delta?: { content?: unknown; reasoning_content?: unknown };
+        message?: { content?: unknown; reasoning_content?: unknown };
+      }
+    | null
+    | undefined,
+): { content: string; reasoning: string } {
   return {
     content: extractContentText(choice?.delta?.content ?? choice?.message?.content),
     reasoning: extractContentText(choice?.delta?.reasoning_content ?? choice?.message?.reasoning_content),
@@ -249,7 +254,8 @@ export async function runTestMessage(): Promise<SidecarTestMessageOutput> {
           messages: [
             {
               role: "system",
-              content: "You are a local runtime smoke test. Follow the user's format exactly and do not omit the verification token.",
+              content:
+                "You are a local runtime smoke test. Follow the user's format exactly and do not omit the verification token.",
             },
             {
               role: "user",

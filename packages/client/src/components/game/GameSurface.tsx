@@ -157,6 +157,7 @@ interface GameSurfaceProps {
   personaInfo?: PersonaInfo;
   chatBackground?: string | null;
   onOpenSettings: () => void;
+  onDeleteMessage: (messageId: string) => void;
 }
 
 export function GameSurface({
@@ -170,6 +171,7 @@ export function GameSurface({
   personaInfo,
   chatBackground: _chatBackground,
   onOpenSettings,
+  onDeleteMessage,
   isMessagesLoading,
 }: GameSurfaceProps) {
   // Sync game metadata → store
@@ -343,9 +345,15 @@ export function GameSurface({
     return (chatMeta.gameInventory as Array<{ name: string; quantity: number }>) ?? [];
   });
   const [inventoryNotifications, setInventoryNotifications] = useState<string[]>([]);
+  const [pendingMapMove, setPendingMapMove] = useState<{
+    position: { x: number; y: number } | string;
+    label: string;
+  } | null>(null);
+  const [startSessionRequested, setStartSessionRequested] = useState(false);
   const [activeReadable, setActiveReadable] = useState<ReadableTag | null>(null);
   const readableQueueRef = useRef<ReadableTag[]>([]);
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startSessionGuardRef = useRef(false);
 
   // Handle readable segments from GameNarration: queue them and show one at a time
   const handleReadable = useCallback(
@@ -1506,6 +1514,7 @@ export function GameSurface({
 
   const sendMessage = useCallback(
     (message: string, attachments?: Array<{ type: string; data: string }>) => {
+      if ((chatMeta.gameSessionStatus as string) === "concluded") return;
       generate({
         chatId: activeChatId,
         connectionId: null,
@@ -1513,7 +1522,7 @@ export function GameSurface({
         ...(attachments?.length ? { attachments } : {}),
       });
     },
-    [activeChatId, generate],
+    [activeChatId, chatMeta.gameSessionStatus, generate],
   );
 
   // Game mutations
@@ -1527,6 +1536,7 @@ export function GameSurface({
   const startSession = useStartSession();
   const generateMap = useGenerateMap();
   const deleteChat = useDeleteChat();
+  const startSessionLocked = startSession.isPending || startSessionRequested;
 
   // Party members from setup config
   const partyMembers = useMemo(() => {
@@ -1857,9 +1867,12 @@ export function GameSurface({
   );
 
   const sessionStatus = (chatMeta.gameSessionStatus as string) || "active";
+  const sessionInteractive = sessionStatus !== "concluded";
   const gameName = chat?.name || "Game";
   const gameId = (chatMeta.gameId as string) || null;
   const sessionSummaries = (chatMeta.gamePreviousSessionSummaries as SessionSummary[]) || [];
+  const displaySessionNumber =
+    sessionStatus === "concluded" ? Math.max(sessionSummaries.length, 1) : sessionSummaries.length + 1;
 
   const handleRollDice = useCallback(
     (notation: string) => {
@@ -1868,15 +1881,80 @@ export function GameSurface({
     [activeChatId, rollDice],
   );
 
+  const isSameMapPosition = useCallback(
+    (left: { x: number; y: number } | string | null | undefined, right: { x: number; y: number } | string) => {
+      if (!left) return false;
+      if (typeof left === "string" || typeof right === "string") {
+        return typeof left === "string" && typeof right === "string" && left === right;
+      }
+      return left.x === right.x && left.y === right.y;
+    },
+    [],
+  );
+
+  const describeMapPosition = useCallback(
+    (position: { x: number; y: number } | string) => {
+      if (typeof position === "string") {
+        return currentMap?.nodes?.find((node) => node.id === position)?.label ?? position;
+      }
+      return (
+        currentMap?.cells?.find((cell) => cell.x === position.x && cell.y === position.y)?.label ??
+        `(${position.x}, ${position.y})`
+      );
+    },
+    [currentMap],
+  );
+
   const handleMapMove = useCallback(
     (position: { x: number; y: number } | string) => {
-      moveOnMap.mutate({ chatId: activeChatId, position });
-      // Also send a message so the GM narrates the movement
-      const label = typeof position === "string" ? position : `(${position.x}, ${position.y})`;
-      sendMessage(`*moves to ${label}*`);
+      if (!sessionInteractive) {
+        setPendingMapMove(null);
+        return;
+      }
+      if (isSameMapPosition(currentMap?.partyPosition, position)) {
+        setPendingMapMove(null);
+        return;
+      }
+      setPendingMapMove({ position, label: describeMapPosition(position) });
     },
-    [activeChatId, moveOnMap, sendMessage],
+    [currentMap?.partyPosition, describeMapPosition, isSameMapPosition, sessionInteractive],
   );
+
+  const handleSendGameTurn = useCallback(
+    (
+      message: string,
+      attachments?: Array<{ type: string; data: string }>,
+      options?: { commitPendingMove?: boolean },
+    ) => {
+      if (!sessionInteractive) return;
+      if (options?.commitPendingMove && pendingMapMove) {
+        moveOnMap.mutate({ chatId: activeChatId, position: pendingMapMove.position });
+      }
+      sendMessage(message, attachments);
+      if (options?.commitPendingMove && pendingMapMove) {
+        setPendingMapMove(null);
+      }
+    },
+    [activeChatId, moveOnMap, pendingMapMove, sendMessage, sessionInteractive],
+  );
+
+  useEffect(() => {
+    setPendingMapMove(null);
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (sessionInteractive) return;
+    setPendingMapMove(null);
+    setActiveChoices(null);
+    setActiveQte(null);
+  }, [sessionInteractive]);
+
+  useEffect(() => {
+    if (!pendingMapMove) return;
+    if (isSameMapPosition(currentMap?.partyPosition, pendingMapMove.position)) {
+      setPendingMapMove(null);
+    }
+  }, [currentMap?.partyPosition, isSameMapPosition, pendingMapMove]);
 
   const handleConcludeSession = useCallback(() => {
     concludeSession.mutate({ chatId: activeChatId });
@@ -1892,13 +1970,24 @@ export function GameSurface({
   }, [handleConcludeSession]);
 
   const handleStartNewSession = useCallback(() => {
-    if (gameId) startSession.mutate({ gameId });
-  }, [gameId, startSession]);
+    if (!gameId || startSessionLocked || startSessionGuardRef.current) return;
+    startSessionGuardRef.current = true;
+    setStartSessionRequested(true);
+    startSession.mutate(
+      { gameId },
+      {
+        onSettled: () => {
+          startSessionGuardRef.current = false;
+          setStartSessionRequested(false);
+        },
+      },
+    );
+  }, [gameId, startSession, startSessionLocked]);
 
   const handleCopySessionContext = useCallback(async () => {
     const lines = [
       `gameName=${gameName}`,
-      `session=${sessionNumber}`,
+      `session=${displaySessionNumber}`,
       `state=${gameState}`,
       `chatId=${activeChatId}`,
       `gameId=${gameId ?? ""}`,
@@ -1924,8 +2013,8 @@ export function GameSurface({
     gameSnapshot?.temperature,
     gameSnapshot?.time,
     gameSnapshot?.weather,
+    displaySessionNumber,
     gameState,
-    sessionNumber,
   ]);
 
   const handleDismissDice = useCallback(() => {
@@ -1933,37 +2022,41 @@ export function GameSurface({
   }, [setDiceRollResult]);
 
   const handleGenerateMap = useCallback(() => {
+    if (!sessionInteractive) return;
     const config = chatMeta.gameSetupConfig as Record<string, unknown> | undefined;
     generateMap.mutate({
       chatId: activeChatId,
       locationType: (config?.setting as string) || "fantasy world",
       context: `Session ${sessionNumber} — ${gameState} state`,
     });
-  }, [activeChatId, chatMeta, generateMap, sessionNumber, gameState]);
+  }, [activeChatId, chatMeta, gameState, generateMap, sessionInteractive, sessionNumber]);
 
   // Choice card selection → send as player message
   const handleChoiceSelect = useCallback(
     (choice: string) => {
+      if (!sessionInteractive) return;
       setActiveChoices(null);
       sendMessage(choice);
     },
-    [sendMessage],
+    [sendMessage, sessionInteractive],
   );
 
   // QTE selection → send with bonus modifier
   const handleQteSelect = useCallback(
     (action: string, timeRemaining: number) => {
+      if (!sessionInteractive) return;
       setActiveQte(null);
       const bonus = Math.ceil(timeRemaining);
       sendMessage(`*${action}* [qte_bonus: ${bonus}]`);
     },
-    [sendMessage],
+    [sendMessage, sessionInteractive],
   );
 
   const handleQteTimeout = useCallback(() => {
+    if (!sessionInteractive) return;
     setActiveQte(null);
     sendMessage("*hesitates too long* [qte_bonus: 0]");
-  }, [sendMessage]);
+  }, [sendMessage, sessionInteractive]);
 
   // Combat end handler — clear combat state and notify GM
   const handleCombatEnd = useCallback(
@@ -2452,7 +2545,7 @@ export function GameSurface({
                   <button
                     onClick={handleCopySessionContext}
                     className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-black/45 text-white/85 backdrop-blur-md transition-colors hover:bg-black/60 hover:text-white"
-                    title={`${gameName} - Session ${sessionNumber}`}
+                    title={`${gameName} - Session ${displaySessionNumber}`}
                   >
                     <Info size={14} />
                   </button>
@@ -2474,7 +2567,8 @@ export function GameSurface({
                   ) : (
                     <button
                       onClick={handleStartNewSession}
-                      className="flex h-9 w-9 items-center justify-center rounded-full border border-emerald-300/25 bg-emerald-500/20 text-emerald-200 backdrop-blur-md transition-colors hover:bg-emerald-500/35"
+                      disabled={startSessionLocked}
+                      className="flex h-9 w-9 items-center justify-center rounded-full border border-emerald-300/25 bg-emerald-500/20 text-emerald-200 backdrop-blur-md transition-colors hover:bg-emerald-500/35 disabled:opacity-50 disabled:hover:bg-emerald-500/20"
                       title="New Session"
                     >
                       <Play size={13} />
@@ -2569,7 +2663,7 @@ export function GameSurface({
                             setMobileActionsOpen(false);
                           }}
                           className="flex h-8 w-8 items-center justify-center rounded-lg text-white/85 transition-colors hover:bg-white/10 hover:text-white"
-                          title={`${gameName} - Session ${sessionNumber}`}
+                          title={`${gameName} - Session ${displaySessionNumber}`}
                         >
                           <Info size={14} />
                         </button>
@@ -2600,7 +2694,8 @@ export function GameSurface({
                               handleStartNewSession();
                               setMobileActionsOpen(false);
                             }}
-                            className="flex h-8 w-8 items-center justify-center rounded-lg text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                            disabled={startSessionLocked}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-emerald-200 transition-colors hover:bg-emerald-500/20 disabled:opacity-50 disabled:hover:bg-transparent"
                             title="New Session"
                           >
                             <Play size={13} />
@@ -2670,8 +2765,9 @@ export function GameSurface({
                     <MobileMapButton
                       map={currentMap}
                       onMove={handleMapMove}
+                      selectedPosition={pendingMapMove?.position ?? null}
                       onGenerateMap={handleGenerateMap}
-                      disabled={isStreaming || !narrationDone}
+                      disabled={isStreaming || !narrationDone || !sessionInteractive}
                       gameState={gameState}
                       timeOfDay={gameSnapshot?.time ?? metaTime ?? null}
                     />
@@ -2681,8 +2777,9 @@ export function GameSurface({
                     <GameMapPanel
                       map={currentMap}
                       onMove={handleMapMove}
+                      selectedPosition={pendingMapMove?.position ?? null}
                       onGenerateMap={handleGenerateMap}
-                      disabled={isStreaming || !narrationDone}
+                      disabled={isStreaming || !narrationDone || !sessionInteractive}
                       gameState={gameState}
                       timeOfDay={gameSnapshot?.time ?? metaTime ?? null}
                       chatId={activeChatId}
@@ -2714,11 +2811,13 @@ export function GameSurface({
                           <div className="text-xs font-medium text-amber-200">Local scene helper failed to start</div>
                           <div className="mt-1 text-[0.6875rem] leading-relaxed text-white/70">
                             Marinara will keep the game running without the local sidecar for now.
-                            {sidecarFailedRuntimeVariant && ` Runtime: ${sidecarFailedRuntimeVariant.replace(/-/g, " ")}.`}
+                            {sidecarFailedRuntimeVariant &&
+                              ` Runtime: ${sidecarFailedRuntimeVariant.replace(/-/g, " ")}.`}
                             {sidecarStartupError ? ` ${sidecarStartupError}.` : ""}
                           </div>
                           <div className="mt-1 text-[0.6875rem] leading-relaxed text-white/55">
-                            Open Local AI Model to retry startup, switch models, or disable local scene analysis temporarily.
+                            Open Local AI Model to retry startup, switch models, or disable local scene analysis
+                            temporarily.
                           </div>
                         </div>
                         <button
@@ -2799,7 +2898,11 @@ export function GameSurface({
                   const choicesSlot =
                     activeChoices && narrationDone ? (
                       <div className="pointer-events-auto mb-2 flex justify-center">
-                        <GameChoiceCards choices={activeChoices} onSelect={handleChoiceSelect} disabled={isStreaming} />
+                        <GameChoiceCards
+                          choices={activeChoices}
+                          onSelect={handleChoiceSelect}
+                          disabled={isStreaming || !sessionInteractive}
+                        />
                       </div>
                     ) : undefined;
 
@@ -2847,6 +2950,7 @@ export function GameSurface({
                           choicesSlot={choicesSlot}
                           onOpenInventory={() => setInventoryOpen(true)}
                           inventoryCount={inventoryItems.length}
+                          onDeleteMessage={onDeleteMessage}
                           segmentEdits={segmentEdits}
                           onEditSegment={(messageId, segmentIndex, newContent) => {
                             if (messageId) {
@@ -2861,10 +2965,12 @@ export function GameSurface({
                           }}
                           inputSlot={
                             <GameInput
-                              onSend={sendMessage}
+                              onSend={handleSendGameTurn}
                               onRollDice={handleRollDice}
                               showPartyToggle={partyMembers.length > 0}
-                              disabled={isStreaming || sessionStatus === "concluded"}
+                              pendingMoveLabel={pendingMapMove?.label ?? null}
+                              onClearPendingMove={() => setPendingMapMove(null)}
+                              disabled={isStreaming || !sessionInteractive}
                               isStreaming={isStreaming}
                               inline
                               draftKey={activeChatId}
@@ -2903,6 +3009,7 @@ export function GameSurface({
                       choicesSlot={choicesSlot}
                       onOpenInventory={() => setInventoryOpen(true)}
                       inventoryCount={inventoryItems.length}
+                      onDeleteMessage={onDeleteMessage}
                       segmentEdits={segmentEdits}
                       onEditSegment={(messageId, segmentIndex, newContent) => {
                         // Store edit as an overlay in chat metadata so we don't destroy
@@ -2920,10 +3027,12 @@ export function GameSurface({
                       }}
                       inputSlot={
                         <GameInput
-                          onSend={sendMessage}
+                          onSend={handleSendGameTurn}
                           onRollDice={handleRollDice}
                           showPartyToggle={partyMembers.length > 0}
-                          disabled={isStreaming || sessionStatus === "concluded"}
+                          pendingMoveLabel={pendingMapMove?.label ?? null}
+                          onClearPendingMove={() => setPendingMapMove(null)}
+                          disabled={isStreaming || !sessionInteractive}
                           isStreaming={isStreaming}
                           inline
                           draftKey={activeChatId}
@@ -2934,7 +3043,7 @@ export function GameSurface({
                 })()}
 
                 {/* QTE overlay — absolute, centered */}
-                {activeQte && (
+                {activeQte && sessionInteractive && (
                   <div className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center">
                     <GameQteOverlay
                       actions={activeQte.actions.map((a) => ({ label: a }))}
@@ -2949,7 +3058,7 @@ export function GameSurface({
                 {historyOpen && (
                   <GameSessionHistory
                     summaries={sessionSummaries}
-                    currentSessionNumber={sessionNumber}
+                    currentSessionNumber={displaySessionNumber}
                     onClose={() => setHistoryOpen(false)}
                   />
                 )}
@@ -2971,7 +3080,7 @@ export function GameSurface({
                 items={inventoryItems}
                 open={inventoryOpen}
                 onClose={() => setInventoryOpen(false)}
-                canInteract={narrationDone && !isStreaming}
+                canInteract={sessionInteractive && narrationDone && !isStreaming}
                 onUseItem={(itemName) => {
                   setInventoryOpen(false);
                   sendMessage(`I use my ${itemName}.`);

@@ -1814,10 +1814,12 @@ export async function generateRoutes(app: FastifyInstance) {
         verbosity = null;
       } else if (chatMode === "game") {
         // Local Gemma: just ensure generous output
-        maxTokens = Math.max(maxTokens, 8192);
+        if (typeof chatParams?.maxTokens !== "number") {
+          maxTokens = Math.max(maxTokens, 8192);
+        }
       }
 
-      if (chatParams && chatMode !== "game") {
+      if (chatParams) {
         if (typeof chatParams.temperature === "number") temperature = chatParams.temperature;
         if (typeof chatParams.maxTokens === "number") maxTokens = chatParams.maxTokens;
         topP = normalizeChatTopP(chatParams.topP) ?? topP;
@@ -2033,6 +2035,47 @@ export async function generateRoutes(app: FastifyInstance) {
           });
         }
       }
+
+      let resolvedGameDiscordSpeakerName: string | null = null;
+      let gameDiscordSpeakerResolved = false;
+
+      const resolveGameDiscordSpeakerName = async (): Promise<string> => {
+        if (gameDiscordSpeakerResolved) {
+          return resolvedGameDiscordSpeakerName ?? "Narrator";
+        }
+
+        gameDiscordSpeakerResolved = true;
+        const gmMode = typeof earlyMeta.gameGmMode === "string" ? earlyMeta.gameGmMode : "";
+        const gmCharacterId =
+          typeof earlyMeta.gameGmCharacterId === "string" && earlyMeta.gameGmCharacterId.trim()
+            ? earlyMeta.gameGmCharacterId.trim()
+            : null;
+
+        if (chatMode === "game" && gmMode === "character" && gmCharacterId) {
+          const knownCharacter = charInfo.find((character) => character.id === gmCharacterId);
+          if (knownCharacter?.name) {
+            resolvedGameDiscordSpeakerName = knownCharacter.name;
+            return knownCharacter.name;
+          }
+
+          const gmRow = await chars.getById(gmCharacterId);
+          if (gmRow) {
+            try {
+              const gmData = JSON.parse(gmRow.data as string);
+              if (typeof gmData.name === "string" && gmData.name.trim()) {
+                const gmName = gmData.name.trim();
+                resolvedGameDiscordSpeakerName = gmName;
+                return gmName;
+              }
+            } catch {
+              /* ignore malformed GM card data */
+            }
+          }
+        }
+
+        resolvedGameDiscordSpeakerName = "Narrator";
+        return "Narrator";
+      };
 
       // ── Fallback: inject character & persona info if the preset didn't include them ──
       // In game mode the GM prompt already includes party members and player persona
@@ -3787,11 +3830,19 @@ export async function generateRoutes(app: FastifyInstance) {
 
       // ── Impersonate: inject instruction to respond as the user's character ──
       if (input.impersonate) {
+        const rawImpersonationDirection = input.userMessage?.trim() ?? "";
+        const legacyDirectionMatch = rawImpersonationDirection.match(
+          /^\[Impersonation instruction — write \{\{user\}\}'s next response, steering it toward the following:\s*([\s\S]+?)\]$/,
+        );
+        const impersonationDirection = legacyDirectionMatch
+          ? legacyDirectionMatch[1]!.trim()
+          : rawImpersonationDirection;
         const impersonateInstruction = [
           `<instruction>`,
           `You are now writing as ${personaName}, the user's character.`,
           `Study ${personaName}'s previous messages in the conversation and replicate their voice, mannerisms, speech patterns, and style as closely as possible.`,
           personaDescription ? `Character description: ${personaDescription}` : "",
+          impersonationDirection ? `Additional direction for this reply: ${impersonationDirection}` : "",
           `Write a single in-character response from ${personaName}'s perspective. Do NOT break character or add meta-commentary. Respond exactly as ${personaName} would.`,
           `</instruction>`,
         ]
@@ -4171,6 +4222,13 @@ export async function generateRoutes(app: FastifyInstance) {
                   usage.promptTokens += result.usage.promptTokens;
                   usage.completionTokens += result.usage.completionTokens;
                   usage.totalTokens += result.usage.totalTokens;
+                  if (result.usage.cachedPromptTokens != null) {
+                    usage.cachedPromptTokens = (usage.cachedPromptTokens ?? 0) + result.usage.cachedPromptTokens;
+                  }
+                  if (result.usage.cacheWritePromptTokens != null) {
+                    usage.cacheWritePromptTokens =
+                      (usage.cacheWritePromptTokens ?? 0) + result.usage.cacheWritePromptTokens;
+                  }
                 }
               }
               finishReason = result.finishReason;
@@ -4280,6 +4338,13 @@ export async function generateRoutes(app: FastifyInstance) {
                     usage.promptTokens += finalResult.usage.promptTokens;
                     usage.completionTokens += finalResult.usage.completionTokens;
                     usage.totalTokens += finalResult.usage.totalTokens;
+                    if (finalResult.usage.cachedPromptTokens != null) {
+                      usage.cachedPromptTokens = (usage.cachedPromptTokens ?? 0) + finalResult.usage.cachedPromptTokens;
+                    }
+                    if (finalResult.usage.cacheWritePromptTokens != null) {
+                      usage.cacheWritePromptTokens =
+                        (usage.cacheWritePromptTokens ?? 0) + finalResult.usage.cacheWritePromptTokens;
+                    }
                   }
                 }
                 finishReason = finalResult.finishReason;
@@ -4350,6 +4415,8 @@ export async function generateRoutes(app: FastifyInstance) {
                   tokensPrompt: usage?.promptTokens ?? null,
                   tokensCompletion: usage?.completionTokens ?? null,
                   tokensTotal: usage?.totalTokens ?? null,
+                  tokensCachedPrompt: usage?.cachedPromptTokens ?? null,
+                  tokensCacheWritePrompt: usage?.cacheWritePromptTokens ?? null,
                   durationMs,
                   finishReason: finishReason ?? null,
                 },
@@ -4463,6 +4530,8 @@ export async function generateRoutes(app: FastifyInstance) {
                 verbosity: verbosity ?? null,
                 tokensPrompt: usage?.promptTokens ?? null,
                 tokensCompletion: usage?.completionTokens ?? null,
+                tokensCachedPrompt: usage?.cachedPromptTokens ?? null,
+                tokensCacheWritePrompt: usage?.cacheWritePromptTokens ?? null,
                 durationMs,
                 finishReason: finishReason ?? null,
               },
@@ -4517,7 +4586,10 @@ export async function generateRoutes(app: FastifyInstance) {
 
           // Mirror character response to Discord (fire-and-forget, skip regens/swipes)
           if (discordWebhookUrl && fullResponse.trim() && !input.impersonate && !input.regenerateMessageId) {
-            const charName = charInfo.find((c) => c.id === targetCharId)?.name ?? "Character";
+            const charName =
+              chatMode === "game"
+                ? await resolveGameDiscordSpeakerName()
+                : (charInfo.find((c) => c.id === targetCharId)?.name ?? "Character");
             postToDiscordWebhook(discordWebhookUrl, { content: fullResponse, username: charName });
           }
 

@@ -882,6 +882,34 @@ export async function chatsRoutes(app: FastifyInstance) {
     return storage.addSwipe(req.params.messageId, content, silent);
   });
 
+  // Delete a swipe without deleting the parent message
+  app.delete<{ Params: { chatId: string; messageId: string; index: string } }>(
+    "/:chatId/messages/:messageId/swipes/:index",
+    async (req, reply) => {
+      const index = Number.parseInt(req.params.index, 10);
+      if (!Number.isInteger(index) || index < 0) {
+        return reply.status(400).send({ error: "Valid swipe index is required" });
+      }
+
+      const swipes = await storage.getSwipes(req.params.messageId);
+      if (swipes.length <= 1) {
+        return reply.status(400).send({ error: "Cannot delete the last remaining swipe" });
+      }
+
+      const target = swipes.find((swipe: any) => swipe.index === index);
+      if (!target) {
+        return reply.status(404).send({ error: "Swipe not found" });
+      }
+
+      const updated = await storage.removeSwipe(req.params.messageId, index);
+      if (!updated) {
+        return reply.status(404).send({ error: "Message not found" });
+      }
+
+      return updated;
+    },
+  );
+
   // Set active swipe
   app.put<{ Params: { chatId: string; messageId: string } }>(
     "/:chatId/messages/:messageId/active-swipe",

@@ -323,8 +323,9 @@ export function useGenerate() {
       const persistedMessages = new Map<string, Message>();
 
       // ── Streaming think-tag filter ──
-      // Models may emit <think>...</think> or <thinking>...</thinking> at the
-      // start of their response. We intercept these tokens during streaming so
+      // Models may emit <think>...</think>, <thinking>...</thinking>, or
+      // <|channel>thought ... <channel|> at the start of their response.
+      // We intercept these tokens during streaming so
       // the user never sees the raw tags — the server will extract the content
       // into message.extra.thinking and emit a content_replace event.
       //
@@ -334,8 +335,9 @@ export function useGenerate() {
       // Think-tag filtering disabled — skip straight to passthrough
       let thinkState: string = "done";
       let thinkBuf = ""; // Raw token accumulator during detect/inside phases
-      let thinkTagName = "think"; // Which variant was matched ("think" or "thinking")
-      const THINK_OPEN_RE = /^(\s*)<(think(?:ing)?)>/i;
+      let thinkCloseTag = "</think>";
+      const THINK_OPEN_RE = /^(\s*)(<(think(?:ing)?)>|<\|channel>thought\b)/i;
+      const THINK_OPEN_PREFIXES = ["<thinking>", "<think>", "<|channel>thought"];
 
       // Compute charsPerTick from the user's streamingSpeed setting (1–100).
       // Read per-tick so changes to the slider take effect immediately.
@@ -432,14 +434,11 @@ export function useGenerate() {
                   // Found opening tag — enter suppression mode
                   thinkState = "inside";
                   thinkBuf = thinkBuf.slice(openMatch[0].length);
-                  thinkTagName = openMatch[2]!.toLowerCase();
+                  thinkCloseTag = openMatch[3] ? `</${openMatch[3].toLowerCase()}>` : "<channel|>";
                   chunk = ""; // suppress
                 } else if (
                   thinkBuf.length > 30 ||
-                  (!(
-                    "<thinking>".startsWith(thinkBuf.trimStart().toLowerCase()) ||
-                    "<think>".startsWith(thinkBuf.trimStart().toLowerCase())
-                  ) &&
+                  (!THINK_OPEN_PREFIXES.some((prefix) => prefix.startsWith(thinkBuf.trimStart().toLowerCase())) &&
                     thinkBuf.trimStart().length > 0)
                 ) {
                   // Not a think tag — flush accumulated buffer as regular content
@@ -454,12 +453,11 @@ export function useGenerate() {
 
               if (thinkState === "inside") {
                 thinkBuf += chunk;
-                const closeStr = `</${thinkTagName}>`;
-                const closeIdx = thinkBuf.toLowerCase().indexOf(closeStr.toLowerCase());
+                const closeIdx = thinkBuf.toLowerCase().indexOf(thinkCloseTag.toLowerCase());
                 if (closeIdx !== -1) {
                   // Found closing tag — everything after it is visible content
                   thinkState = "done";
-                  chunk = thinkBuf.slice(closeIdx + closeStr.length).trimStart();
+                  chunk = thinkBuf.slice(closeIdx + thinkCloseTag.length).trimStart();
                   thinkBuf = "";
                 } else {
                   chunk = ""; // still inside — suppress
@@ -727,6 +725,8 @@ export function useGenerate() {
                 tokensPrompt: number | null;
                 tokensCompletion: number | null;
                 tokensTotal: number | null;
+                tokensCachedPrompt: number | null;
+                tokensCacheWritePrompt: number | null;
                 durationMs: number | null;
                 finishReason: string | null;
               };
@@ -734,6 +734,12 @@ export function useGenerate() {
               if (usage.tokensPrompt != null) parts.push(`prompt: ${usage.tokensPrompt.toLocaleString()}`);
               if (usage.tokensCompletion != null) parts.push(`completion: ${usage.tokensCompletion.toLocaleString()}`);
               if (usage.tokensTotal != null) parts.push(`total: ${usage.tokensTotal.toLocaleString()}`);
+              if ((usage.tokensCachedPrompt ?? 0) > 0) {
+                parts.push(`cached: ${usage.tokensCachedPrompt!.toLocaleString()}`);
+              }
+              if ((usage.tokensCacheWritePrompt ?? 0) > 0) {
+                parts.push(`cache write: ${usage.tokensCacheWritePrompt!.toLocaleString()}`);
+              }
               if (usage.durationMs != null) parts.push(`${(usage.durationMs / 1000).toFixed(1)}s`);
               if (usage.finishReason) parts.push(`finish: ${usage.finishReason}`);
               const tokenInfo = parts.length > 0 ? parts.join(" · ") : "no usage data";
@@ -797,7 +803,7 @@ export function useGenerate() {
                 pendingText = "";
                 thinkState = "done";
                 thinkBuf = "";
-                thinkTagName = "think";
+                thinkCloseTag = "</think>";
                 if (isActiveChat()) setStreamBuffer("");
               }
 

@@ -37,6 +37,7 @@ interface ConversationViewProps {
   onDelete: (messageId: string) => void;
   onRegenerate: (messageId: string) => void;
   onEdit: (messageId: string, content: string) => void;
+  onSetActiveSwipe: (messageId: string, index: number) => void;
   onPeekPrompt: () => void;
   lastAssistantMessageId: string | null;
   onOpenSettings: () => void;
@@ -115,6 +116,7 @@ export function ConversationView({
   onDelete,
   onRegenerate,
   onEdit,
+  onSetActiveSwipe,
   onPeekPrompt,
   lastAssistantMessageId,
   onOpenSettings,
@@ -683,16 +685,18 @@ export function ConversationView({
               continue;
             }
 
-            // Check if this starts a split-line group
-            const isSplitStart = item.key.endsWith("__line0");
+            // Check if this starts a split assistant-message group.
+            // Older code/comments called these "line" groups, but the actual
+            // rendered keys use __blockN.
+            const isSplitStart = item.key.endsWith("__block0") || item.key.endsWith("__line0");
             if (isSplitStart) {
-              const baseId = item.key.replace("__line0", "");
+              const baseId = item.key.replace(/__(?:block|line)0$/, "");
               const groupItems = [item];
               let j = i + 1;
               while (
                 j < filtered.length &&
                 filtered[j]!.type === "message" &&
-                filtered[j]!.key.startsWith(baseId + "__line")
+                (filtered[j]!.key.startsWith(baseId + "__block") || filtered[j]!.key.startsWith(baseId + "__line"))
               ) {
                 groupItems.push(filtered[j]! as typeof item);
                 j++;
@@ -710,6 +714,7 @@ export function ConversationView({
                   onDelete={onDelete}
                   onRegenerate={onRegenerate}
                   onEdit={onEdit}
+                  onSetActiveSwipe={onSetActiveSwipe}
                   onPeekPrompt={onPeekPrompt}
                 />,
               );
@@ -741,6 +746,7 @@ export function ConversationView({
                 onDelete={onDelete}
                 onRegenerate={onRegenerate}
                 onEdit={onEdit}
+                onSetActiveSwipe={onSetActiveSwipe}
                 onPeekPrompt={onPeekPrompt}
                 isLastAssistantMessage={msg.id === lastAssistantMessageId}
                 characterMap={characterMap}
@@ -861,6 +867,7 @@ function SplitMessageGroup({
   onDelete,
   onRegenerate,
   onEdit,
+  onSetActiveSwipe,
   onPeekPrompt,
 }: {
   items: Array<{ key: string; msg: Message; isGrouped: boolean; index: number }>;
@@ -873,6 +880,7 @@ function SplitMessageGroup({
   onDelete: (id: string) => void;
   onRegenerate: (id: string) => void;
   onEdit: (id: string, content: string) => void;
+  onSetActiveSwipe: (id: string, index: number) => void;
   onPeekPrompt: () => void;
 }) {
   const [showActions, setShowActions] = useState(false);
@@ -912,6 +920,7 @@ function SplitMessageGroup({
           onDelete={onDelete}
           onRegenerate={onRegenerate}
           onEdit={onEdit}
+          onSetActiveSwipe={onSetActiveSwipe}
           onPeekPrompt={onPeekPrompt}
           isLastAssistantMessage={false}
           characterMap={characterMap}
@@ -985,6 +994,7 @@ function SplitMessageGroup({
                 onDelete={onDelete}
                 onRegenerate={onRegenerate}
                 onEdit={onEdit}
+                onSetActiveSwipe={onSetActiveSwipe}
                 onPeekPrompt={onPeekPrompt}
                 isLastAssistantMessage={false}
                 characterMap={characterMap}
@@ -1005,6 +1015,7 @@ function SplitMessageGroup({
               onDelete={onDelete}
               onRegenerate={onRegenerate}
               onEdit={onEdit}
+              onSetActiveSwipe={onSetActiveSwipe}
               onPeekPrompt={onPeekPrompt}
               onEditClick={handleStartEdit}
               isLastAssistantMessage={firstItem.msg.id === lastAssistantMessageId}
@@ -1017,7 +1028,7 @@ function SplitMessageGroup({
 
         return items.map((gi) => {
           const { msg, isGrouped: grp } = gi;
-          const isChild = !gi.key.endsWith("__line0");
+          const isChild = !/(?:__block0|__line0)$/.test(gi.key);
           return (
             <ConversationMessage
               key={gi.key}
@@ -1030,6 +1041,7 @@ function SplitMessageGroup({
               onDelete={onDelete}
               onRegenerate={onRegenerate}
               onEdit={onEdit}
+              onSetActiveSwipe={onSetActiveSwipe}
               onPeekPrompt={onPeekPrompt}
               onEditClick={handleStartEdit}
               isLastAssistantMessage={msg.id === lastAssistantMessageId}
