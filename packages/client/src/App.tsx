@@ -55,13 +55,9 @@ export function App() {
   const setShowDownloadModal = useSidecarStore((s) => s.setShowDownloadModal);
   const fetchSidecarStatus = useSidecarStore((s) => s.fetchStatus);
 
-  // Fetch sidecar status on mount and prompt if first visit
+  // Fetch sidecar status on mount so the Local AI card is populated when opened later.
   useEffect(() => {
-    fetchSidecarStatus().then(() => {
-      if (!useSidecarStore.getState().hasBeenPrompted) {
-        setShowDownloadModal(true);
-      }
-    });
+    void fetchSidecarStatus();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Apply theme + font size to the document root whenever they change

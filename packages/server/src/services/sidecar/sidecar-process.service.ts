@@ -5,6 +5,8 @@ import { dirname, join } from "path";
 import type { SidecarBackend } from "@marinara-engine/shared";
 import { sidecarModelService } from "./sidecar-model.service.js";
 import { isAbortError } from "./sidecar-download.js";
+import { buildLlamaArgs, buildLlamaStartupPlans } from "./sidecar-launch-plan.js";
+import { buildLlamaProcessEnv } from "./sidecar-runtime-env.js";
 import { mlxRuntimeService, type MlxRuntimeInstall } from "./mlx-runtime.service.js";
 import { sidecarRuntimeService, type SidecarRuntimeInstall } from "./sidecar-runtime.service.js";
 
@@ -35,6 +37,7 @@ type ManagedRuntimeInstall = SidecarRuntimeInstall | MlxRuntimeInstall;
 type SyncOptions = {
   suppressKnownFailure?: boolean;
   forceStart?: boolean;
+  allowRuntimeInstall?: boolean;
 };
 
 class SidecarServerExitError extends Error {
@@ -85,6 +88,7 @@ class SidecarProcessService {
     await this.syncForCurrentConfig({
       suppressKnownFailure: !forceStart,
       forceStart,
+      allowRuntimeInstall: forceStart,
     });
     if (!this.ready || !this.baseUrl) {
       throw new Error(this.startupError ?? "The local sidecar server is not ready");
@@ -104,7 +108,28 @@ class SidecarProcessService {
       this.clearStartupFailure();
       this.currentSignature = null;
       await this.stopUnlocked();
-      await this.syncUnlocked();
+      await this.syncUnlocked({ allowRuntimeInstall: true });
+    });
+  }
+
+  async installRuntime(): Promise<void> {
+    return this.withLock(async () => {
+      this.clearStartupFailure();
+      const backend = sidecarModelService.getResolvedBackend();
+      const hadUsableRuntime = this.isRuntimeInstalled(backend);
+      if (!hadUsableRuntime) {
+        await this.stopUnlocked();
+      }
+      await this.ensureRuntimeInstalled(backend);
+      if (!hadUsableRuntime) {
+        this.cleanupInactiveRuntimeBackends(backend);
+      }
+
+      if (sidecarModelService.getConfiguredModelRef() && sidecarModelService.isEnabled()) {
+        await this.syncUnlocked({ allowRuntimeInstall: false });
+      } else {
+        sidecarModelService.setStatus(sidecarModelService.getConfiguredModelRef() ? "downloaded" : "not_downloaded");
+      }
     });
   }
 
@@ -117,19 +142,20 @@ class SidecarProcessService {
       if (backend === "mlx") {
         mlxRuntimeService.resetRuntime();
       } else {
-        if (sidecarRuntimeService.getStatus().source === "system") {
-          throw new Error(
-            "The local runtime is using a system llama-server from PATH. Reinstall that runtime outside Marinara.",
-          );
+        if (sidecarRuntimeService.getStatus(sidecarModelService.getConfig().runtimePreference).source === "system") {
+          throw new Error("The local runtime is using a system llama-server from PATH. Reinstall that runtime outside Marinara.");
         }
         sidecarRuntimeService.resetRuntime();
       }
 
       if (sidecarModelService.getConfiguredModelRef() && sidecarModelService.isEnabled()) {
-        await this.syncUnlocked();
+        await this.syncUnlocked({ allowRuntimeInstall: true });
       } else {
+        await this.ensureRuntimeInstalled(backend);
         sidecarModelService.setStatus(sidecarModelService.getConfiguredModelRef() ? "downloaded" : "not_downloaded");
       }
+
+      this.cleanupInactiveRuntimeBackends(backend);
     });
   }
 
@@ -171,9 +197,17 @@ class SidecarProcessService {
 
   private normalizeSyncOptions(options?: boolean | SyncOptions): SyncOptions {
     if (typeof options === "boolean") {
-      return { forceStart: options };
+      return { forceStart: options, allowRuntimeInstall: options };
     }
     return options ?? {};
+  }
+
+  private isRuntimeInstalled(backend: SidecarBackend): boolean {
+    if (backend === "mlx") {
+      return mlxRuntimeService.getStatus().installed;
+    }
+
+    return sidecarRuntimeService.getStatus(sidecarModelService.getConfig().runtimePreference).installed;
   }
 
   private async syncUnlocked(options: SyncOptions = {}): Promise<void> {
@@ -188,6 +222,13 @@ class SidecarProcessService {
     }
 
     if (!options.forceStart && !sidecarModelService.isEnabled()) {
+      await this.stopUnlocked();
+      this.clearStartupFailure();
+      sidecarModelService.setStatus("downloaded");
+      return;
+    }
+
+    if (!options.allowRuntimeInstall && !this.isRuntimeInstalled(backend)) {
       await this.stopUnlocked();
       this.clearStartupFailure();
       sidecarModelService.setStatus("downloaded");
@@ -224,9 +265,15 @@ class SidecarProcessService {
         });
       }
 
-      return await sidecarRuntimeService.ensureInstalled((progress) => {
-        sidecarModelService.emitExternalProgress(progress);
-      }, options);
+      return await sidecarRuntimeService.ensureInstalled(
+        (progress) => {
+          sidecarModelService.emitExternalProgress(progress);
+        },
+        {
+          ...options,
+          preference: sidecarModelService.getConfig().runtimePreference,
+        },
+      );
     } catch (error) {
       if (isAbortError(error)) {
         sidecarModelService.setStatus(sidecarModelService.getConfiguredModelRef() ? "downloaded" : "not_downloaded");
@@ -239,6 +286,15 @@ class SidecarProcessService {
 
   private isMlxRuntime(runtime: ManagedRuntimeInstall): runtime is MlxRuntimeInstall {
     return "pythonPath" in runtime;
+  }
+
+  private cleanupInactiveRuntimeBackends(activeBackend: SidecarBackend): void {
+    if (activeBackend === "mlx") {
+      sidecarRuntimeService.resetRuntime();
+      return;
+    }
+
+    mlxRuntimeService.resetRuntime();
   }
 
   private getLlamaServerPath(runtime: ManagedRuntimeInstall): string {
@@ -257,27 +313,13 @@ class SidecarProcessService {
 
   private buildLlamaArgs(modelPath: string, gpuLayers: number, port: number, runtime: SidecarRuntimeInstall): string[] {
     const config = sidecarModelService.getConfig();
-    const args = [
-      "-m",
+    return buildLlamaArgs({
       modelPath,
-      "--host",
-      "127.0.0.1",
-      "--parallel",
-      "2",
-      "--log-disable",
-      "--ctx-size",
-      String(config.contextSize),
-      "--port",
-      String(port),
-    ];
-
-    // Gemma 4 needs split mode disabled on CUDA multi-GPU launches,
-    // but non-CUDA builds may reject the flag entirely.
-    if (/cuda/i.test(runtime.variant) && gpuLayers > 0) {
-      args.push("-sm", "none");
-    }
-    args.push("-ngl", String(gpuLayers));
-    return args;
+      gpuLayers,
+      port,
+      contextSize: config.contextSize,
+      runtimeVariant: runtime.variant,
+    });
   }
 
   private buildMlxArgs(modelRepo: string, port: number): string[] {
@@ -290,18 +332,10 @@ class SidecarProcessService {
 
   private buildLlamaStartupPlans(runtime: SidecarRuntimeInstall): Array<{ gpuLayers: number; label: string }> {
     const config = sidecarModelService.getConfig();
-    if (config.gpuLayers !== -1) {
-      return [{ gpuLayers: config.gpuLayers, label: `gpuLayers=${config.gpuLayers}` }];
-    }
-
-    if (!this.usesGpuRuntime(runtime)) {
-      return [{ gpuLayers: 0, label: "CPU runtime" }];
-    }
-
-    return [
-      { gpuLayers: 999, label: "max GPU offload" },
-      { gpuLayers: 0, label: "CPU fallback" },
-    ];
+    return buildLlamaStartupPlans({
+      configuredGpuLayers: config.gpuLayers,
+      usesGpuRuntime: this.usesGpuRuntime(runtime),
+    });
   }
 
   private shouldRetryStartup(error: unknown): error is SidecarServerExitError {
@@ -457,6 +491,7 @@ class SidecarProcessService {
 
       const child = spawn(runtime.serverPath, args, {
         cwd: dirname(runtime.serverPath),
+        env: buildLlamaProcessEnv(runtime),
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -655,7 +690,7 @@ class SidecarProcessService {
     }
 
     try {
-      await this.syncForCurrentConfig();
+      await this.syncForCurrentConfig({ allowRuntimeInstall: false });
     } catch (error) {
       console.error("[sidecar] Auto-restart failed:", error);
       sidecarModelService.setStatus("server_error");
