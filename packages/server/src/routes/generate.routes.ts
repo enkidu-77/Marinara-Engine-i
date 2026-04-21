@@ -6531,10 +6531,22 @@ export async function generateRoutes(app: FastifyInstance) {
                   const existingData =
                     typeof targetChar.data === "string" ? JSON.parse(targetChar.data as string) : targetChar.data;
                   const updates: Record<string, unknown> = {};
+                  const extensionUpdates: Record<string, unknown> = {};
                   if (ucCmd.description !== undefined) updates.description = ucCmd.description;
                   if (ucCmd.personality !== undefined) updates.personality = ucCmd.personality;
                   if (ucCmd.firstMessage !== undefined) updates.first_mes = ucCmd.firstMessage;
                   if (ucCmd.scenario !== undefined) updates.scenario = ucCmd.scenario;
+                  if (ucCmd.mesExample !== undefined) updates.mes_example = ucCmd.mesExample;
+                  if (ucCmd.creatorNotes !== undefined) updates.creator_notes = ucCmd.creatorNotes;
+                  if (ucCmd.systemPrompt !== undefined) updates.system_prompt = ucCmd.systemPrompt;
+                  if (ucCmd.postHistoryInstructions !== undefined) {
+                    updates.post_history_instructions = ucCmd.postHistoryInstructions;
+                  }
+                  if (ucCmd.backstory !== undefined) extensionUpdates.backstory = ucCmd.backstory;
+                  if (ucCmd.appearance !== undefined) extensionUpdates.appearance = ucCmd.appearance;
+                  if (Object.keys(extensionUpdates).length > 0) {
+                    updates.extensions = { ...(existingData.extensions ?? {}), ...extensionUpdates };
+                  }
                   await chars.update(targetChar.id, { ...existingData, ...updates });
                   reply.raw.write(
                     `data: ${JSON.stringify({
@@ -6563,6 +6575,8 @@ export async function generateRoutes(app: FastifyInstance) {
                   if (upCmd.description !== undefined) sets.description = upCmd.description;
                   if (upCmd.personality !== undefined) sets.personality = upCmd.personality;
                   if (upCmd.appearance !== undefined) sets.appearance = upCmd.appearance;
+                  if (upCmd.scenario !== undefined) sets.scenario = upCmd.scenario;
+                  if (upCmd.backstory !== undefined) sets.backstory = upCmd.backstory;
                   await chars.updatePersona(targetPersona.id, sets as any);
                   reply.raw.write(
                     `data: ${JSON.stringify({
@@ -6657,6 +6671,9 @@ export async function generateRoutes(app: FastifyInstance) {
                     if (d.scenario) parts.push(`Scenario: ${d.scenario}`);
                     if (d.mes_example) parts.push(`Example Messages: ${d.mes_example}`);
                     if (d.system_prompt) parts.push(`System Prompt: ${d.system_prompt}`);
+                    if (d.post_history_instructions) {
+                      parts.push(`Post-History Instructions: ${d.post_history_instructions}`);
+                    }
                     if (d.first_mes) parts.push(`First Message: ${d.first_mes}`);
                     if (d.creator_notes) parts.push(`Creator Notes: ${d.creator_notes}`);
                     if (d.extensions?.appearance) parts.push(`Appearance: ${d.extensions.appearance}`);
@@ -6670,6 +6687,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     const parts = [`Name: ${found.name}`];
                     if (found.description) parts.push(`Description: ${found.description}`);
                     if (found.personality) parts.push(`Personality: ${found.personality}`);
+                    if (found.scenario) parts.push(`Scenario: ${found.scenario}`);
                     if (found.appearance) parts.push(`Appearance: ${found.appearance}`);
                     if (found.backstory) parts.push(`Backstory: ${found.backstory}`);
                     fetchedContent = parts.join("\n");

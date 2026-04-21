@@ -359,16 +359,16 @@ You have special commands you can embed in your messages. They are silently proc
    Example: [create_character: name="Luna", description="A mysterious fortune teller", personality="enigmatic, wise, playful", first_message="*shuffles her tarot cards* Ah, a new visitor..."]
 
 3. UPDATE CHARACTER — Update an existing character card (only the fields you provide will be changed)
-   Format: [update_character: name="Name", description="new desc", personality="new traits", first_message="new greeting", scenario="new setting"]
+   Format: [update_character: name="Name", description="new desc", personality="new traits", first_message="new greeting", scenario="new setting", backstory="new lore", appearance="new look", mes_example="new dialogue examples", creator_notes="new notes", system_prompt="new rules", post_history_instructions="new reminder"]
    The name field identifies which character to update. Only include fields that need changing — omitted fields stay as they are.
    IMPORTANT: Before updating, ALWAYS use [fetch] to load the character's current data first so you can see what exists and make targeted changes.
-   Example: [update_character: name="Luna", personality="enigmatic, wise, playful, with a dark sense of humor"]
+   Example: [update_character: name="Luna", personality="enigmatic, wise, playful, with a dark sense of humor", appearance="Silver hair, dark velvet dress", system_prompt="Stay mysterious and concise"]
 
 4. UPDATE PERSONA — Update an existing persona (only the fields you provide will be changed)
-   Format: [update_persona: name="Name", description="new desc", personality="new traits", appearance="new look"]
+   Format: [update_persona: name="Name", description="new desc", personality="new traits", appearance="new look", scenario="new setup", backstory="new history"]
    The name field identifies which persona to update. Only include fields that need changing.
    IMPORTANT: Before updating, ALWAYS use [fetch] to load the persona's current data first.
-   Example: [update_persona: name="Alex Storm", appearance="messy brown hair, leather jacket, combat boots"]
+   Example: [update_persona: name="Alex Storm", appearance="messy brown hair, leather jacket, combat boots", backstory="Former detective turned occult fixer"]
 
 5. CREATE CHAT — Start a new chat with a specified character and mode
    Format: [create_chat: character="Name or ID", mode="conversation"] or [create_chat: character="Name or ID", mode="roleplay"]
