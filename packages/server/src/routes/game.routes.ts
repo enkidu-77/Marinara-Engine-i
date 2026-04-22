@@ -2854,6 +2854,7 @@ export async function gameRoutes(app: FastifyInstance) {
     const imgBaseUrl = imgConn.baseUrl || "https://image.pollinations.ai";
     const imgApiKey = imgConn.apiKey || "";
     const imgSource = (imgConn as any).imageGenerationSource || imgModel;
+    const imgComfyWorkflow = imgConn.comfyuiWorkflow || undefined;
     const imgServiceHint = imgConn.imageService || imgSource;
 
     const setupCfg = meta.gameSetupConfig as Record<string, unknown> | null;
@@ -2886,6 +2887,7 @@ export async function gameRoutes(app: FastifyInstance) {
         imgBaseUrl,
         imgApiKey,
         imgService: imgServiceHint,
+        imgComfyWorkflow,
       });
       generatedBackground = tag;
     }
@@ -2923,6 +2925,7 @@ export async function gameRoutes(app: FastifyInstance) {
           imgBaseUrl,
           imgApiKey,
           imgService: imgServiceHint,
+          imgComfyWorkflow,
         });
         if (avatarUrl) {
           generatedNpcAvatars.push({ name: npc.name, avatarUrl });

@@ -37,6 +37,7 @@ export interface NpcPortraitRequest {
   imgBaseUrl: string;
   imgApiKey: string;
   imgService?: string | null;
+  imgComfyWorkflow?: string | undefined;
 }
 
 /**
@@ -72,6 +73,7 @@ export async function generateNpcPortrait(req: NpcPortraitRequest): Promise<stri
         model: req.imgModel,
         width: 512,
         height: 512,
+        comfyWorkflow: req.imgComfyWorkflow || undefined,
       },
     );
 
@@ -115,6 +117,7 @@ export interface BackgroundGenRequest {
   imgBaseUrl: string;
   imgApiKey: string;
   imgService?: string | null;
+  imgComfyWorkflow?: string | undefined;
 }
 
 /**
@@ -156,6 +159,7 @@ export async function generateBackground(req: BackgroundGenRequest): Promise<str
         model: req.imgModel,
         width: 1024,
         height: 576,
+        comfyWorkflow: req.imgComfyWorkflow || undefined,
       },
     );
 
