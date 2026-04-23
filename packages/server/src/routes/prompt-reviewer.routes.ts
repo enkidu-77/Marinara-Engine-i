@@ -131,7 +131,7 @@ export async function promptReviewerRoutes(app: FastifyInstance) {
     });
 
     try {
-      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider);
+      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
       let fullResponse = "";
 
       const userPrompt = `Review this prompt preset. Focus areas: ${input.focusAreas.join(", ")}

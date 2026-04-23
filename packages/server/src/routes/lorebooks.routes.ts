@@ -278,6 +278,7 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       conn.apiKey as string,
       conn.maxContext,
       conn.openrouterProvider,
+      conn.maxTokensOverride,
     );
 
     // Build text for each entry: combine name, keys, and content

@@ -1145,7 +1145,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       }
       if (!baseUrl) return reply.status(400).send({ error: "No base URL for this connection" });
 
-      provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider);
+      provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
       model = conn.model;
     }
 

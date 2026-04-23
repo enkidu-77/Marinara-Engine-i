@@ -874,7 +874,7 @@ export async function gameRoutes(app: FastifyInstance) {
       connectionId,
       chat.connectionId,
     );
-    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider);
+    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
     const setupGenerationParameters = resolveStoredGameGenerationParameters(meta, defaultGenerationParameters);
 
     let gmCharacterCard: string | null = null;
@@ -1435,6 +1435,7 @@ export async function gameRoutes(app: FastifyInstance) {
             conn.apiKey!,
             conn.maxContext,
             conn.openrouterProvider,
+            conn.maxTokensOverride,
           );
 
           const recapMessages: ChatMessage[] = [
@@ -1565,7 +1566,7 @@ export async function gameRoutes(app: FastifyInstance) {
     const latestState = await gameStates.getLatest(chatId);
 
     const { conn, baseUrl } = await resolveConnection(connections, connectionId, chat.connectionId);
-    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider);
+    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
 
     const summaryMessages: ChatMessage[] = [
       { role: "system", content: buildSessionSummaryPrompt() },
@@ -1825,7 +1826,7 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!chat) throw new Error("Chat not found");
 
     const { conn, baseUrl } = await resolveConnection(connections, connectionId, chat.connectionId);
-    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider);
+    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
 
     const messages: ChatMessage[] = [
       { role: "system", content: buildMapGenerationPrompt(locationType, context) },
@@ -2419,7 +2420,7 @@ export async function gameRoutes(app: FastifyInstance) {
       { role: "user", content: userPrompt },
     ];
 
-    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider);
+    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
     const result = await provider.chatComplete(
       messages,
       gameGenOptions(
@@ -2526,7 +2527,7 @@ export async function gameRoutes(app: FastifyInstance) {
       { role: "user", content: userPrompt },
     ];
 
-    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider);
+    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey!, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
     console.log(
       "[game/scene-wrap] chatId=%s, model=%s, narration=%d chars",
       input.chatId,

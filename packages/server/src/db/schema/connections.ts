@@ -37,6 +37,8 @@ export const apiConnections = sqliteTable("api_connections", {
   imageService: text("image_service"),
   /** Default generation parameters (stored as JSON) for new chats using this connection */
   defaultParameters: text("default_parameters"),
+  /** Optional hard cap on max_tokens for the API response (for providers like DeepSeek that have lower limits). */
+  maxTokensOverride: integer("max_tokens_override"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

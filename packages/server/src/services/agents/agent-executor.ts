@@ -74,7 +74,11 @@ export async function executeAgent(
 
     // Agents use lower temperature for reliability
     const temperature = (config.settings.temperature as number) ?? 0.3;
-    const maxTokens = Math.max((config.settings.maxTokens as number) ?? 4096, 16384);
+    const rawMaxTokens = Math.max((config.settings.maxTokens as number) ?? 4096, 16384);
+    const maxTokens =
+      provider.maxTokensOverrideValue !== null
+        ? Math.min(rawMaxTokens, provider.maxTokensOverrideValue)
+        : rawMaxTokens;
     const streamResponses = context.streaming !== false;
 
     // If tools are available, use the tool call loop
@@ -269,12 +273,17 @@ export async function executeAgentBatch(
 
     // Each agent needs enough room for its full JSON output.
     // Use a generous floor (16384) so the model never runs out mid-response.
+    // Cap to the connection-level maxTokensOverride when set.
     const maxTokensPerAgent = Math.max(...configs.map((c) => (c.settings.maxTokens as number) ?? 4096));
     const temperature = Math.min(...configs.map((c) => (c.settings.temperature as number) ?? 0.3));
-    const batchMaxTokens = Math.max(maxTokensPerAgent * configs.length, 16384);
+    const rawBatchMaxTokens = Math.max(maxTokensPerAgent * configs.length, 16384);
+    const batchMaxTokens =
+      provider.maxTokensOverrideValue !== null
+        ? Math.min(rawBatchMaxTokens, provider.maxTokensOverrideValue)
+        : rawBatchMaxTokens;
     const streamResponses = context.streaming !== false;
     console.log(
-      `[agent-batch] maxTokens: ${batchMaxTokens} (${maxTokensPerAgent} × ${configs.length} agents, floor 16384)`,
+      `[agent-batch] maxTokens: ${batchMaxTokens} (${maxTokensPerAgent} × ${configs.length} agents, floor 16384${provider.maxTokensOverrideValue !== null ? `, capped at ${provider.maxTokensOverrideValue}` : ""})`,
     );
 
     if (isDebugAgentsEnabled()) {
