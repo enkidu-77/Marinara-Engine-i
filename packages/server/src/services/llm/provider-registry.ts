@@ -15,10 +15,15 @@ export function createLLMProvider(
   apiKey: string,
   maxContext?: number | null,
   openrouterProvider?: string | null,
+  maxTokensOverride?: number | null,
 ): BaseLLMProvider {
   const normalizedMaxContext =
     typeof maxContext === "number" && Number.isFinite(maxContext) && maxContext > 0
       ? Math.floor(maxContext)
+      : undefined;
+  const normalizedMaxTokensOverride =
+    typeof maxTokensOverride === "number" && Number.isFinite(maxTokensOverride) && maxTokensOverride > 0
+      ? Math.floor(maxTokensOverride)
       : undefined;
 
   switch (provider) {
@@ -28,12 +33,12 @@ export function createLLMProvider(
     case "mistral":
     case "cohere":
     case "custom":
-      return new OpenAIProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider);
+      return new OpenAIProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);
     case "anthropic":
-      return new AnthropicProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider);
+      return new AnthropicProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);
     case "google":
-      return new GoogleProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider);
+      return new GoogleProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);
     default:
-      return new OpenAIProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider);
+      return new OpenAIProvider(baseUrl, apiKey, normalizedMaxContext, openrouterProvider, normalizedMaxTokensOverride);
   }
 }

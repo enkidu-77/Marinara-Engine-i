@@ -628,6 +628,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 embedConn.apiKey as string,
                 embedConn.maxContext as number | null | undefined,
                 embedConn.openrouterProvider as string | null | undefined,
+                embedConn.maxTokensOverride as number | null | undefined,
               );
               const embeddings = await embeddingProvider.embed([recentMsgs], embeddingModel);
               chatContextEmbedding = embeddings[0] ?? null;
@@ -948,6 +949,7 @@ export async function generateRoutes(app: FastifyInstance) {
             conn.apiKey,
             conn.maxContext,
             conn.openrouterProvider,
+            conn.maxTokensOverride,
           );
           const summaryResults = await Promise.allSettled(
             bucketsToSummarize.map(async (bucket) => {
@@ -1077,6 +1079,7 @@ export async function generateRoutes(app: FastifyInstance) {
             conn.apiKey,
             conn.maxContext,
             conn.openrouterProvider,
+            conn.maxTokensOverride,
           );
           const weekResults = await Promise.allSettled(
             weeksToConsolidate.map(async ({ weekKey, days }) => {
@@ -2005,7 +2008,7 @@ export async function generateRoutes(app: FastifyInstance) {
       }
 
       // Create provider
-      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider);
+      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
 
       // ────────────────────────────────────────
       // Agent Pipeline: resolve enabled agents
@@ -2038,6 +2041,7 @@ export async function generateRoutes(app: FastifyInstance) {
               defaultAgentConn.apiKey,
               defaultAgentConn.maxContext,
               defaultAgentConn.openrouterProvider,
+              defaultAgentConn.maxTokensOverride,
             ),
             model: defaultAgentConn.model,
           });
@@ -2069,6 +2073,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   agentConn.apiKey,
                   agentConn.maxContext,
                   agentConn.openrouterProvider,
+                  agentConn.maxTokensOverride,
                 );
                 agentModel = agentConn.model;
                 agentProviderCache.set(effectiveConnectionId, { provider: agentProvider, model: agentModel });
@@ -6183,6 +6188,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     conn.apiKey,
                     conn.maxContext,
                     conn.openrouterProvider,
+                    conn.maxTokensOverride,
                   );
                   const promptResult = await promptBuilder.chatComplete(
                     [

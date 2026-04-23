@@ -86,6 +86,7 @@ export function createConnectionsStorage(db: DB) {
         imageGenerationSource: input.imageGenerationSource ?? null,
         comfyuiWorkflow: input.comfyuiWorkflow ?? null,
         imageService: input.imageService ?? null,
+        maxTokensOverride: input.maxTokensOverride ?? null,
         createdAt: timestamp,
         updatedAt: timestamp,
       });
@@ -158,6 +159,9 @@ export function createConnectionsStorage(db: DB) {
       if (data.imageService !== undefined) {
         updateFields.imageService = data.imageService;
       }
+      if (data.maxTokensOverride !== undefined) {
+        updateFields.maxTokensOverride = data.maxTokensOverride;
+      }
       await db.update(apiConnections).set(updateFields).where(eq(apiConnections.id, id));
       return this.getById(id);
     },
@@ -188,6 +192,7 @@ export function createConnectionsStorage(db: DB) {
         imageGenerationSource: source.imageGenerationSource,
         comfyuiWorkflow: source.comfyuiWorkflow,
         imageService: source.imageService,
+        maxTokensOverride: source.maxTokensOverride,
         createdAt: timestamp,
         updatedAt: timestamp,
       });

@@ -98,6 +98,7 @@ export function ConnectionEditor() {
   const [localImageGenerationSource, setLocalImageGenerationSource] = useState("");
   const [localComfyuiWorkflow, setLocalComfyuiWorkflow] = useState("");
   const [localImageService, setLocalImageService] = useState<string | null>(null);
+  const [localMaxTokensOverride, setLocalMaxTokensOverride] = useState<number | null>(null);
 
   // Test results
   const [testResult, setTestResult] = useState<{ success: boolean; message: string; latencyMs: number } | null>(null);
@@ -182,6 +183,7 @@ export function ConnectionEditor() {
     );
     setLocalComfyuiWorkflow((c.comfyuiWorkflow as string) ?? "");
     setLocalImageService(((c.imageService as string | null) ?? (c.imageGenerationSource as string | null)) || null);
+    setLocalMaxTokensOverride(typeof c.maxTokensOverride === "number" ? (c.maxTokensOverride as number) : null);
     setDirty(false);
     setSaveError(null);
     setTestResult(null);
@@ -258,6 +260,7 @@ export function ConnectionEditor() {
       comfyuiWorkflow: localComfyuiWorkflow || null,
       imageService:
         localProvider === "image_generation" ? localImageGenerationSource || localImageService || null : null,
+      maxTokensOverride: localMaxTokensOverride ?? null,
     };
     // Only send API key if user typed a new one
     if (localApiKey.trim()) {
@@ -288,6 +291,7 @@ export function ConnectionEditor() {
     localImageGenerationSource,
     localComfyuiWorkflow,
     localImageService,
+    localMaxTokensOverride,
     updateConnection,
   ]);
 
@@ -1003,6 +1007,35 @@ export function ConnectionEditor() {
               </div>
               <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
                 This is auto-set when selecting a model from the list. Override manually if needed.
+              </p>
+            </FieldGroup>
+          )}
+
+          {/* ── Max Tokens Override ── */}
+          {localProvider !== "image_generation" && (
+            <FieldGroup
+              label="Max Tokens Override"
+              icon={<Zap size="0.875rem" className="text-amber-400" />}
+              help="Hard cap on max_tokens for the API response (limiting output size). Use this for providers that enforce a lower limit than what the engine calculates (e.g. DeepSeek caps at 8192). Leave empty to let the engine decide."
+            >
+              <div className="flex items-center gap-3">
+                <DraftNumberInput
+                  value={localMaxTokensOverride ?? 0}
+                  min={0}
+                  selectOnFocus
+                  onCommit={(nextValue) => {
+                    setLocalMaxTokensOverride(nextValue > 0 ? nextValue : null);
+                    markDirty();
+                  }}
+                  className="w-40 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                />
+                <span className="text-xs text-[var(--muted-foreground)]">
+                  {localMaxTokensOverride ? `${localMaxTokensOverride.toLocaleString()} tokens max` : "No override"}
+                </span>
+              </div>
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                Set to 0 or leave empty to disable. When set, no request to this connection will exceed this token
+                limit — including batched agent calls.
               </p>
             </FieldGroup>
           )}

@@ -70,7 +70,7 @@ export async function conversationRoutes(app: FastifyInstance) {
           ? JSON.parse(chat.characterIds)
           : chat.characterIds;
 
-    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider);
+    const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
     const model = conn.model ?? "";
     const mondayStr = getMonday().toISOString();
 

@@ -511,6 +511,11 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     column: "default_parameters",
     definition: "TEXT",
   },
+  {
+    table: "api_connections",
+    column: "max_tokens_override",
+    definition: "INTEGER",
+  },
 ];
 
 export async function runMigrations(db: DB) {

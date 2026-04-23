@@ -265,7 +265,7 @@ async function resolveRetryAgents(args: {
     throw new Error("Cannot resolve provider URL");
   }
 
-  const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider);
+  const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
   const resolvedAgents: ResolvedRetryAgent[] = [];
 
   for (const cfg of enabledConfigs) {
@@ -287,6 +287,7 @@ async function resolveRetryAgents(args: {
               agentConn.apiKey,
               agentConn.maxContext,
               agentConn.openrouterProvider,
+              agentConn.maxTokensOverride,
             );
             agentModel = agentConn.model;
           }
