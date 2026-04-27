@@ -10,7 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { type SpritePlacement, type SpriteSide } from "@marinara-engine/shared";
+import { type SceneForkMode, type SpritePlacement, type SpriteSide } from "@marinara-engine/shared";
 import {
   FolderOpen,
   Globe,
@@ -216,6 +216,12 @@ function RegeneratingMessageContent({
   const parsedExtra = typeof msg.extra === "string" ? JSON.parse(msg.extra) : (msg.extra ?? {});
   const cleanExtra = { ...parsedExtra, attachments: null };
   return <ChatMessage message={{ ...msg, extra: cleanExtra, content: streamBuffer || "" }} isStreaming {...rest} />;
+}
+
+/** True for stored context messages that should feed generation but not render in the transcript. */
+function isHiddenFromUser(message: MessageWithSwipes) {
+  const extra = typeof message.extra === "string" ? JSON.parse(message.extra) : (message.extra ?? {});
+  return extra.hiddenFromUser === true;
 }
 
 function RpToolbarButton({
@@ -543,6 +549,7 @@ function AuthorNotesButton({ chatId, chatMeta }: { chatId: string | null; chatMe
   );
 }
 
+/** Props for the full roleplay surface, including scene lifecycle and fork controls. */
 type RoleplaySurfaceProps = {
   activeChatId: string;
   chat: ChatData | null | undefined;
@@ -600,6 +607,8 @@ type RoleplaySurfaceProps = {
   onToggleConversationStart: (messageId: string, current: boolean) => void;
   onPeekPrompt: () => void;
   onBranch?: (messageId: string) => void;
+  onCloneSceneFromHere?: (messageId: string) => void;
+  isCloneSceneFromHereDisabled?: boolean;
   onToggleSelectMessage: (toggle: MessageSelectionToggle) => void;
   onSummaryContextSizeChange: (size: number) => void;
   onRerunTrackers: () => void;
@@ -607,6 +616,8 @@ type RoleplaySurfaceProps = {
   onStartEncounter: () => void;
   onConcludeScene: () => void;
   onAbandonScene: () => void;
+  onForkScene: (sceneChatId: string, mode: SceneForkMode) => void;
+  isForkingScene?: boolean;
   onOpenSettings: () => void;
   onOpenFiles: () => void;
   onOpenGallery: () => void;
@@ -691,6 +702,8 @@ export function ChatRoleplaySurface({
   onToggleConversationStart,
   onPeekPrompt,
   onBranch,
+  onCloneSceneFromHere,
+  isCloneSceneFromHereDisabled,
   onToggleSelectMessage,
   onSummaryContextSizeChange,
   onRerunTrackers,
@@ -698,6 +711,8 @@ export function ChatRoleplaySurface({
   onStartEncounter,
   onConcludeScene,
   onAbandonScene,
+  onForkScene,
+  isForkingScene,
   onOpenSettings,
   onOpenFiles,
   onOpenGallery,
@@ -987,6 +1002,7 @@ export function ChatRoleplaySurface({
                 )}
 
                 {messages?.map((msg, i) => {
+                  if (isHiddenFromUser(msg)) return null;
                   const isRegenerating = isStreaming && regenerateMessageId === msg.id;
                   return (
                     <div
@@ -1008,6 +1024,8 @@ export function ChatRoleplaySurface({
                           onToggleConversationStart={onToggleConversationStart}
                           onPeekPrompt={onPeekPrompt}
                           onBranch={onBranch}
+                          onCloneSceneFromHere={onCloneSceneFromHere}
+                          isCloneSceneFromHereDisabled={isCloneSceneFromHereDisabled}
                           isLastAssistantMessage={msg.id === lastAssistantMessageId}
                           characterMap={characterMap}
                           personaInfo={personaInfo}
@@ -1033,6 +1051,8 @@ export function ChatRoleplaySurface({
                           onToggleConversationStart={onToggleConversationStart}
                           onPeekPrompt={onPeekPrompt}
                           onBranch={onBranch}
+                          onCloneSceneFromHere={onCloneSceneFromHere}
+                          isCloneSceneFromHereDisabled={isCloneSceneFromHereDisabled}
                           isLastAssistantMessage={msg.id === lastAssistantMessageId}
                           characterMap={characterMap}
                           personaInfo={personaInfo}
@@ -1077,6 +1097,8 @@ export function ChatRoleplaySurface({
                     originChatId={chatMeta.sceneOriginChatId}
                     onConclude={onConcludeScene}
                     onAbandon={onAbandonScene}
+                    onFork={onForkScene}
+                    isForking={isForkingScene}
                   />
                 )}
                 {combatAgentEnabled && (
