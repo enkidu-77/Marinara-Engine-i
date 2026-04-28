@@ -46,8 +46,8 @@ Copy `.env.example` to `.env` when you need to change ports, HTTPS settings, or 
 - `packages/server/` — Fastify API, SQLite integration, migrations, importers, and AI agents
 - `packages/shared/` — Shared types, schemas, constants, and `APP_VERSION`
 - `android/` — Android WebView wrapper for the Termux-served local app
-- `installer` — Windows installer sources and helper scripts
-- `docs/` — docs and repo media assets
+- `win/` — Windows installer sources and helper scripts
+- `docs/` — Docs and repo media assets
 - `start.bat`, `start.sh`, `start-termux.sh` — platform launchers
 
 ## Validation
@@ -166,8 +166,8 @@ Current version touchpoints:
 | `packages/server/package.json`              | Derived workspace version                              |
 | `packages/shared/package.json`              | Derived workspace version                              |
 | `packages/shared/src/constants/defaults.ts` | Shared `APP_VERSION` used by the app and update checks |
-| `installer/installer.nsi`                   | Windows installer output version                       |
-| `installer/install.bat`                     | Windows installer banner text                          |
+| `win/installer/installer.nsi`               | Windows installer output version                       |
+| `win/installer/install.bat`                 | Windows installer banner text                          |
 | `android/app/build.gradle`                  | Android `versionName` and `versionCode`                |
 
 Android policy:
@@ -196,7 +196,7 @@ Release helpers now in the repo:
 
 - `pnpm version:sync -- --android-version-code <next-code>` updates the derived version files and README release references from the root `package.json` version.
 - `pnpm version:check` fails when those derived files drift out of sync.
-- `pnpm guard:installer-artifacts` fails when tracked installer binaries appear under `installer/*.exe`.
+- `pnpm guard:installer-artifacts` fails when tracked installer binaries appear under `win/installer/*.exe`.
 - `pnpm release:notes -- <version>` renders the matching `CHANGELOG.md` entry for release publication.
 
 ## Immediate Way Forward
