@@ -1031,9 +1031,7 @@ async function loadDatacatTags(): Promise<void> {
 }
 
 function datacatTagNamesToIds(names: string[]): number[] {
-  return names
-    .map((n) => datacatTagNameToId.get(n.toLowerCase()))
-    .filter((id): id is number => typeof id === "number");
+  return names.map((n) => datacatTagNameToId.get(n.toLowerCase())).filter((id): id is number => typeof id === "number");
 }
 
 const datacatProvider: ProviderConfig = {

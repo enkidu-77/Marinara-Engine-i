@@ -33,7 +33,8 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     id: "agent-max-length",
     category: "Top Issue",
     question: "My trackers, Lorebook Keeper, or agents do nothing or fail with a max length error. What fixes that?",
-    answer: "The most common fix is increasing max response length so the model can finish the tracker JSON instead of truncating it.",
+    answer:
+      "The most common fix is increasing max response length so the model can finish the tracker JSON instead of truncating it.",
     bullets: [
       "Raise max response length in your connection or chat Advanced Settings.",
       "If an agent keeps breaking formatting, move it to a stronger model, especially Gemma 4 or another reliable structured-output model.",
@@ -44,7 +45,8 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     id: "sidecar-cpu-fallback",
     category: "Top Issue",
     question: "I saw '[sidecar] Startup with max GPU offload failed, retrying with CPU fallback'. Is that normal?",
-    answer: "Usually yes. Marinara's local sidecar is meant to live on CPU and RAM so your main RP model can keep the GPU and VRAM.",
+    answer:
+      "Usually yes. Marinara's local sidecar is meant to live on CPU and RAM so your main RP model can keep the GPU and VRAM.",
     bullets: [
       "A fallback message does not automatically mean anything is broken.",
       "The sidecar is there for helpers and utility tasks, not to compete with your main model for VRAM.",
@@ -122,7 +124,8 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     id: "bigger-agent-model",
     category: "Connections",
     question: "How do I use a bigger model for agents instead of the local sidecar?",
-    answer: "Create a normal connection to your own Kobold, llama.cpp, or compatible endpoint and mark it for agent use.",
+    answer:
+      "Create a normal connection to your own Kobold, llama.cpp, or compatible endpoint and mark it for agent use.",
     bullets: [
       "The switch lives on the connection itself.",
       "Once enabled, agents can use that remote model instead of the local sidecar path.",
@@ -203,9 +206,7 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     category: "Core",
     question: "How do I hide a message from the prompt without deleting it?",
     answer: "Open the message actions and use the eyeball icon.",
-    bullets: [
-      "That hides the message from prompt assembly without wiping it from the visible chat history.",
-    ],
+    bullets: ["That hides the message from prompt assembly without wiping it from the visible chat history."],
   },
   {
     id: "sillytavern-import",
@@ -232,19 +233,16 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     id: "attribute-scale",
     category: "Agents",
     question: "What counts as high or low for attribute stats?",
-    answer: "The default expectation is basically DnD-style 1 to 20, but the model still interprets the fiction around it.",
-    bullets: [
-      "Think of 10-ish as ordinary and 18 to 20 as exceptional unless your setup says otherwise.",
-    ],
+    answer:
+      "The default expectation is basically DnD-style 1 to 20, but the model still interprets the fiction around it.",
+    bullets: ["Think of 10-ish as ordinary and 18 to 20 as exceptional unless your setup says otherwise."],
   },
   {
     id: "narrative-director-captures-messages",
     category: "Agents",
     question: "Narrative Director is capturing my messages and bot replies inside itself. Why?",
     answer: "That has shown up most often with weaker or unstable model choices, especially GLM 5.1 style runs.",
-    bullets: [
-      "Switch the agent to a stronger model before rewriting prompts.",
-    ],
+    bullets: ["Switch the agent to a stronger model before rewriting prompts."],
   },
   {
     id: "comfyui-illustrator-setup",
@@ -253,7 +251,7 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     answer: "The workflow template has to expose the placeholders Marinara expects.",
     bullets: [
       "Use %prompt%, %width%, %height%, %negative_prompt%, and %seed% in the workflow or request template.",
-      "If your JSON parser complains, wrap width and height placeholders in quotes, like \"%width%\".",
+      'If your JSON parser complains, wrap width and height placeholders in quotes, like "%width%".',
       "The default timeout is 120 seconds, which is often too short for slower Flux or Chroma workflows.",
     ],
   },
@@ -262,36 +260,28 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     category: "Images",
     question: "How do I change image resolution?",
     answer: "Set it on the image-generation connection itself.",
-    bullets: [
-      "Newer versions expose width and height in the connection panel rather than hiding it in a prompt.",
-    ],
+    bullets: ["Newer versions expose width and height in the connection panel rather than hiding it in a prompt."],
   },
   {
     id: "temp-must-be-1",
     category: "Images",
     question: "I got a 'Temp must be 1' error while using Illustrate. Which temperature is wrong?",
     answer: "Usually the image connection, not your main chat model.",
-    bullets: [
-      "Check the image-generation connection's temperature field first.",
-    ],
+    bullets: ["Check the image-generation connection's temperature field first."],
   },
   {
     id: "booru-prompts",
     category: "Images",
     question: "How do I get booru-style prompts from Illustrator?",
     answer: "Edit the Illustrator agent prompt in the Agents section.",
-    bullets: [
-      "That is where you steer the prompt format rather than fighting the image connection settings.",
-    ],
+    bullets: ["That is where you steer the prompt format rather than fighting the image connection settings."],
   },
   {
     id: "character-sprites",
     category: "Images",
     question: "How do I generate character sprites?",
     answer: "Open the character card and use the sprite generation flow from there.",
-    bullets: [
-      "You still need a working image-generation connection before the button becomes useful.",
-    ],
+    bullets: ["You still need a working image-generation connection before the button becomes useful."],
   },
   {
     id: "game-invalid-json",
@@ -345,15 +335,14 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     category: "Game Mode",
     question: "Does ending a session summarize it and let me continue later?",
     answer: "Yes. Ending a session generates continuity data and the next session can resume from that state later.",
-    bullets: [
-      "The session-end flow is meant to preserve a usable recap, not just close the chat.",
-    ],
+    bullets: ["The session-end flow is meant to preserve a usable recap, not just close the chat."],
   },
   {
     id: "content-filtering",
     category: "Misc",
     question: "Is there built-in content filtering?",
-    answer: "Not as a separate Marinara safety layer. Filtering behavior mostly depends on the model or provider you connect.",
+    answer:
+      "Not as a separate Marinara safety layer. Filtering behavior mostly depends on the model or provider you connect.",
   },
   {
     id: "shared-gpu",
@@ -385,10 +374,7 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     category: "Misc",
     question: "Can I chat in languages other than English? What about the UI?",
     answer: "Chat content works in other languages, but the UI itself is still English-first.",
-    bullets: [
-      "Non-English chats are fine.",
-      "UI translations are still limited, though contributions are welcome.",
-    ],
+    bullets: ["Non-English chats are fine.", "UI translations are still limited, though contributions are welcome."],
   },
   {
     id: "bug-reports",
@@ -469,8 +455,8 @@ export function HomeFaq() {
                     Start here before you go hunting through Discord logs.
                   </p>
                   <p className="mt-1 text-[0.6875rem] leading-relaxed text-[var(--muted-foreground)]/85">
-                    The biggest repeat problems are Game Mode model choice, silent agent failures from low max response length,
-                    and confusion about the local sidecar using CPU instead of the GPU.
+                    The biggest repeat problems are Game Mode model choice, silent agent failures from low max response
+                    length, and confusion about the local sidecar using CPU instead of the GPU.
                   </p>
                 </div>
               </div>
@@ -496,7 +482,9 @@ export function HomeFaq() {
                 <p className="text-[0.6875rem] font-medium uppercase tracking-[0.16em] text-[var(--muted-foreground)]/65">
                   Frequently Asked Questions
                 </p>
-                <p className="text-[0.625rem] text-[var(--muted-foreground)]/50">Tap a question to reveal the answer.</p>
+                <p className="text-[0.625rem] text-[var(--muted-foreground)]/50">
+                  Tap a question to reveal the answer.
+                </p>
               </div>
 
               <div className="max-h-[22rem] space-y-2 overflow-y-auto pr-0.5 sm:max-h-[28rem] sm:pr-1">

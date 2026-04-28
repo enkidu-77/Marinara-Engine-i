@@ -134,15 +134,26 @@ export function saveImageToDisk(chatId: string, base64: string, ext: string): st
 /** Default 5-minute timeout for image generation API calls (overridable via env). */
 const IMAGE_GEN_TIMEOUT = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? 300_000);
 
+function isOpenAIGptImageModel(model?: string): boolean {
+  return !!model && /^gpt-image-(?:1|1\.5|2)(?:$|-)/i.test(model.trim());
+}
+
 async function generateOpenAI(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
   const url = `${baseUrl.replace(/\/+$/, "")}/images/generations`;
+  const usesGptImageApi = isOpenAIGptImageModel(request.model);
   const body: Record<string, unknown> = {
     prompt: request.prompt,
     n: 1,
     size: `${request.width ?? 1024}x${request.height ?? 1024}`,
-    response_format: "b64_json",
   };
   if (request.model) body.model = request.model;
+  if (usesGptImageApi) {
+    // GPT Image models return base64 image data from the Images API without the
+    // legacy DALL-E `response_format` toggle. `output_format` controls PNG/JPEG/WebP.
+    body.output_format = "png";
+  } else {
+    body.response_format = "b64_json";
+  }
 
   const resp = await fetch(url, {
     method: "POST",

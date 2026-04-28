@@ -126,7 +126,10 @@ export function CyoaChoices({ messages }: Props) {
       {isEditing ? (
         <div className="w-full max-w-[85%] space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--card)]/90 p-3 backdrop-blur-md dark:border-white/10 dark:bg-black/45">
           {draftChoices.map((choice, index) => (
-            <div key={index} className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/20 p-3 dark:border-white/8 dark:bg-black/30">
+            <div
+              key={index}
+              className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/20 p-3 dark:border-white/8 dark:bg-black/30"
+            >
               <input
                 type="text"
                 value={choice.label}

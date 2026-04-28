@@ -20,12 +20,7 @@
 //     same mechanism Zed and other IDE integrations use.
 //   • SDK docs: https://docs.anthropic.com/en/docs/claude-code/sdk
 //
-import {
-  BaseLLMProvider,
-  type ChatMessage,
-  type ChatOptions,
-  type LLMUsage,
-} from "../base-provider.js";
+import { BaseLLMProvider, type ChatMessage, type ChatOptions, type LLMUsage } from "../base-provider.js";
 import { logger } from "../../../lib/logger.js";
 
 /**

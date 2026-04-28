@@ -2,7 +2,8 @@
 // Chat: Conversation Input — Discord-style
 // ──────────────────────────────────────────────
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Smile, StopCircle, X, Plus, ImagePlay, AtSign } from "lucide-react";
+import { Send, Smile, StopCircle, X, Plus, ImagePlay, AtSign, Users } from "lucide-react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { useChatStore } from "../../stores/chat.store";
@@ -18,13 +19,14 @@ import {
   type SlashCommandContext,
 } from "../../lib/slash-commands";
 import { resolveInputMacrosForChat } from "../../lib/chat-macros";
-import { cn } from "../../lib/utils";
+import { cn, getAvatarCropStyle } from "../../lib/utils";
 import { QuickConnectionSwitcher } from "./QuickConnectionSwitcher";
 import { QuickPersonaSwitcher } from "./QuickPersonaSwitcher";
 import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
 import { EmojiPicker } from "../ui/EmojiPicker";
 import { GifPicker } from "../ui/GifPicker";
 import { MariThinkingIndicator } from "./MariThinkingIndicator";
+import { SlashCommandFeedback } from "./SlashCommandFeedback";
 
 interface Attachment {
   type: string;
@@ -77,9 +79,18 @@ async function convertToPng(blob: Blob): Promise<{ blob: Blob; dataUrl: string }
 
 interface ConversationInputProps {
   characterNames?: string[];
+  groupResponseOrder?: string;
+  chatCharacters?: Array<{
+    id: string;
+    name: string;
+    avatarUrl: string | null;
+    avatarCrop?: { zoom: number; offsetX: number; offsetY: number } | null;
+    conversationStatus?: "online" | "idle" | "dnd" | "offline";
+    conversationActivity?: string;
+  }>;
 }
 
-export function ConversationInput({ characterNames = [] }: ConversationInputProps) {
+export function ConversationInput({ characterNames = [], groupResponseOrder, chatCharacters }: ConversationInputProps) {
   const [hasInput, setHasInput] = useState(false);
   const [completions, setCompletions] = useState<SlashCommand[]>([]);
   const [selectedCompletion, setSelectedCompletion] = useState(0);
@@ -93,10 +104,14 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
   const [mentionCompletions, setMentionCompletions] = useState<string[]>([]);
   const [selectedMention, setSelectedMention] = useState(0);
   const [mentionStartPos, setMentionStartPos] = useState(0);
+  const [charPickerOpen, setCharPickerOpen] = useState(false);
+  const [charPickerPos, setCharPickerPos] = useState<{ left: number; top: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const gifButtonRef = useRef<HTMLButtonElement>(null);
+  const charPickerBtnRef = useRef<HTMLButtonElement>(null);
+  const charPickerMenuRef = useRef<HTMLDivElement>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
   const activeChatId = useChatStore((s) => s.activeChatId);
   const { data: activeChat } = useChat(activeChatId);
@@ -110,17 +125,22 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const setCurrentInput = useChatStore((s) => s.setCurrentInput);
+  const currentInput = useChatStore((s) => s.currentInput);
   const { generate } = useGenerate();
   const { applyToUserInput } = useApplyRegex();
   const enterToSend = useUIStore((s) => s.enterToSendConvo);
+  const guideGenerations = useUIStore((s) => s.guideGenerations);
   const createMessage = useCreateMessage(activeChatId);
   const qc = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const syncInputState = useCallback((value: string) => {
-    setHasInput(value.trim().length > 0);
-    setCurrentInput(value);
-  }, [setCurrentInput]);
+  const syncInputState = useCallback(
+    (value: string) => {
+      setHasInput(value.trim().length > 0);
+      setCurrentInput(value);
+    },
+    [setCurrentInput],
+  );
 
   // Restore draft
   const prevChatIdRef = useRef<string | null>(null);
@@ -149,7 +169,7 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
         useChatStore.getState().setInputDraft(chatId, el.value);
       }
     };
-  }, []);
+  }, [activeChatId]);
 
   const handleFileUpload = useCallback(async (files: FileList | null) => {
     if (!files) return;
@@ -368,6 +388,15 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
     // Extract @mentions from the raw message (before regex transforms)
     const mentioned = extractMentions(raw);
 
+    if (groupResponseOrder === "manual" && mentioned.length === 0) {
+      await createMessage.mutateAsync({
+        role: "user",
+        content: message,
+        characterId: null,
+      });
+      return;
+    }
+
     await generate({
       chatId: activeChatId,
       connectionId: null,
@@ -385,8 +414,9 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
     clearInputDraft,
     createMessage,
     characterNames,
+    groupResponseOrder,
     qc,
-    syncInputState
+    syncInputState,
   ]);
 
   const handleKeyDown = useCallback(
@@ -450,7 +480,16 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
         handleSend();
       }
     },
-    [completions, selectedCompletion, mentionCompletions, selectedMention, insertMention, enterToSend, handleSend, syncInputState],
+    [
+      completions,
+      selectedCompletion,
+      mentionCompletions,
+      selectedMention,
+      insertMention,
+      enterToSend,
+      handleSend,
+      syncInputState,
+    ],
   );
 
   const handleInput = useCallback(() => {
@@ -502,17 +541,20 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
     if (hasInput && feedback) setFeedback(null);
   }, [hasInput, feedback]);
 
-  const handleEmojiSelect = useCallback((emoji: string) => {
-    if (!textareaRef.current) return;
-    const el = textareaRef.current;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const value = el.value;
-    el.value = value.slice(0, start) + emoji + value.slice(end);
-    el.selectionStart = el.selectionEnd = start + emoji.length;
-    syncInputState(el.value);
-    el.focus();
-  }, [syncInputState]);
+  const handleEmojiSelect = useCallback(
+    (emoji: string) => {
+      if (!textareaRef.current) return;
+      const el = textareaRef.current;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const value = el.value;
+      el.value = value.slice(0, start) + emoji + value.slice(end);
+      el.selectionStart = el.selectionEnd = start + emoji.length;
+      syncInputState(el.value);
+      el.focus();
+    },
+    [syncInputState],
+  );
 
   const handleGifSelect = useCallback(
     async (gifUrl: string) => {
@@ -535,6 +577,11 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
         return;
       }
 
+      if (groupResponseOrder === "manual" && characterNames.length > 1) {
+        createMessage.mutate({ role: "user", content: gifUrl, characterId: null });
+        return;
+      }
+
       await generate({
         chatId: activeChatId,
         connectionId: null,
@@ -542,14 +589,77 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
         ...(gifAttachments ? { attachments: gifAttachments } : {}),
       });
     },
-    [activeChatId, isStreaming, generate, createMessage],
+    [activeChatId, isStreaming, groupResponseOrder, characterNames.length, generate, createMessage],
   );
+
+  const handleCharacterResponse = useCallback(
+    async (characterId: string) => {
+      if (!activeChatId || isStreaming) return;
+      setCharPickerOpen(false);
+      setCharPickerPos(null);
+      try {
+        await generate(
+          guideGenerations && hasInput
+            ? { chatId: activeChatId, connectionId: null, forCharacterId: characterId, generationGuide: currentInput }
+            : { chatId: activeChatId, connectionId: null, forCharacterId: characterId },
+        );
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "Generation failed";
+        toast.error(msg);
+      }
+    },
+    [activeChatId, isStreaming, generate, guideGenerations, hasInput, currentInput],
+  );
+
+  useEffect(() => {
+    if (!charPickerOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        charPickerMenuRef.current &&
+        !charPickerMenuRef.current.contains(e.target as Node) &&
+        charPickerBtnRef.current &&
+        !charPickerBtnRef.current.contains(e.target as Node)
+      ) {
+        setCharPickerOpen(false);
+        setCharPickerPos(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [charPickerOpen]);
+
+  useEffect(() => {
+    if (!charPickerOpen || !charPickerBtnRef.current) return;
+    const rect = charPickerBtnRef.current.getBoundingClientRect();
+    const inputBox = charPickerBtnRef.current.closest(".rounded-2xl") as HTMLElement | null;
+    const anchorTop = inputBox ? inputBox.getBoundingClientRect().top : rect.top;
+    requestAnimationFrame(() => {
+      const menuEl = charPickerMenuRef.current;
+      const menuHeight = menuEl?.offsetHeight || 300;
+      const menuWidth = menuEl?.offsetWidth || 220;
+      let left = rect.right - menuWidth;
+      if (left < 8) left = 8;
+      setCharPickerPos({ left, top: Math.max(8, anchorTop - menuHeight - 4) });
+    });
+  }, [charPickerOpen]);
+
+  const showCharPicker = groupResponseOrder === "manual" && !!chatCharacters && chatCharacters.length > 1;
+  const statusDotClass = (status?: string) =>
+    status === "offline"
+      ? "bg-gray-400"
+      : status === "dnd"
+        ? "bg-red-500"
+        : status === "idle"
+          ? "bg-yellow-500"
+          : "bg-green-500";
+  const statusLabel = (status?: string) =>
+    status === "offline" ? "Offline" : status === "dnd" ? "Busy" : status === "idle" ? "Away" : null;
 
   return (
     <div className="relative px-3 pb-3">
       {/* Slash command autocomplete */}
       {completions.length > 0 && (
-        <div className="absolute bottom-full left-3 right-3 mb-1 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-lg">
+        <div className="absolute bottom-full left-3 right-3 z-40 mb-1 max-h-[min(18rem,45dvh)] overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-lg [-webkit-overflow-scrolling:touch]">
           {completions.map((cmd, i) => (
             <button
               key={cmd.name}
@@ -563,13 +673,15 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
                 }
               }}
               className={cn(
-                "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors",
+                "flex w-full min-w-0 items-start gap-2 px-3 py-2.5 text-left text-sm transition-colors",
                 i === selectedCompletion ? "bg-foreground/10 text-foreground" : "hover:bg-[var(--accent)]",
               )}
             >
-              <span className="font-mono text-xs">/{cmd.name}</span>
+              <span className="shrink-0 whitespace-nowrap font-mono text-xs">/{cmd.name}</span>
               {cmd.description && (
-                <span className="truncate text-[0.6875rem] text-[var(--muted-foreground)]">{cmd.description}</span>
+                <span className="min-w-0 flex-1 text-[0.6875rem] leading-snug text-[var(--muted-foreground)] [overflow-wrap:anywhere]">
+                  {cmd.description}
+                </span>
               )}
             </button>
           ))}
@@ -600,17 +712,8 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
 
       {/* Feedback toast */}
       {feedback && (
-        <div className="absolute bottom-full left-3 right-3 mb-2 flex justify-center">
-          <div className="flex w-full items-start gap-2 rounded-lg bg-foreground/15 px-3 py-2 text-xs font-medium text-foreground shadow-md">
-            <span className="flex-1 whitespace-pre-wrap">{feedback}</span>
-            <button
-              onClick={() => setFeedback(null)}
-              className="rounded p-0.5 opacity-60 transition-opacity hover:opacity-100"
-              aria-label="Dismiss"
-            >
-              <X size="0.75rem" />
-            </button>
-          </div>
+        <div className="absolute bottom-full left-3 right-3 z-50 mb-2">
+          <SlashCommandFeedback feedback={feedback} onDismiss={() => setFeedback(null)} />
         </div>
       )}
 
@@ -676,11 +779,15 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
         <textarea
           ref={textareaRef}
           placeholder={
-            characterNames.length > 1 && chatName
-              ? `Message ${chatName}, / for commands`
-              : characterNames.length > 0
-                ? `Message @${characterNames[0]}, / for commands`
-                : "Message..."
+            groupResponseOrder === "manual"
+              ? characterNames.length > 0
+                ? `Message freely; @${characterNames[0]} to get a reply`
+                : "Message freely..."
+              : characterNames.length > 1 && chatName
+                ? `Message ${chatName}, / for commands`
+                : characterNames.length > 0
+                  ? `Message @${characterNames[0]}, / for commands`
+                  : "Message..."
           }
           rows={1}
           onInput={handleInput}
@@ -743,6 +850,26 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
             />
           </div>
 
+          {showCharPicker && (
+            <button
+              ref={charPickerBtnRef}
+              onClick={() => setCharPickerOpen((v) => !v)}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                guideGenerations && hasInput
+                  ? "text-[var(--primary)] bg-[var(--primary)]/15 ring-1 ring-[var(--primary)]/30 hover:bg-[var(--primary)]/20"
+                  : charPickerOpen
+                    ? "text-foreground bg-foreground/10"
+                    : "text-foreground/70 hover:bg-foreground/10 hover:text-foreground",
+              )}
+              title={
+                guideGenerations && hasInput ? "Trigger character response (guided)" : "Trigger character response"
+              }
+            >
+              <Users size="1rem" />
+            </button>
+          )}
+
           <button
             onClick={isActuallyGenerating ? () => useChatStore.getState().stopGeneration() : handleSend}
             className={cn(
@@ -759,6 +886,65 @@ export function ConversationInput({ characterNames = [] }: ConversationInputProp
           </button>
         </div>
       </div>
+      {showCharPicker &&
+        charPickerOpen &&
+        createPortal(
+          <div
+            ref={charPickerMenuRef}
+            className="fixed z-[9999] flex max-h-[320px] min-w-[220px] max-w-[280px] flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl"
+            style={
+              charPickerPos ? { left: charPickerPos.left, top: charPickerPos.top } : { visibility: "hidden" as const }
+            }
+          >
+            <div className="flex items-center justify-center border-b border-[var(--border)] px-3 py-2 text-[0.6875rem] font-semibold">
+              Trigger Response
+            </div>
+            <div className="overflow-y-auto p-1">
+              {chatCharacters!.map((char) => (
+                <button
+                  key={char.id}
+                  onClick={() => handleCharacterResponse(char.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all hover:bg-[var(--accent)]",
+                    (char.conversationStatus === "dnd" || char.conversationStatus === "offline") && "opacity-60",
+                  )}
+                >
+                  <div className="relative shrink-0">
+                    {char.avatarUrl ? (
+                      <span className="block h-7 w-7 overflow-hidden rounded-full">
+                        <img
+                          src={char.avatarUrl}
+                          alt={char.name}
+                          className="h-full w-full object-cover"
+                          style={getAvatarCropStyle(char.avatarCrop)}
+                        />
+                      </span>
+                    ) : (
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--secondary)] text-[0.6875rem] font-semibold text-[var(--muted-foreground)]">
+                        {(char.name || "?")[0].toUpperCase()}
+                      </div>
+                    )}
+                    <span
+                      className={cn(
+                        "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-[var(--card)]",
+                        statusDotClass(char.conversationStatus),
+                      )}
+                    />
+                  </div>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs">{char.name}</span>
+                    {(char.conversationActivity || statusLabel(char.conversationStatus)) && (
+                      <span className="block truncate text-[0.625rem] text-[var(--muted-foreground)]">
+                        {char.conversationActivity || statusLabel(char.conversationStatus)}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

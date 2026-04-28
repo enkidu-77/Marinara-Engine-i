@@ -63,9 +63,21 @@ function ensureDir(dir: string) {
   }
 }
 
+function isOpenAIGptImageModel(model?: string): boolean {
+  return !!model && /^gpt-image-(?:1|1\.5|2)(?:$|-)/i.test(model.trim());
+}
+
+function clampByte(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
 /**
- * Convert near-white background pixels to transparency.
- * This works best when the model renders on a solid white backdrop.
+ * Remove the border-connected white matte and decontaminate edge pixels.
+ * This keeps internal whites intact while cleaning the generated backdrop halo.
  */
 async function removeNearWhiteBackgroundPng(input: Buffer, cleanupStrength = 50): Promise<Buffer> {
   const sharp = await getSharp();
@@ -79,55 +91,167 @@ async function removeNearWhiteBackgroundPng(input: Buffer, cleanupStrength = 50)
   const channels = info.channels;
   const strength = Math.max(0, Math.min(100, cleanupStrength));
 
-  // 0 = very soft, 100 = very aggressive
-  // Keep the low end conservative so strength=0 only removes almost-pure white.
-  const hardCutoff = Math.round(1 + (strength / 100) * 7); // 1..8
-  const fadeWindow = Math.round(6 + (strength / 100) * 24); // 6..30
-  const softCutoff = hardCutoff + fadeWindow;
+  const width = info.width;
+  const height = info.height;
+  const pixelCount = width * height;
+  const matteMask = new Uint8Array(pixelCount);
+  const queue = new Int32Array(pixelCount);
+  let queueStart = 0;
+  let queueEnd = 0;
 
-  // Extra guards to avoid deleting light skin/highlights:
-  // - Only affect very bright pixels (high min channel)
-  // - Only affect near-neutral pixels (small RGB channel spread)
-  const minChannelFloor = Math.round(242 + (strength / 100) * 8); // 242..250
-  const spreadHardLimit = Math.round(5 + (strength / 100) * 8); // 5..13
-  const spreadSoftWindow = 10;
-  const spreadSoftLimit = spreadHardLimit + spreadSoftWindow;
+  const hardCutoff = 10 + (strength / 100) * 24;
+  const softCutoff = hardCutoff + 18 + (strength / 100) * 20;
+  const minChannelFloor = 248 - (strength / 100) * 23;
+  const spreadLimit = 7 + (strength / 100) * 18;
+  const transparentAlpha = 4;
 
-  for (let i = 0; i < rgba.length; i += channels) {
-    const r = rgba[i] ?? 255;
-    const g = rgba[i + 1] ?? 255;
-    const b = rgba[i + 2] ?? 255;
-    const a = rgba[i + 3] ?? 255;
+  const pixelOffset = (pixelIndex: number) => pixelIndex * channels;
 
-    const minChannel = Math.min(r, g, b);
-    const maxChannel = Math.max(r, g, b);
-    const spread = maxChannel - minChannel;
+  const whiteDistance = (pixelIndex: number): number => {
+    const offset = pixelOffset(pixelIndex);
+    const red = rgba[offset] ?? 255;
+    const green = rgba[offset + 1] ?? 255;
+    const blue = rgba[offset + 2] ?? 255;
+    return Math.hypot(255 - red, 255 - green, 255 - blue);
+  };
 
-    // Skip colored / not-bright-enough pixels entirely.
-    if (minChannel < minChannelFloor || spread > spreadSoftLimit) {
-      continue;
+  const isWhiteMatteCandidate = (pixelIndex: number, distanceCutoff: number, floorOffset = 0, spreadOffset = 0) => {
+    const offset = pixelOffset(pixelIndex);
+    const red = rgba[offset] ?? 255;
+    const green = rgba[offset + 1] ?? 255;
+    const blue = rgba[offset + 2] ?? 255;
+    const alpha = rgba[offset + 3] ?? 255;
+
+    if (alpha <= transparentAlpha) return true;
+
+    const minChannel = Math.min(red, green, blue);
+    const maxChannel = Math.max(red, green, blue);
+    if (minChannel < minChannelFloor + floorOffset || maxChannel - minChannel > spreadLimit + spreadOffset) {
+      return false;
     }
 
-    // Use Euclidean distance from pure white (255,255,255) once the neutral+bright guards pass.
-    const distanceFromWhite = Math.sqrt((255 - r) * (255 - r) + (255 - g) * (255 - g) + (255 - b) * (255 - b));
+    return whiteDistance(pixelIndex) <= distanceCutoff;
+  };
 
-    let alphaFactor = 1;
+  const enqueueMatte = (pixelIndex: number) => {
+    if (matteMask[pixelIndex]) return;
+    if (!isWhiteMatteCandidate(pixelIndex, softCutoff)) return;
+    matteMask[pixelIndex] = 1;
+    queue[queueEnd++] = pixelIndex;
+  };
 
-    if (spread > spreadHardLimit) {
-      const spreadT = (spread - spreadHardLimit) / Math.max(1, spreadSoftWindow);
-      alphaFactor *= 1 - Math.max(0, Math.min(1, spreadT));
+  for (let xPos = 0; xPos < width; xPos++) {
+    enqueueMatte(xPos);
+    enqueueMatte((height - 1) * width + xPos);
+  }
+  for (let yPos = 0; yPos < height; yPos++) {
+    enqueueMatte(yPos * width);
+    enqueueMatte(yPos * width + width - 1);
+  }
+
+  while (queueStart < queueEnd) {
+    const pixelIndex = queue[queueStart++]!;
+    const xPos = pixelIndex % width;
+    const yPos = Math.floor(pixelIndex / width);
+
+    if (xPos > 0) enqueueMatte(pixelIndex - 1);
+    if (xPos < width - 1) enqueueMatte(pixelIndex + 1);
+    if (yPos > 0) enqueueMatte(pixelIndex - width);
+    if (yPos < height - 1) enqueueMatte(pixelIndex + width);
+  }
+
+  const findForegroundNeighborColor = (pixelIndex: number) => {
+    const xPos = pixelIndex % width;
+    const yPos = Math.floor(pixelIndex / width);
+    let redTotal = 0;
+    let greenTotal = 0;
+    let blueTotal = 0;
+    let weightTotal = 0;
+
+    for (let yOffset = -2; yOffset <= 2; yOffset++) {
+      const sampleY = yPos + yOffset;
+      if (sampleY < 0 || sampleY >= height) continue;
+
+      for (let xOffset = -2; xOffset <= 2; xOffset++) {
+        if (xOffset === 0 && yOffset === 0) continue;
+        const sampleX = xPos + xOffset;
+        if (sampleX < 0 || sampleX >= width) continue;
+
+        const sampleIndex = sampleY * width + sampleX;
+        if (matteMask[sampleIndex] || isWhiteMatteCandidate(sampleIndex, softCutoff, -12, 8)) continue;
+
+        const sampleOffset = pixelOffset(sampleIndex);
+        const alpha = rgba[sampleOffset + 3] ?? 255;
+        if (alpha <= transparentAlpha) continue;
+
+        const distance = Math.hypot(xOffset, yOffset);
+        const weight = alpha / 255 / Math.max(1, distance);
+        redTotal += (rgba[sampleOffset] ?? 0) * weight;
+        greenTotal += (rgba[sampleOffset + 1] ?? 0) * weight;
+        blueTotal += (rgba[sampleOffset + 2] ?? 0) * weight;
+        weightTotal += weight;
+      }
     }
 
-    if (distanceFromWhite <= hardCutoff) {
-      rgba[i + 3] = Math.max(0, Math.min(a, Math.round(a * (1 - alphaFactor))));
-      continue;
+    if (weightTotal <= 0) return null;
+    return {
+      red: redTotal / weightTotal,
+      green: greenTotal / weightTotal,
+      blue: blueTotal / weightTotal,
+    };
+  };
+
+  for (let pixelIndex = 0; pixelIndex < pixelCount; pixelIndex++) {
+    if (!matteMask[pixelIndex]) continue;
+    const offset = pixelOffset(pixelIndex);
+    rgba[offset + 3] = 0;
+  }
+
+  for (let pixelIndex = 0; pixelIndex < pixelCount; pixelIndex++) {
+    if (matteMask[pixelIndex]) continue;
+
+    const xPos = pixelIndex % width;
+    const yPos = Math.floor(pixelIndex / width);
+    let matteNeighbors = 0;
+
+    for (let yOffset = -1; yOffset <= 1; yOffset++) {
+      const sampleY = yPos + yOffset;
+      if (sampleY < 0 || sampleY >= height) continue;
+
+      for (let xOffset = -1; xOffset <= 1; xOffset++) {
+        if (xOffset === 0 && yOffset === 0) continue;
+        const sampleX = xPos + xOffset;
+        if (sampleX < 0 || sampleX >= width) continue;
+        matteNeighbors += matteMask[sampleY * width + sampleX] ?? 0;
+      }
     }
 
-    if (distanceFromWhite <= softCutoff) {
-      const t = (distanceFromWhite - hardCutoff) / Math.max(1, fadeWindow);
-      const keep = Math.max(0, Math.min(1, t));
-      rgba[i + 3] = Math.max(0, Math.min(a, Math.round(a * (keep + (1 - keep) * (1 - alphaFactor)))));
+    if (matteNeighbors === 0 || !isWhiteMatteCandidate(pixelIndex, softCutoff + 18, -22, 12)) continue;
+
+    const offset = pixelOffset(pixelIndex);
+    const alpha = rgba[offset + 3] ?? 255;
+    if (alpha <= transparentAlpha) continue;
+
+    const fade = 1 - clampUnit((whiteDistance(pixelIndex) - hardCutoff) / Math.max(1, softCutoff + 18 - hardCutoff));
+    const edgeWeight = clampUnit(matteNeighbors / 5);
+    const cleanupWeight = fade * edgeWeight;
+    const neighborColor = findForegroundNeighborColor(pixelIndex);
+
+    if (neighborColor) {
+      const blend = clampUnit(cleanupWeight * (0.55 + strength / 400));
+      rgba[offset] = clampByte((rgba[offset] ?? 0) * (1 - blend) + neighborColor.red * blend);
+      rgba[offset + 1] = clampByte((rgba[offset + 1] ?? 0) * (1 - blend) + neighborColor.green * blend);
+      rgba[offset + 2] = clampByte((rgba[offset + 2] ?? 0) * (1 - blend) + neighborColor.blue * blend);
+    } else {
+      const matteAmount = clampUnit(cleanupWeight * 0.65);
+      const foregroundAmount = Math.max(0.08, 1 - matteAmount);
+      rgba[offset] = clampByte(((rgba[offset] ?? 0) - 255 * matteAmount) / foregroundAmount);
+      rgba[offset + 1] = clampByte(((rgba[offset + 1] ?? 0) - 255 * matteAmount) / foregroundAmount);
+      rgba[offset + 2] = clampByte(((rgba[offset + 2] ?? 0) - 255 * matteAmount) / foregroundAmount);
     }
+
+    const alphaRemoval = cleanupWeight * (0.18 + strength / 280);
+    rgba[offset + 3] = clampByte(alpha * (1 - alphaRemoval));
   }
 
   return sharp(rgba, {
@@ -347,7 +471,7 @@ export async function spritesRoutes(app: FastifyInstance) {
 
   /**
    * POST /api/sprites/generate-sheet
-   * Generate an expression sheet via image generation, then slice it into individual cells.
+   * Generate a sprite sheet via image generation, then slice it into individual cells.
    * Body: { connectionId, appearance, referenceImages?, expressions: string[], cols, rows }
    * Returns: { sheetBase64, cells: [{ expression, base64 }] }
    */
@@ -393,27 +517,60 @@ export async function spritesRoutes(app: FastifyInstance) {
     const imgSource = (conn as any).imageGenerationSource || imgModel;
     const imgServiceHint = conn.imageService || imgSource;
 
-    // Build the prompt for an expression sheet or full-body
+    // Build the prompt for an expression sheet or full-body pose sheet.
     const expressionList = expressions.join(", ");
+    const singlePortrait = body.spriteType !== "full-body" && expressions.length === 1 && cols === 1 && rows === 1;
+    const singleFullBody = body.spriteType === "full-body" && expressions.length === 1 && cols === 1 && rows === 1;
+    const generateExpressionsIndividually =
+      body.spriteType !== "full-body" && !singlePortrait && isOpenAIGptImageModel(imgModel);
     let prompt = "";
-    if (body.spriteType === "full-body") {
+    if (singleFullBody) {
       prompt = [
         `single full-body character sprite, one character only,`,
         `entire body visible from head to toe, centered in frame, no cropping,`,
         `solid white studio background,`,
         `${body.appearance?.trim() || ""},`,
-        `general standing/idle game pose, no text, no watermark`,
+        `pose/action: ${expressions[0] ?? "idle"},`,
+        `anime/game sprite style, consistent character design,`,
+        `no grid, no panel borders, no text, no labels, no watermark`,
+      ].join(" ");
+    } else if (body.spriteType === "full-body") {
+      prompt = [
+        `full-body character sprite sheet with EXACTLY ${expressions.length} total pose cells,`,
+        `strict ${cols} columns by ${rows} rows grid, no extra rows, no extra columns, no extra panels,`,
+        `${expressions.length} equally sized tall cells arranged in a perfectly uniform grid,`,
+        `solid white background, thin straight lines separating each cell,`,
+        `same character in every cell, consistent art style and outfit,`,
+        `poses left-to-right top-to-bottom: ${expressionList},`,
+        `${body.appearance?.trim() || ""},`,
+        `each cell shows the entire body from head to toe, centered, no cropping,`,
+        `leave enough whitespace around each full-body pose so feet, hair, weapons, and hands are fully visible,`,
+        `all cells same size, perfectly aligned, no overlapping, no merged cells,`,
+        `the final image must stop after the ${rows} row; do not draw a bonus row or bonus poses,`,
+        `no text, no labels, no numbers`,
+      ].join(" ");
+    } else if (singlePortrait) {
+      prompt = [
+        `single character portrait sprite, one character only,`,
+        `head and shoulders portrait, centered in frame, no cropping,`,
+        `solid white studio background,`,
+        `${body.appearance?.trim() || ""},`,
+        `facial expression: ${expressions[0] ?? "neutral"},`,
+        `anime/game sprite style, consistent character design,`,
+        `no grid, no panel borders, no text, no labels, no watermark`,
       ].join(" ");
     } else {
       prompt = [
-        `character expression sheet, strict ${cols} columns by ${rows} rows grid,`,
-        `${cols * rows} equally sized square cells arranged in a perfectly uniform grid,`,
+        `character expression sheet with EXACTLY ${expressions.length} total portrait cells,`,
+        `strict ${cols} columns by ${rows} rows grid, no extra rows, no extra columns, no extra panels,`,
+        `${expressions.length} equally sized square cells arranged in a perfectly uniform grid,`,
         `solid white background, thin straight lines separating each cell,`,
         `same character in every cell, consistent art style,`,
         `expressions left-to-right top-to-bottom: ${expressionList},`,
         `${body.appearance?.trim() || ""},`,
         `each cell shows head and shoulders portrait with a different facial expression,`,
         `all cells same size, perfectly aligned, no overlapping, no merged cells,`,
+        `the final image must stop after the ${rows} row; do not draw a fourth row or bonus expressions,`,
         `no text, no labels, no numbers`,
       ].join(" ");
     }
@@ -427,67 +584,67 @@ export async function spritesRoutes(app: FastifyInstance) {
     const resolvedRefs = rawRefs.map(resolveReferenceImageBase64).filter((r): r is string => !!r);
 
     try {
-      if (body.spriteType === "full-body") {
+      if (generateExpressionsIndividually) {
         const cells: Array<{ expression: string; base64: string }> = [];
         const failedExpressions: Array<{ expression: string; error: string }> = [];
 
-        for (const pose of expressions) {
+        for (const expression of expressions) {
           try {
-            const posePrompt = [
-              prompt,
-              `pose/action: ${pose}.`,
-              `Keep exactly one full character fully visible and uncropped.`,
+            const expressionPrompt = [
+              `single character portrait sprite, one character only,`,
+              `head and shoulders portrait, centered in frame, no cropping,`,
+              `solid white studio background,`,
+              `${body.appearance?.trim() || ""},`,
+              `facial expression: ${expression},`,
+              `anime/game sprite style, consistent character design,`,
+              `no grid, no panel borders, no text, no labels, no watermark`,
             ].join(" ");
 
-            const targetWidth = 832;
-            const targetHeight = 1216;
-
+            const targetSize = 1024;
             const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, imgServiceHint, {
-              prompt: posePrompt,
+              prompt: expressionPrompt,
               model: imgModel,
-              width: targetWidth,
-              height: targetHeight,
+              width: targetSize,
+              height: targetSize,
               referenceImage: resolvedRefs[0],
               referenceImages: resolvedRefs.length > 1 ? resolvedRefs : undefined,
               comfyWorkflow: conn.comfyuiWorkflow || undefined,
             });
 
             let spriteBuffer: Buffer = Buffer.from(imageResult.base64, "base64");
-
-            // Normalize to the expected portrait dimensions – some providers
-            // ignore or snap the requested size, returning wider / square images.
             const sharp = await getSharp();
             const meta = await sharp(spriteBuffer).metadata();
-            if (meta.width && meta.height && (meta.width !== targetWidth || meta.height !== targetHeight)) {
+            if (meta.width && meta.height && (meta.width !== targetSize || meta.height !== targetSize)) {
               spriteBuffer = await sharp(spriteBuffer)
-                .resize(targetWidth, targetHeight, { fit: "cover", position: "centre" })
+                .resize(targetSize, targetSize, { fit: "cover", position: "centre" })
                 .png()
                 .toBuffer();
             }
+
             if (body.noBackground) {
               try {
                 spriteBuffer = await removeNearWhiteBackgroundPng(spriteBuffer, cleanupStrength);
               } catch (bgErr) {
-                app.log.warn(bgErr, "Full-body sprite background cleanup failed; continuing with original image");
+                app.log.warn(bgErr, "Expression sprite background cleanup failed; continuing with original image");
               }
             }
 
             cells.push({
-              expression: pose,
+              expression,
               base64: spriteBuffer.toString("base64"),
             });
-          } catch (poseErr: any) {
-            const msg = String(poseErr?.message || "Generation failed")
+          } catch (expressionErr: any) {
+            const msg = String(expressionErr?.message || "Generation failed")
               .replace(/<[^>]*>/g, "")
               .slice(0, 300);
-            app.log.warn(poseErr, `Full-body pose "${pose}" generation failed; skipping`);
-            failedExpressions.push({ expression: pose, error: msg });
+            app.log.warn(expressionErr, `Expression sprite "${expression}" generation failed; skipping`);
+            failedExpressions.push({ expression, error: msg });
           }
         }
 
         if (cells.length === 0) {
           return reply.status(500).send({
-            error: "All pose generations failed",
+            error: "All expression generations failed",
             failedExpressions,
           });
         }
@@ -500,12 +657,12 @@ export async function spritesRoutes(app: FastifyInstance) {
       }
 
       // Generate the sheet image.
-      // Size the canvas so each cell is roughly square (~512px) — this makes
-      // the grid aspect ratio match the requested cols×rows and prevents
-      // the model from producing misaligned layouts that slice incorrectly.
-      const cellSize = 512;
-      const sheetWidth = cols * cellSize;
-      const sheetHeight = rows * cellSize;
+      // Size the canvas so the grid aspect ratio matches the requested cells;
+      // full-body sheets use taller cells so poses have room from head to toe.
+      const cellWidthHint = 512;
+      const cellHeightHint = body.spriteType === "full-body" ? 768 : 512;
+      const sheetWidth = cols * cellWidthHint;
+      const sheetHeight = rows * cellHeightHint;
 
       const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, imgServiceHint, {
         prompt,

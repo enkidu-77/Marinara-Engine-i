@@ -62,7 +62,7 @@ export function createChatsStorage(db: DB) {
         characterIds: JSON.stringify(input.characterIds),
         groupId: input.groupId ?? null,
         personaId: input.personaId,
-        promptPresetId: input.promptPresetId,
+        promptPresetId: input.mode === "conversation" ? null : input.promptPresetId,
         connectionId: input.connectionId,
         metadata: JSON.stringify({
           summary: null,

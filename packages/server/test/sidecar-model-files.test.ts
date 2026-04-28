@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isLikelyMmprojModelPath, isSupportedLlamaCppModelFilename } from "../src/services/sidecar/sidecar-model-files.js";
+import {
+  isLikelyMmprojModelPath,
+  isSupportedLlamaCppModelFilename,
+} from "../src/services/sidecar/sidecar-model-files.js";
 
 test("rejects mmproj GGUF files as main llama.cpp models", () => {
   assert.equal(isLikelyMmprojModelPath("unslothgemma-4-E2B-it-GGUFmmproj-BF16.gguf"), true);

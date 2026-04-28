@@ -12,6 +12,7 @@ export interface MusicScoreInput {
   weather?: string | null;
   timeOfDay?: string | null;
   currentMusic?: string | null;
+  recentMusic?: string[] | null;
   availableMusic: string[];
 }
 
@@ -86,7 +87,7 @@ function pickRandom<T>(items: readonly T[]): T {
  * Returns `null` when the current music is already appropriate.
  */
 export function scoreMusic(input: MusicScoreInput): string | null {
-  const { state, weather, timeOfDay, currentMusic, availableMusic } = input;
+  const { state, weather, timeOfDay, currentMusic, recentMusic, availableMusic } = input;
 
   if (!availableMusic.length) return null;
 
@@ -129,9 +130,11 @@ export function scoreMusic(input: MusicScoreInput): string | null {
     return { tag, score };
   });
 
-  // 6. Always pick a different track from the currently playing one when possible.
-  const eligible = scored.filter((entry) => entry.tag !== currentMusic);
-  const poolBase = eligible.length > 0 ? eligible : scored;
+  // 6. Avoid the current track and a short recent-history window when possible.
+  const recentSet = new Set((recentMusic ?? []).filter((tag) => tag && tag !== currentMusic));
+  const nonCurrent = scored.filter((entry) => entry.tag !== currentMusic);
+  const nonRecent = nonCurrent.filter((entry) => !recentSet.has(entry.tag));
+  const poolBase = nonRecent.length > 0 ? nonRecent : nonCurrent.length > 0 ? nonCurrent : scored;
   if (!poolBase.length) return null;
 
   // 7. Prefer the strongest matches, but widen the pool until it is large

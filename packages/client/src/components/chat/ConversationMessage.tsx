@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Chat: Discord-style conversation message
 // ──────────────────────────────────────────────
-import { useState, useCallback, useRef, useEffect, memo, useMemo, type ReactNode } from "react";
+import { useState, useCallback, useRef, useEffect, memo, useMemo, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   Pencil,
@@ -20,7 +20,7 @@ import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type { Message } from "@marinara-engine/shared";
 import { useUIStore } from "../../stores/ui.store";
 import { useChatStore } from "../../stores/chat.store";
-import { cn, copyToClipboard } from "../../lib/utils";
+import { cn, copyToClipboard, getAvatarCropStyle } from "../../lib/utils";
 import { applyInlineMarkdown, renderMarkdownBlocks } from "../../lib/markdown";
 import { chatKeys } from "../../hooks/use-chats";
 import { resolveMessageMacros } from "../../lib/chat-macros";
@@ -29,7 +29,7 @@ import { api } from "../../lib/api-client";
 import type { CharacterMap, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
 
 /** Build style object for name color (supports gradients). */
-function nameColorStyle(color?: string): React.CSSProperties | undefined {
+function nameColorStyle(color?: string): CSSProperties | undefined {
   if (!color) return undefined;
   if (color.includes("gradient(")) {
     return {
@@ -85,13 +85,29 @@ function highlightMentions(nodes: ReactNode[], names: string[], keyPrefix: strin
 }
 
 /** Renders message content, showing image URLs as inline images */
-function MessageContent({ content, mentionNames }: { content: string; mentionNames?: string[] }) {
+function MessageContent({
+  content,
+  mentionNames,
+  onImageOpen,
+}: {
+  content: string;
+  mentionNames?: string[];
+  onImageOpen: (url: string) => void;
+}) {
   if (IMAGE_URL_RE.test(content.trim())) {
     const url = content.trim();
     return (
-      <a href={url} target="_blank" rel="noopener noreferrer">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onImageOpen(url);
+        }}
+        className="block cursor-zoom-in rounded-lg text-left"
+        title="Open image"
+      >
         <img src={url} alt="GIF" className="max-h-48 max-w-full sm:max-w-xs rounded-lg" loading="lazy" />
-      </a>
+      </button>
     );
   }
 
@@ -111,29 +127,30 @@ interface SpeakerSegment {
   speaker: string | null; // null = narration / non-attributed text
   text: string;
 }
-function parseSpeakerTags(content: string): SpeakerSegment[] | null {
+function parseSpeakerTags(content: string, knownNames: Set<string>): SpeakerSegment[] | null {
   const regex = /<speaker="([^"]*)">([\s\S]*?)<\/speaker>/g;
   let match: RegExpExecArray | null;
   const segments: SpeakerSegment[] = [];
   let lastIndex = 0;
-  let found = false;
+  let foundTag = false;
   while ((match = regex.exec(content)) !== null) {
-    found = true;
+    foundTag = true;
+    const speakerName = match[1]!.trim();
+    const knownSpeaker = knownNames.has(speakerName.toLowerCase());
     // Text before this tag
     if (match.index > lastIndex) {
       const before = content.slice(lastIndex, match.index).trim();
       if (before) segments.push({ speaker: null, text: before });
     }
-    segments.push({ speaker: match[1]!, text: match[2]!.trim() });
+    segments.push({ speaker: knownSpeaker ? speakerName : null, text: match[2]!.trim() });
     lastIndex = regex.lastIndex;
   }
-  if (!found) return null;
   // Trailing text
   if (lastIndex < content.length) {
     const after = content.slice(lastIndex).trim();
     if (after) segments.push({ speaker: null, text: after });
   }
-  return segments;
+  return foundTag ? segments : null;
 }
 
 /** Parse "Name: text" format into segments. Requires known character names to avoid false positives. */
@@ -233,6 +250,8 @@ interface ConversationMessageProps {
   personaInfo?: PersonaInfo;
   /** Override the edit button click (used by SplitMessageGroup) */
   onEditClick?: () => void;
+  /** Character IDs that actually belong to this chat. Speaker-name rendering is scoped to these IDs. */
+  chatCharacterIds?: string[];
   /** 1-based ordinal position in the message list. Shown under avatar when actions visible. */
   messageIndex?: number;
   messageOrderIndex?: number;
@@ -257,6 +276,7 @@ export const ConversationMessage = memo(function ConversationMessage({
   characterMap,
   personaInfo,
   onEditClick,
+  chatCharacterIds,
   messageIndex,
   messageOrderIndex,
   multiSelectMode,
@@ -268,9 +288,12 @@ export const ConversationMessage = memo(function ConversationMessage({
   const [showActions, setShowActions] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
+  const [imageLightbox, setImageLightbox] = useState<string | null>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const hasInput = useChatStore((s) => s.currentInput.trim().length > 0);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
+  const chatFontSize = useUIStore((s) => s.chatFontSize);
+  const messageTextStyle = useMemo<CSSProperties>(() => ({ fontSize: `${chatFontSize}px` }), [chatFontSize]);
   const isGuided = guideGenerations && hasInput;
   const regenerateButtonTitle = isGuided ? "Regenerate (guided)" : "Regenerate";
   const regenerateGuidedClass = isGuided
@@ -291,12 +314,19 @@ export const ConversationMessage = memo(function ConversationMessage({
     return typeof message.extra === "string" ? JSON.parse(message.extra) : message.extra;
   }, [message.extra]);
 
+  const scopedCharacterMap = useMemo(() => {
+    if (!characterMap) return null;
+    if (!chatCharacterIds) return characterMap;
+    const allowedIds = new Set(chatCharacterIds);
+    return new Map(Array.from(characterMap).filter(([id]) => allowedIds.has(id)));
+  }, [characterMap, chatCharacterIds]);
+
   // Character info
-  const charInfo = message.characterId && characterMap ? characterMap.get(message.characterId) : null;
+  const charInfo = message.characterId && scopedCharacterMap ? scopedCharacterMap.get(message.characterId) : null;
   const primaryCharInfo =
     charInfo ??
-    (characterMap
-      ? (Array.from(characterMap.values()).find(
+    (scopedCharacterMap
+      ? (Array.from(scopedCharacterMap.values()).find(
           (candidate): candidate is NonNullable<typeof candidate> => !!candidate,
         ) ?? null)
       : null);
@@ -306,6 +336,7 @@ export const ConversationMessage = memo(function ConversationMessage({
   // Fall back to the current personaInfo prop for older messages without snapshots.
   const msgPersona = isUser && extra.personaSnapshot ? extra.personaSnapshot : null;
   const avatarUrl = isUser ? (msgPersona?.avatarUrl ?? personaInfo?.avatarUrl ?? null) : (charInfo?.avatarUrl ?? null);
+  const avatarCropStyle = isUser ? undefined : getAvatarCropStyle(charInfo?.avatarCrop);
   const displayName = isUser
     ? (msgPersona?.name ?? personaInfo?.name ?? "You")
     : (primaryCharInfo?.name ?? "Assistant");
@@ -323,10 +354,13 @@ export const ConversationMessage = memo(function ConversationMessage({
           scenario: msgPersona?.scenario ?? personaInfo?.scenario,
         },
         primaryCharacter: primaryCharInfo ?? { name: displayName },
-        characters: characterMap ? Array.from(characterMap.values()) : displayName ? [{ name: displayName }] : [],
+        characters: scopedCharacterMap
+          ? Array.from(scopedCharacterMap.values())
+          : displayName
+            ? [{ name: displayName }]
+            : [],
       }),
     [
-      characterMap,
       displayName,
       message.content,
       msgPersona?.appearance,
@@ -342,6 +376,7 @@ export const ConversationMessage = memo(function ConversationMessage({
       personaInfo?.personality,
       personaInfo?.scenario,
       primaryCharInfo,
+      scopedCharacterMap,
     ],
   );
 
@@ -375,9 +410,9 @@ export const ConversationMessage = memo(function ConversationMessage({
   // Build name→character lookup for speaker tag resolution.
   // When multiple characters share the same name, prefer the one assigned to this message.
   const charByName = useMemo(() => {
-    if (!characterMap) return null;
+    if (!scopedCharacterMap) return null;
     const map = new Map<string, NonNullable<ReturnType<CharacterMap["get"]>>>();
-    for (const [id, v] of characterMap) {
+    for (const [id, v] of scopedCharacterMap) {
       if (v) {
         const key = v.name.toLowerCase();
         // If the message's own characterId matches this entry, always prefer it
@@ -389,26 +424,26 @@ export const ConversationMessage = memo(function ConversationMessage({
       }
     }
     return map;
-  }, [characterMap, message.characterId]);
+  }, [scopedCharacterMap, message.characterId]);
 
   // Collect character names for @mention highlighting
   const mentionNames = useMemo(() => {
-    if (!characterMap) return [] as string[];
+    if (!scopedCharacterMap) return [] as string[];
     const names: string[] = [];
-    for (const [, v] of characterMap) {
+    for (const [, v] of scopedCharacterMap) {
       if (v?.name) names.push(v.name);
     }
     return names;
-  }, [characterMap]);
+  }, [scopedCharacterMap]);
 
   // Parse speaker tags or Name: text format for group merged-mode messages
   const groupedSegments = useMemo(() => {
     if (isUser || !renderedContent) return null;
+    const knownNames = charByName ? new Set(charByName.keys()) : new Set<string>();
     // Try <speaker> tags first (backward compat)
-    const speakerSegs = parseSpeakerTags(renderedContent);
+    const speakerSegs = parseSpeakerTags(renderedContent, knownNames);
     if (speakerSegs) return groupConsecutiveSegments(speakerSegs);
     // Try Name: text format
-    const knownNames = charByName ? new Set(charByName.keys()) : new Set<string>();
     const nameSegs = parseNamePrefixFormat(renderedContent, knownNames);
     if (nameSegs) return groupConsecutiveSegments(nameSegs);
     return null;
@@ -597,6 +632,7 @@ export const ConversationMessage = memo(function ConversationMessage({
         {groupedSegments.slice(0, visibleSegments).map((grp, i) => {
           const segChar = grp.speaker && charByName ? charByName.get(grp.speaker.toLowerCase()) : null;
           const segAvatar = segChar?.avatarUrl ?? null;
+          const segAvatarCropStyle = getAvatarCropStyle(segChar?.avatarCrop);
           const segName = segChar?.name ?? grp.speaker ?? "";
           const segColor = segChar?.nameColor;
           const isFirst = i === 0;
@@ -608,6 +644,7 @@ export const ConversationMessage = memo(function ConversationMessage({
               <div
                 key={i}
                 className="pl-14 py-0.5 text-[0.875rem] leading-relaxed break-words whitespace-pre-wrap text-[var(--muted-foreground)] italic animate-[fadeSlideIn_0.4s_ease-out]"
+                style={messageTextStyle}
               >
                 {mentionNames.length
                   ? highlightMentions(applyInlineMarkdown(combinedText, `ns${i}`), mentionNames, `ns${i}`)
@@ -633,7 +670,13 @@ export const ConversationMessage = memo(function ConversationMessage({
                       <div className="w-10 flex-shrink-0">
                         <div className="h-10 w-10 overflow-hidden rounded-full bg-[var(--accent)]">
                           {segAvatar ? (
-                            <img src={segAvatar} alt={segName} loading="lazy" className="h-full w-full object-cover" />
+                            <img
+                              src={segAvatar}
+                              alt={segName}
+                              loading="lazy"
+                              className="h-full w-full object-cover"
+                              style={segAvatarCropStyle}
+                            />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center text-sm font-bold text-[var(--muted-foreground)]">
                               {segName[0]?.toUpperCase()}
@@ -661,7 +704,10 @@ export const ConversationMessage = memo(function ConversationMessage({
                             </span>
                           )}
                         </div>
-                        <div className="text-[0.9375rem] leading-relaxed break-words whitespace-pre-wrap">
+                        <div
+                          className="text-[0.9375rem] leading-relaxed break-words whitespace-pre-wrap"
+                          style={messageTextStyle}
+                        >
                           {mentionNames.length
                             ? highlightMentions(
                                 applyInlineMarkdown(paragraphs[0]!, `gs${i}_0`),
@@ -677,6 +723,7 @@ export const ConversationMessage = memo(function ConversationMessage({
                       <div
                         key={pi}
                         className="pl-14 mt-0.5 text-[0.9375rem] leading-relaxed break-words whitespace-pre-wrap"
+                        style={messageTextStyle}
                       >
                         {mentionNames.length
                           ? highlightMentions(
@@ -843,7 +890,13 @@ export const ConversationMessage = memo(function ConversationMessage({
           <>
             <div className="h-10 w-10 overflow-hidden rounded-full bg-[var(--accent)]">
               {avatarUrl ? (
-                <img src={avatarUrl} alt={displayName} loading="lazy" className="h-full w-full object-cover" />
+                <img
+                  src={avatarUrl}
+                  alt={displayName}
+                  loading="lazy"
+                  className="h-full w-full object-cover"
+                  style={avatarCropStyle}
+                />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-sm font-bold text-[var(--muted-foreground)]">
                   {isUser ? <User size="1.125rem" /> : displayName[0]?.toUpperCase()}
@@ -890,7 +943,7 @@ export const ConversationMessage = memo(function ConversationMessage({
               }}
               className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-2.5 text-[0.9375rem] leading-relaxed outline-none"
               rows={1}
-              style={{ overflow: "auto" }}
+              style={{ overflow: "auto", ...messageTextStyle }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   e.preventDefault();
@@ -917,6 +970,7 @@ export const ConversationMessage = memo(function ConversationMessage({
               "mari-message-content text-[0.9375rem] leading-relaxed break-words whitespace-pre-wrap",
               isStreaming && !renderedContent && "py-1",
             )}
+            style={messageTextStyle}
           >
             {isStreaming && !renderedContent ? (
               <div className="flex items-center gap-1">
@@ -926,7 +980,7 @@ export const ConversationMessage = memo(function ConversationMessage({
               </div>
             ) : (
               <>
-                <MessageContent content={renderedContent} mentionNames={mentionNames} />
+                <MessageContent content={renderedContent} mentionNames={mentionNames} onImageOpen={setImageLightbox} />
                 {isStreaming && (
                   <span className="ml-0.5 inline-block h-4 w-[0.125rem] animate-pulse rounded-full bg-[var(--foreground)]/50" />
                 )}
@@ -954,14 +1008,22 @@ export const ConversationMessage = memo(function ConversationMessage({
             {extra.attachments.map((att: any, i: number) =>
               att.type === "image" || att.type?.startsWith("image/") ? (
                 <div key={i} className="group/att relative inline-block">
-                  <a href={att.url || att.data} target="_blank" rel="noopener noreferrer">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setImageLightbox(att.url || att.data);
+                    }}
+                    className="block cursor-zoom-in rounded-lg text-left"
+                    title="Open image"
+                  >
                     <img
                       src={att.url || att.data}
                       alt={att.filename || att.name || "image"}
                       className="max-h-80 max-w-full rounded-lg"
                       loading="lazy"
                     />
-                  </a>
+                  </button>
                   <button
                     onClick={() => handleRemoveAttachment(i)}
                     title="Remove from message"
@@ -1070,6 +1132,29 @@ export const ConversationMessage = memo(function ConversationMessage({
                 </pre>
               </div>
             </div>
+          </div>,
+          document.body,
+        )}
+
+      {imageLightbox &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm max-md:pt-[env(safe-area-inset-top)]"
+            onClick={() => setImageLightbox(null)}
+          >
+            <img
+              src={imageLightbox}
+              alt="Expanded image"
+              className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              onClick={() => setImageLightbox(null)}
+              className="absolute right-4 top-4 rounded-full bg-black/50 p-2 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+              aria-label="Close image"
+            >
+              <X size="1.125rem" />
+            </button>
           </div>,
           document.body,
         )}

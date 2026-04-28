@@ -57,7 +57,10 @@ function formatToolPayloadForLog(payload: string, maxLength = 400): string {
     value
       .replace(/(Bearer\s+)[A-Za-z0-9\-._~+/]+=*/gi, "$1[REDACTED]")
       .replace(/((?:access|refresh|id)?[_-]?token["'\s:=]+)([^,\s"']+)/gi, "$1[REDACTED]")
-      .replace(/((?:api[_-]?key|password|secret|authorization|cookie|credential)["'\s:=]+)([^,\s"']+)/gi, "$1[REDACTED]");
+      .replace(
+        /((?:api[_-]?key|password|secret|authorization|cookie|credential)["'\s:=]+)([^,\s"']+)/gi,
+        "$1[REDACTED]",
+      );
 
   try {
     const parsed = JSON.parse(payload);
@@ -233,6 +236,7 @@ async function executeAgentWithTools(
       role: "assistant",
       content: result.content ?? "",
       tool_calls: result.toolCalls,
+      ...(result.providerMetadata ? { providerMetadata: result.providerMetadata } : {}),
     });
 
     // Execute each tool call and append results

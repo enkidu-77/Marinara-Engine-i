@@ -106,6 +106,6 @@ export async function avatarsRoutes(app: FastifyInstance) {
     const filePath = join(npcDir, `${safeName}.png`);
     writeFileSync(filePath, Buffer.from(match[1]!, "base64"));
 
-    return reply.send({ avatarPath: `/api/avatars/npc/${chatId}/${safeName}.png` });
+    return reply.send({ avatarPath: `/api/avatars/npc/${chatId}/${safeName}.png?v=${Date.now()}` });
   });
 }

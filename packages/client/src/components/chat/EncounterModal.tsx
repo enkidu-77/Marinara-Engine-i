@@ -101,7 +101,9 @@ function EnemyCard({ enemy, index: _index, isDead }: { enemy: CombatEnemy; index
         <HPBar current={enemy.hp} max={enemy.maxHp} />
       </div>
       <StatusBadges statuses={enemy.statuses} />
-      {enemy.description && <p className="mt-1 text-[0.625rem] leading-tight text-foreground/40">{enemy.description}</p>}
+      {enemy.description && (
+        <p className="mt-1 text-[0.625rem] leading-tight text-foreground/40">{enemy.description}</p>
+      )}
       {isDead && (
         <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/40">
           <Skull size="1.25rem" className="text-red-400/60" />
@@ -200,7 +202,9 @@ function TargetSelection({ attackType, enemies, party, onSelect, onCancel }: Tar
           )}
 
           {attackType === "both" && (
-            <div className="py-1 text-center text-[0.625rem] font-bold uppercase tracking-wider text-[var(--muted-foreground)]/40">or</div>
+            <div className="py-1 text-center text-[0.625rem] font-bold uppercase tracking-wider text-[var(--muted-foreground)]/40">
+              or
+            </div>
           )}
 
           {/* Individual enemies */}
@@ -546,7 +550,9 @@ function PlayerControls({ onAction }: { onAction: (text: string) => void }) {
         {/* Attacks */}
         {attacks.length > 0 && (
           <div>
-            <div className="mb-1.5 text-[0.625rem] font-semibold uppercase tracking-wider text-foreground/30">Attacks</div>
+            <div className="mb-1.5 text-[0.625rem] font-semibold uppercase tracking-wider text-foreground/30">
+              Attacks
+            </div>
             <div className="flex flex-wrap gap-1.5">
               {attacks.map((atk, i) => (
                 <button
@@ -567,7 +573,9 @@ function PlayerControls({ onAction }: { onAction: (text: string) => void }) {
         {/* Items */}
         {items.length > 0 && (
           <div>
-            <div className="mb-1.5 text-[0.625rem] font-semibold uppercase tracking-wider text-foreground/30">Items</div>
+            <div className="mb-1.5 text-[0.625rem] font-semibold uppercase tracking-wider text-foreground/30">
+              Items
+            </div>
             <div className="flex flex-wrap gap-1.5">
               {items.map((item, i) => (
                 <button

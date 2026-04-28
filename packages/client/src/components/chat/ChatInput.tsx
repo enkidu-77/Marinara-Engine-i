@@ -20,12 +20,13 @@ import {
   type SlashCommandContext,
 } from "../../lib/slash-commands";
 import { resolveInputMacrosForChat } from "../../lib/chat-macros";
-import { cn } from "../../lib/utils";
+import { cn, getAvatarCropStyle } from "../../lib/utils";
 import { EmojiPicker } from "../ui/EmojiPicker";
 import { QuickConnectionSwitcher } from "./QuickConnectionSwitcher";
 import { QuickPersonaSwitcher } from "./QuickPersonaSwitcher";
 import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
 import { MariThinkingIndicator } from "./MariThinkingIndicator";
+import { SlashCommandFeedback } from "./SlashCommandFeedback";
 
 interface Attachment {
   type: string; // MIME type
@@ -40,7 +41,12 @@ interface ChatInputProps {
   mode?: "conversation" | "roleplay";
   characterNames?: string[];
   groupResponseOrder?: string;
-  chatCharacters?: Array<{ id: string; name: string; avatarUrl: string | null }>;
+  chatCharacters?: Array<{
+    id: string;
+    name: string;
+    avatarUrl: string | null;
+    avatarCrop?: { zoom: number; offsetX: number; offsetY: number } | null;
+  }>;
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -80,10 +86,13 @@ export const ChatInput = memo(function ChatInput({
   const resizeRafRef = useRef<number>(0);
   const qc = useQueryClient();
 
-  const syncInputState = useCallback((value: string) => {
-    setHasInput(value.trim().length > 0);
-    setCurrentInput(value);
-  }, [setCurrentInput]);
+  const syncInputState = useCallback(
+    (value: string) => {
+      setHasInput(value.trim().length > 0);
+      setCurrentInput(value);
+    },
+    [setCurrentInput],
+  );
 
   // Restore draft when mounting or switching chats
   const prevChatIdRef = useRef<string | null>(null);
@@ -405,7 +414,7 @@ export const ChatInput = memo(function ChatInput({
     mode,
     groupResponseOrder,
     createMessage,
-    syncInputState
+    syncInputState,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -501,17 +510,20 @@ export const ChatInput = memo(function ChatInput({
 
   const _isRP = mode === "roleplay";
 
-  const handleEmojiSelect = useCallback((emoji: string) => {
-    if (!textareaRef.current) return;
-    const el = textareaRef.current;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const value = el.value;
-    el.value = value.slice(0, start) + emoji + value.slice(end);
-    el.selectionStart = el.selectionEnd = start + emoji.length;
-    syncInputState(el.value);
-    el.focus();
-  }, [syncInputState]);
+  const handleEmojiSelect = useCallback(
+    (emoji: string) => {
+      if (!textareaRef.current) return;
+      const el = textareaRef.current;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const value = el.value;
+      el.value = value.slice(0, start) + emoji + value.slice(end);
+      el.selectionStart = el.selectionEnd = start + emoji.length;
+      syncInputState(el.value);
+      el.focus();
+    },
+    [syncInputState],
+  );
 
   // Character picker: trigger a response from a specific character (manual mode)
   const handleCharacterResponse = useCallback(
@@ -522,8 +534,8 @@ export const ChatInput = memo(function ChatInput({
       try {
         await generate(
           guideGenerations && hasInput
-          ? { chatId: activeChatId, connectionId: null, forCharacterId: characterId, generationGuide: currentInput }
-          : { chatId: activeChatId, connectionId: null, forCharacterId: characterId }
+            ? { chatId: activeChatId, connectionId: null, forCharacterId: characterId, generationGuide: currentInput }
+            : { chatId: activeChatId, connectionId: null, forCharacterId: characterId },
         );
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Generation failed";
@@ -575,7 +587,7 @@ export const ChatInput = memo(function ChatInput({
     <div className="mari-chat-input chat-input-container px-3 pb-3">
       {/* Slash command autocomplete popup */}
       {completions.length > 0 && (
-        <div className="mb-2 overflow-hidden rounded-xl border border-foreground/10 bg-[var(--card)] shadow-xl backdrop-blur-xl">
+        <div className="mb-2 max-h-[min(18rem,45dvh)] overflow-y-auto rounded-xl border border-foreground/10 bg-[var(--card)] shadow-xl backdrop-blur-xl [-webkit-overflow-scrolling:touch]">
           {completions.map((cmd, i) => (
             <button
               key={cmd.name}
@@ -589,32 +601,23 @@ export const ChatInput = memo(function ChatInput({
                 setCompletions([]);
               }}
               className={cn(
-                "flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors",
+                "flex w-full min-w-0 items-start gap-2 px-3 py-2.5 text-left text-sm transition-colors",
                 i === selectedCompletion
                   ? "bg-foreground/10 text-foreground"
                   : "text-foreground/70 hover:bg-foreground/5",
               )}
             >
-              <span className="font-mono font-semibold text-blue-400">/{cmd.name}</span>
-              <span className="text-xs opacity-60">{cmd.description}</span>
+              <span className="shrink-0 whitespace-nowrap font-mono font-semibold text-blue-400">/{cmd.name}</span>
+              <span className="min-w-0 flex-1 text-xs leading-snug opacity-60 [overflow-wrap:anywhere]">
+                {cmd.description}
+              </span>
             </button>
           ))}
         </div>
       )}
 
       {/* Feedback toast */}
-      {feedback && (
-        <div className={cn("mb-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs bg-amber-500/15 text-amber-300")}>
-          <span className="flex-1 whitespace-pre-wrap">{feedback}</span>
-          <button
-            onClick={() => setFeedback(null)}
-            className="shrink-0 rounded p-0.5 opacity-60 transition-opacity hover:opacity-100"
-            aria-label="Dismiss"
-          >
-            <X size="0.75rem" />
-          </button>
-        </div>
-      )}
+      {feedback && <SlashCommandFeedback feedback={feedback} onDismiss={() => setFeedback(null)} className="mb-2" />}
 
       {/* Attachment previews */}
       {attachments.length > 0 && (
@@ -747,7 +750,7 @@ export const ChatInput = memo(function ChatInput({
                   ? "text-foreground bg-foreground/10"
                   : "text-foreground/40 hover:bg-foreground/10 hover:text-foreground/70",
             )}
-            title={(guideGenerations && hasInput) ? "Trigger character response (guided)" : "Trigger character response"}
+            title={guideGenerations && hasInput ? "Trigger character response (guided)" : "Trigger character response"}
           >
             <Users size="1rem" />
           </button>
@@ -797,7 +800,14 @@ export const ChatInput = memo(function ChatInput({
                   className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all hover:bg-[var(--accent)]"
                 >
                   {char.avatarUrl ? (
-                    <img src={char.avatarUrl} alt={char.name} className="h-7 w-7 shrink-0 rounded-full object-cover" />
+                    <span className="h-7 w-7 shrink-0 overflow-hidden rounded-full">
+                      <img
+                        src={char.avatarUrl}
+                        alt={char.name}
+                        className="h-full w-full object-cover"
+                        style={getAvatarCropStyle(char.avatarCrop)}
+                      />
+                    </span>
                   ) : (
                     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--secondary)] text-[0.6875rem] font-semibold text-[var(--muted-foreground)]">
                       {(char.name || "?")[0].toUpperCase()}

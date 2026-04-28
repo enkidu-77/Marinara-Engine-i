@@ -143,8 +143,7 @@ export async function importSTChat(jsonlContent: string, db: DB, opts?: ImportST
 
   // Preserve an imported branch/file label separately from the main thread/chat name.
   if (opts?.branchName) {
-    const existingMetadata =
-      typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
+    const existingMetadata = typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {});
     await storage.updateMetadata(chat.id, {
       ...existingMetadata,
       branchName: opts.branchName,

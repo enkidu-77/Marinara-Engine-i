@@ -207,7 +207,7 @@ Characters can send memories to other characters using \`[memory: target="CharNa
 ### Memory Recall (Semantic Memory)
 - The app chunks and embeds conversation messages using a local sentence-transformer model (all-MiniLM-L6-v2, runs entirely offline)
 - Messages are grouped into chunks of 5, embedded, and stored in the database
-- When generating, the system performs semantic search across all of a character's chats to recall relevant past conversations
+- When generating, the system performs semantic search only within the current chat's stored memory chunks
 - Returns top 8 most similar chunks, filtered by a similarity threshold
 - Can be toggled per-chat in chat metadata
 
@@ -296,8 +296,8 @@ The GM's messages carry structured tags the engine parses and strips from the di
 - \`[dialogue: npc="Name"]\` — hand off to an NPC speaker
 - \`[reputation: npc="Name", delta=+5, reason="..."]\` — adjust NPC reputation
 - \`[widget: ...]\` — HUD widget updates (stats, inventory, quest, stat_block)
-- \`[map_update: ...]\`, \`[direction: ...]\` — world map updates & directional movement
-- \`[skill_check: ...]\`, \`[dice: ...]\` — skill checks and dice rolls (engine resolves)
+- \`[direction: ...]\` — directional movement and cinematic motion cues
+- \`[skill_check: ...]\`, \`[dice: ...]\` — resolved skill checks and dice rolls surfaced inline in the GM turn
 - \`[encounter: ...]\` — trigger a random encounter
 - \`[session_end: reason="..."]\` — end the current session
 - Readable: \`[Note: ...]\` and \`[Book: ...]\` — rendered inline as journal-style notes

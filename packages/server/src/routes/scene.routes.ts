@@ -15,6 +15,7 @@ import { createConnectionsStorage } from "../services/storage/connections.storag
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createGameStateStorage } from "../services/storage/game-state.storage.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
+import { stripConversationPromptTimestamps } from "../services/conversation/transcript-sanitize.js";
 import { DATA_DIR } from "../utils/data-dir.js";
 import type { ChatMessage } from "../services/llm/base-provider.js";
 import type {
@@ -249,7 +250,7 @@ export async function sceneRoutes(app: FastifyInstance) {
     const initiatorName = initiatorCharId ? await getCharacterName(chars, initiatorCharId) : "User";
     const recentMsgs = await getRecentMessages(chats, originChatId, 30);
     const historyText = recentMsgs
-      .map((m) => `${m.role === "user" ? personaName : initiatorName}: ${m.content}`)
+      .map((m) => `${m.role === "user" ? personaName : initiatorName}: ${stripConversationPromptTimestamps(m.content)}`)
       .join("\n\n")
       .slice(-3000);
 
@@ -705,7 +706,7 @@ export async function sceneRoutes(app: FastifyInstance) {
     // Get recent conversation for context
     const recentMsgs = await getRecentMessages(chats, chatId, 20);
     const historyText = recentMsgs
-      .map((m) => `${m.role === "user" ? personaName : "Character"}: ${m.content}`)
+      .map((m) => `${m.role === "user" ? personaName : "Character"}: ${stripConversationPromptTimestamps(m.content)}`)
       .join("\n\n");
 
     const planPrompt: ChatMessage[] = [

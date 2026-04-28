@@ -279,7 +279,8 @@ class SidecarRuntimeService {
     const diagnostics = this.getDiagnostics();
     const systemInstall = this.getSystemInstallSync(diagnostics, preference);
     const current = this.getCurrentInstall();
-    const activeInstall = systemInstall ?? (current && this.isInstallUsableForPreference(current, preference) ? current : null);
+    const activeInstall =
+      systemInstall ?? (current && this.isInstallUsableForPreference(current, preference) ? current : null);
     return {
       installed: activeInstall !== null,
       build: activeInstall?.build ?? null,
@@ -390,7 +391,9 @@ class SidecarRuntimeService {
     const preference = options?.preference ?? "auto";
     const systemInstall = await this.getSystemInstall(preference);
     if (preference === "system" && !systemInstall) {
-      throw new Error("No system llama-server was found in PATH. Install llama.cpp separately or choose a bundled runtime.");
+      throw new Error(
+        "No system llama-server was found in PATH. Install llama.cpp separately or choose a bundled runtime.",
+      );
     }
     if (systemInstall && !excludedVariants.has(systemInstall.variant)) {
       return systemInstall;
@@ -527,9 +530,13 @@ class SidecarRuntimeService {
       const match = await this.selectBestAsset(release.assets, excludedVariants, preference);
       if (!match) {
         if (preference !== "auto") {
-          throw new Error(`Marinara could not find ${formatRuntimePreference(preference)} for ${process.platform}/${process.arch}.`);
+          throw new Error(
+            `Marinara could not find ${formatRuntimePreference(preference)} for ${process.platform}/${process.arch}.`,
+          );
         }
-        throw new Error(`Your platform (${process.platform}/${process.arch}) is not supported for local inference yet.`);
+        throw new Error(
+          `Your platform (${process.platform}/${process.arch}) is not supported for local inference yet.`,
+        );
       }
 
       const directoryName = `${release.tag_name}-${match.variant}`;
@@ -813,7 +820,10 @@ class SidecarRuntimeService {
     return assets.find((asset) => pattern.test(asset.name)) ?? null;
   }
 
-  private findWindowsCudaDllAsset(assets: GitHubReleaseAsset[], cudaRuntimeAsset: GitHubReleaseAsset): GitHubReleaseAsset | null {
+  private findWindowsCudaDllAsset(
+    assets: GitHubReleaseAsset[],
+    cudaRuntimeAsset: GitHubReleaseAsset,
+  ): GitHubReleaseAsset | null {
     const cudaVersion = extractVersion(cudaRuntimeAsset.name);
     if (cudaVersion === "0") {
       return null;
@@ -892,8 +902,10 @@ class SidecarRuntimeService {
       return false;
     }
 
-    return parseBooleanEnv(process.env.MARINARA_SIDECAR_USE_SYSTEM_LLAMA) ||
-      parseBooleanEnv(process.env.MARINARA_SIDECAR_USE_SYSTEM_LLAMA_SERVER);
+    return (
+      parseBooleanEnv(process.env.MARINARA_SIDECAR_USE_SYSTEM_LLAMA) ||
+      parseBooleanEnv(process.env.MARINARA_SIDECAR_USE_SYSTEM_LLAMA_SERVER)
+    );
   }
 
   private createSystemInstall(systemPath: string, capabilities: RuntimeCapabilities | null): SidecarRuntimeInstall {

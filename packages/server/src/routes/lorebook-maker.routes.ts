@@ -138,7 +138,14 @@ export async function lorebookMakerRoutes(app: FastifyInstance) {
     };
 
     try {
-      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
+      const provider = createLLMProvider(
+        conn.provider,
+        baseUrl,
+        conn.apiKey,
+        conn.maxContext,
+        conn.openrouterProvider,
+        conn.maxTokensOverride,
+      );
 
       // ── Decide whether to batch ──
       const totalEntries = input.entryCount;

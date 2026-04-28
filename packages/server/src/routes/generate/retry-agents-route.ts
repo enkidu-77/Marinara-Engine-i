@@ -18,7 +18,7 @@ import { createChatsStorage } from "../../services/storage/chats.storage.js";
 import { createConnectionsStorage } from "../../services/storage/connections.storage.js";
 import { createGameStateStorage } from "../../services/storage/game-state.storage.js";
 import { createLorebooksStorage } from "../../services/storage/lorebooks.storage.js";
-import { syncGameMapPartyPosition } from "../../services/game/map-position.service.js";
+import { syncGameMapMetaPartyPosition } from "../../services/game/map-position.service.js";
 import { gameStateSnapshots as gameStateSnapshotsTable } from "../../db/schema/index.js";
 import { parseExtra, parseGameStateRow, resolveBaseUrl } from "./generate-route-utils.js";
 import {
@@ -33,6 +33,7 @@ import { sendSseEvent, startSseReply } from "./sse.js";
 import type { GameMap } from "@marinara-engine/shared";
 
 type PersonaContext = {
+  personaId: string | null;
   personaName: string;
   personaDescription: string;
   personaFields: { personality?: string; scenario?: string; backstory?: string; appearance?: string };
@@ -56,6 +57,7 @@ async function resolvePersonaContext(
   chat: any,
 ): Promise<PersonaContext> {
   let personaName = "User";
+  let personaId: string | null = null;
   let personaDescription = "";
   let personaFields: PersonaContext["personaFields"] = {};
   let personaStats: any = null;
@@ -67,9 +69,10 @@ async function resolvePersonaContext(
     allPersonas.find((p: any) => p.isActive === "true");
 
   if (!persona) {
-    return { personaName, personaDescription, personaFields, personaStats, rpgStats };
+    return { personaId, personaName, personaDescription, personaFields, personaStats, rpgStats };
   }
 
+  personaId = persona.id as string;
   personaName = persona.name;
   personaDescription = persona.description;
   personaFields = {
@@ -102,7 +105,7 @@ async function resolvePersonaContext(
     }
   }
 
-  return { personaName, personaDescription, personaFields, personaStats, rpgStats };
+  return { personaId, personaName, personaDescription, personaFields, personaStats, rpgStats };
 }
 
 async function buildRetryAgentContext(args: {
@@ -209,6 +212,7 @@ async function buildRetryAgentContext(args: {
     lorebooksStore,
     chatId,
     characterIds,
+    personaId: personaContext.personaId,
     activeLorebookIds,
     preferredTargetLorebookId: lorebookKeeperSettings.targetLorebookId,
   });
@@ -518,11 +522,12 @@ async function applyRetryResultEffects(args: {
           await gameStateStore.updateByMessage(retryMessageId, retrySwipeIndex, chatId, worldStatePatch as any);
         }
 
-        const existingGameMap = (chatMeta.gameMap as GameMap | null) ?? null;
         const nextLocation = typeof worldStatePatch.location === "string" ? worldStatePatch.location : null;
-        const syncedGameMap = syncGameMapPartyPosition(existingGameMap, nextLocation);
+        const existingGameMap = (chatMeta.gameMap as GameMap | null) ?? null;
+        const syncedMeta = syncGameMapMetaPartyPosition(chatMeta, nextLocation);
+        const syncedGameMap = (syncedMeta.gameMap as GameMap | null) ?? null;
         if (syncedGameMap && syncedGameMap !== existingGameMap) {
-          chatMeta.gameMap = syncedGameMap;
+          Object.assign(chatMeta, syncedMeta);
           await chats.updateMetadata(chatId, chatMeta);
           sendSseEvent(reply, { type: "game_map_update", data: syncedGameMap });
         }
@@ -775,7 +780,7 @@ async function applyRetryResultEffects(args: {
                   const charRow = await chars.getById(c.id);
                   const avatarPath = charRow?.avatarPath as string | null;
                   if (!avatarPath) continue;
-                  const filename = avatarPath.split("/").pop();
+                  const filename = avatarPath.split("?")[0]?.split("/").pop();
                   if (!filename) continue;
                   const diskPath = join(DATA_DIR, "avatars", filename);
                   try {
@@ -794,7 +799,7 @@ async function applyRetryResultEffects(args: {
                     const { readFileSync, existsSync } = await import("node:fs");
                     const { join } = await import("node:path");
                     const DATA_DIR = join(process.cwd(), "packages", "server", "data");
-                    const filename = avatarPath.split("/").pop();
+                    const filename = avatarPath.split("?")[0]?.split("/").pop();
                     if (filename) {
                       const diskPath = join(DATA_DIR, "avatars", filename);
                       try {

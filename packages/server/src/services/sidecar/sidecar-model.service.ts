@@ -135,12 +135,32 @@ class SidecarModelService {
       if (existsSync(CONFIG_PATH)) {
         const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as Partial<SidecarConfig>;
         nextConfig = { ...SIDECAR_DEFAULT_CONFIG, ...raw };
-        nextConfig.contextSize = normalizeIntegerSetting(nextConfig.contextSize, SIDECAR_DEFAULT_CONFIG.contextSize, 512, 32768);
-        nextConfig.maxTokens = normalizeIntegerSetting(nextConfig.maxTokens, SIDECAR_DEFAULT_CONFIG.maxTokens, 64, 32768);
-        nextConfig.temperature = normalizeFloatSetting(nextConfig.temperature, SIDECAR_DEFAULT_CONFIG.temperature, 0, 2);
+        nextConfig.contextSize = normalizeIntegerSetting(
+          nextConfig.contextSize,
+          SIDECAR_DEFAULT_CONFIG.contextSize,
+          512,
+          32768,
+        );
+        nextConfig.maxTokens = normalizeIntegerSetting(
+          nextConfig.maxTokens,
+          SIDECAR_DEFAULT_CONFIG.maxTokens,
+          64,
+          32768,
+        );
+        nextConfig.temperature = normalizeFloatSetting(
+          nextConfig.temperature,
+          SIDECAR_DEFAULT_CONFIG.temperature,
+          0,
+          2,
+        );
         nextConfig.topP = normalizeFloatSetting(nextConfig.topP, SIDECAR_DEFAULT_CONFIG.topP, Number.EPSILON, 1);
         nextConfig.topK = normalizeIntegerSetting(nextConfig.topK, SIDECAR_DEFAULT_CONFIG.topK, 0, 500);
-        nextConfig.gpuLayers = normalizeIntegerSetting(nextConfig.gpuLayers, SIDECAR_DEFAULT_CONFIG.gpuLayers, -1, 1024);
+        nextConfig.gpuLayers = normalizeIntegerSetting(
+          nextConfig.gpuLayers,
+          SIDECAR_DEFAULT_CONFIG.gpuLayers,
+          -1,
+          1024,
+        );
 
         if (!isRuntimePreference(nextConfig.runtimePreference)) {
           nextConfig.runtimePreference = SIDECAR_DEFAULT_CONFIG.runtimePreference;

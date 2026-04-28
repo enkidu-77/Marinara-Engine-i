@@ -37,9 +37,13 @@ import { useTranslate } from "../../hooks/use-translate";
 import { api } from "../../lib/api-client";
 import { ttsService } from "../../lib/tts-service";
 import { useTTSConfig } from "../../hooks/use-tts";
+import { buildTTSMessageText, resolveTTSVoiceForSpeaker } from "../../lib/tts-dialogue";
 import { DIALOGUE_QUOTE_PATTERN_SOURCE, HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE } from "../../lib/dialogue-quotes";
 import DOMPurify from "dompurify";
 import type { CharacterMap, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
+
+const MESSAGE_ACTION_ICON_SIZE = "1em";
+const MESSAGE_SWIPE_ICON_SIZE = "1.15em";
 
 /** Isolated edit textarea — uncontrolled to avoid React re-renders on every keystroke. */
 const EditTextarea = memo(function EditTextarea({
@@ -542,6 +546,12 @@ export const ChatMessage = memo(function ChatMessage({
   // TTS
   const { data: ttsConfig } = useTTSConfig();
   const ttsEnabled = ttsConfig?.enabled ?? false;
+  const ttsSpeakerName = message.characterId ? characterMap?.get(message.characterId)?.name : undefined;
+  const ttsVoice = ttsConfig ? resolveTTSVoiceForSpeaker(ttsConfig, ttsSpeakerName, message.characterId) : "";
+  const ttsSpeakText =
+    ttsConfig && (ttsConfig.source !== "elevenlabs" || ttsVoice)
+      ? buildTTSMessageText(message.content, ttsConfig, ttsSpeakerName)
+      : "";
   const [ttsState, setTTSState] = useState(ttsService.getState());
   const [ttsActiveId, setTTSActiveId] = useState<string | null>(ttsService.getActiveId());
   useEffect(
@@ -566,9 +576,10 @@ export const ChatMessage = memo(function ChatMessage({
     if (liveIsThis) {
       ttsService.stop();
     } else {
-      void ttsService.speak(message.content, message.id);
+      if (!ttsSpeakText) return;
+      void ttsService.speak(ttsSpeakText, message.id, { speaker: ttsSpeakerName, voice: ttsVoice });
     }
-  }, [message.content, message.id]);
+  }, [message.id, ttsSpeakText, ttsSpeakerName, ttsVoice]);
 
   // Dismiss actions when tapping outside on mobile
   useEffect(() => {
@@ -694,36 +705,43 @@ export const ChatMessage = memo(function ChatMessage({
   // Apply regex scripts to AI output (assistant/narrator roles)
   const { applyToAIOutput } = useApplyRegex();
 
-  // Resolve character info
-  const charInfo = message.characterId && characterMap ? characterMap.get(message.characterId) : null;
+  const scopedCharacterMap = useMemo(() => {
+    if (!characterMap) return null;
+    if (!chatCharacterIds) return characterMap;
+    const allowedIds = new Set(chatCharacterIds);
+    return new Map(Array.from(characterMap).filter(([id]) => allowedIds.has(id)));
+  }, [characterMap, chatCharacterIds]);
+
+  // Resolve character info from characters that actually belong to this chat.
+  const charInfo = message.characterId && scopedCharacterMap ? scopedCharacterMap.get(message.characterId) : null;
   const primaryCharInfo =
     charInfo ??
-    (characterMap && chatCharacterIds
-      ? (chatCharacterIds
-          .map((id) => characterMap.get(id))
-          .find((candidate): candidate is NonNullable<typeof candidate> => !!candidate) ?? null)
-      : (characterMap?.values().next().value ?? null));
+    (scopedCharacterMap
+      ? (Array.from(scopedCharacterMap.values()).find(
+          (candidate): candidate is NonNullable<typeof candidate> => !!candidate,
+        ) ?? null)
+      : null);
 
   // For user messages, prefer per-message persona snapshot (stored when message was sent)
   // to preserve the correct persona name/avatar even after switching personas.
   // Fall back to the current personaInfo prop for older messages without snapshots.
   const msgPersona = isUser && extra.personaSnapshot ? extra.personaSnapshot : null;
   const userName = msgPersona?.name ?? personaInfo?.name ?? "You";
-  const charName = primaryCharInfo?.name ?? message.characterId ?? "Assistant";
+  const charName = primaryCharInfo?.name ?? "Assistant";
   const personaDescription = msgPersona?.description ?? personaInfo?.description;
   const personaPersonality = msgPersona?.personality ?? personaInfo?.personality;
   const personaBackstory = msgPersona?.backstory ?? personaInfo?.backstory;
   const personaAppearance = msgPersona?.appearance ?? personaInfo?.appearance;
   const personaScenario = msgPersona?.scenario ?? personaInfo?.scenario;
   const macroCharacters = useMemo(() => {
-    if (characterMap && chatCharacterIds?.length) {
-      const candidates = chatCharacterIds
-        .map((id) => characterMap.get(id))
-        .filter((candidate): candidate is NonNullable<typeof candidate> => !!candidate);
+    if (scopedCharacterMap?.size) {
+      const candidates = Array.from(scopedCharacterMap.values()).filter(
+        (candidate): candidate is NonNullable<typeof candidate> => !!candidate,
+      );
       if (candidates.length > 0) return candidates;
     }
     return charName ? [{ name: charName }] : [];
-  }, [charName, characterMap, chatCharacterIds]);
+  }, [charName, scopedCharacterMap]);
 
   const displayContent = useMemo(() => {
     const text = isUser || isSystem ? message.content : applyToAIOutput(message.content, messageDepth);
@@ -779,15 +797,18 @@ export const ChatMessage = memo(function ChatMessage({
 
   // Build speaker → dialogueColor map for group chat speaker tag coloring
   const speakerColorMap = useMemo(() => {
-    if (!characterMap || characterMap.size <= 1) return undefined;
+    if (!scopedCharacterMap || scopedCharacterMap.size <= 1) return undefined;
     const map = new Map<string, string>();
-    for (const [, info] of characterMap) {
+    for (const [, info] of scopedCharacterMap) {
       if (info.name && info.dialogueColor) {
         map.set(info.name, info.dialogueColor);
       }
     }
+    if (personaInfo?.name && personaInfo.dialogueColor) {
+      map.set(personaInfo.name, personaInfo.dialogueColor);
+    }
     return map.size > 0 ? map : undefined;
-  }, [characterMap]);
+  }, [personaInfo?.dialogueColor, personaInfo?.name, scopedCharacterMap]);
 
   // Merged group chat: cycling avatars + cycling name color
   const isMergedGroup = groupChatMode === "merged" && !isUser && chatCharacterIds && chatCharacterIds.length > 1;
@@ -1370,23 +1391,23 @@ export const ChatMessage = memo(function ChatMessage({
 
             {/* Swipes */}
             {hasSwipes && (
-              <div className="mari-message-swipes flex items-center gap-1.5 px-1 text-[0.625rem] text-white/40">
+              <div className="mari-message-swipes flex items-center gap-1.5 px-1 text-[0.75rem] text-white/40">
                 <button
-                  className="rounded-md p-0.5 transition-colors hover:bg-white/10 disabled:opacity-30"
+                  className="rounded-md p-[0.25em] transition-colors hover:bg-white/10 disabled:opacity-30"
                   onClick={handleSwipePrev}
                   disabled={message.activeSwipeIndex <= 0}
                 >
-                  <ChevronLeft size="0.75rem" />
+                  <ChevronLeft size={MESSAGE_SWIPE_ICON_SIZE} />
                 </button>
                 <span className="tabular-nums">
                   {message.activeSwipeIndex + 1}/{swipeCount}
                 </span>
                 <button
-                  className="rounded-md p-0.5 transition-colors hover:bg-white/10 disabled:opacity-30"
+                  className="rounded-md p-[0.25em] transition-colors hover:bg-white/10 disabled:opacity-30"
                   onClick={handleSwipeNext}
                   disabled={message.activeSwipeIndex >= swipeCount - 1}
                 >
-                  <ChevronRight size="0.75rem" />
+                  <ChevronRight size={MESSAGE_SWIPE_ICON_SIZE} />
                 </button>
               </div>
             )}
@@ -1399,35 +1420,45 @@ export const ChatMessage = memo(function ChatMessage({
                 showActions && "opacity-100",
               )}
             >
-              <ActionBtn icon={copied ? "\u2713" : <Copy size="0.6875rem" />} onClick={handleCopy} title="Copy" dark />
               <ActionBtn
-                icon={<Languages size="0.6875rem" />}
+                icon={copied ? "\u2713" : <Copy size={MESSAGE_ACTION_ICON_SIZE} />}
+                onClick={handleCopy}
+                title="Copy"
+                dark
+              />
+              <ActionBtn
+                icon={<Languages size={MESSAGE_ACTION_ICON_SIZE} />}
                 onClick={() => translate(message.id, message.content, message.chatId)}
                 title={translatedText ? "Hide translation" : "Translate"}
                 className={translatedText ? "text-blue-400/80 hover:text-blue-300" : undefined}
                 dark
               />
-              <ActionBtn icon={<Pencil size="0.6875rem" />} onClick={startEditing} title="Edit" dark />
+              <ActionBtn icon={<Pencil size={MESSAGE_ACTION_ICON_SIZE} />} onClick={startEditing} title="Edit" dark />
               <ActionBtn
-                icon={<RefreshCw size="0.6875rem" />}
+                icon={<RefreshCw size={MESSAGE_ACTION_ICON_SIZE} />}
                 onClick={() => onRegenerate?.(message.id)}
                 title={regenerateButtonTitle}
                 className={regenerateGuidedClass}
                 dark
               />
               <ActionBtn
-                icon={<Flag size="0.6875rem" />}
+                icon={<Flag size={MESSAGE_ACTION_ICON_SIZE} />}
                 onClick={() => onToggleConversationStart?.(message.id, isConversationStart)}
                 title={isConversationStart ? "Remove conversation start" : "Mark as new start"}
                 className={isConversationStart ? "text-amber-400/80 hover:text-amber-300" : undefined}
                 dark
               />
               {isLastAssistantMessage && !isUser && (
-                <ActionBtn icon={<Eye size="0.6875rem" />} onClick={() => onPeekPrompt?.()} title="Peek prompt" dark />
+                <ActionBtn
+                  icon={<Eye size={MESSAGE_ACTION_ICON_SIZE} />}
+                  onClick={() => onPeekPrompt?.()}
+                  title="Peek prompt"
+                  dark
+                />
               )}
               {thinking && !isUser && (
                 <ActionBtn
-                  icon={<Brain size="0.6875rem" />}
+                  icon={<Brain size={MESSAGE_ACTION_ICON_SIZE} />}
                   onClick={() => setShowThinking(true)}
                   title="View thoughts"
                   dark
@@ -1435,7 +1466,7 @@ export const ChatMessage = memo(function ChatMessage({
               )}
               {onBranch && (
                 <ActionBtn
-                  icon={<GitBranch size="0.6875rem" />}
+                  icon={<GitBranch size={MESSAGE_ACTION_ICON_SIZE} />}
                   onClick={() => onBranch(message.id)}
                   title="Branch from here"
                   dark
@@ -1443,7 +1474,7 @@ export const ChatMessage = memo(function ChatMessage({
               )}
               {onCloneSceneFromHere && (
                 <ActionBtn
-                  icon={<GitBranch size="0.6875rem" />}
+                  icon={<GitBranch size={MESSAGE_ACTION_ICON_SIZE} />}
                   onClick={() => onCloneSceneFromHere(message.id)}
                   title="Clone from here"
                   disabled={isCloneSceneFromHereDisabled}
@@ -1451,7 +1482,7 @@ export const ChatMessage = memo(function ChatMessage({
                 />
               )}
               <ActionBtn
-                icon={<Trash2 size="0.6875rem" />}
+                icon={<Trash2 size={MESSAGE_ACTION_ICON_SIZE} />}
                 onClick={() => onDelete?.(message.id)}
                 title="Delete"
                 className="hover:text-red-400"
@@ -1461,17 +1492,25 @@ export const ChatMessage = memo(function ChatMessage({
                 <ActionBtn
                   icon={
                     isLoadingThis ? (
-                      <Loader2 size="0.6875rem" className="animate-spin" />
+                      <Loader2 size={MESSAGE_ACTION_ICON_SIZE} className="animate-spin" />
                     ) : isSpeakingThis ? (
-                      <VolumeX size="0.6875rem" />
+                      <VolumeX size={MESSAGE_ACTION_ICON_SIZE} />
                     ) : (
-                      <Volume2 size="0.6875rem" />
+                      <Volume2 size={MESSAGE_ACTION_ICON_SIZE} />
                     )
                   }
                   onClick={handleSpeak}
-                  title={isLoadingThis ? "Loading…" : isSpeakingThis ? "Stop speaking" : "Speak"}
+                  title={
+                    !ttsSpeakText
+                      ? "No dialogue to speak"
+                      : isLoadingThis
+                        ? "Loading…"
+                        : isSpeakingThis
+                          ? "Stop speaking"
+                          : "Speak"
+                  }
                   className={isSpeakingThis ? "text-sky-400 hover:text-sky-300" : undefined}
-                  disabled={ttsBusy && !isSpeakingThis}
+                  disabled={!ttsSpeakText || (ttsBusy && !isSpeakingThis)}
                   dark
                 />
               )}
@@ -1717,23 +1756,23 @@ export const ChatMessage = memo(function ChatMessage({
 
           {/* Swipes */}
           {hasSwipes && (
-            <div className="mari-message-swipes flex items-center gap-1.5 px-2 text-[0.625rem] text-[var(--muted-foreground)]">
+            <div className="mari-message-swipes flex items-center gap-1.5 px-2 text-[0.75rem] text-[var(--muted-foreground)]">
               <button
-                className="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
+                className="rounded p-[0.25em] transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
                 onClick={handleSwipePrev}
                 disabled={message.activeSwipeIndex <= 0}
               >
-                <ChevronLeft size="0.6875rem" />
+                <ChevronLeft size={MESSAGE_SWIPE_ICON_SIZE} />
               </button>
               <span className="tabular-nums">
                 {message.activeSwipeIndex + 1}/{swipeCount}
               </span>
               <button
-                className="rounded p-0.5 transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
+                className="rounded p-[0.25em] transition-colors hover:bg-[var(--accent)] disabled:opacity-30"
                 onClick={handleSwipeNext}
                 disabled={message.activeSwipeIndex >= swipeCount - 1}
               >
-                <ChevronRight size="0.6875rem" />
+                <ChevronRight size={MESSAGE_SWIPE_ICON_SIZE} />
               </button>
             </div>
           )}
@@ -1746,49 +1785,61 @@ export const ChatMessage = memo(function ChatMessage({
               showActions && "opacity-100",
             )}
           >
-            <ActionBtn icon={copied ? "✓" : <Copy size="0.625rem" />} onClick={handleCopy} title="Copy" />
             <ActionBtn
-              icon={<Languages size="0.625rem" />}
+              icon={copied ? "✓" : <Copy size={MESSAGE_ACTION_ICON_SIZE} />}
+              onClick={handleCopy}
+              title="Copy"
+            />
+            <ActionBtn
+              icon={<Languages size={MESSAGE_ACTION_ICON_SIZE} />}
               onClick={() => translate(message.id, message.content, message.chatId)}
               title={translatedText ? "Hide translation" : "Translate"}
               className={translatedText ? "text-blue-500" : undefined}
             />
-            <ActionBtn icon={<Pencil size="0.625rem" />} onClick={startEditing} title="Edit" />
+            <ActionBtn icon={<Pencil size={MESSAGE_ACTION_ICON_SIZE} />} onClick={startEditing} title="Edit" />
             <ActionBtn
-              icon={<RefreshCw size="0.625rem" />}
+              icon={<RefreshCw size={MESSAGE_ACTION_ICON_SIZE} />}
               onClick={() => onRegenerate?.(message.id)}
               title={regenerateButtonTitle}
               className={regenerateGuidedClass}
             />
             <ActionBtn
-              icon={<Flag size="0.625rem" />}
+              icon={<Flag size={MESSAGE_ACTION_ICON_SIZE} />}
               onClick={() => onToggleConversationStart?.(message.id, isConversationStart)}
               title={isConversationStart ? "Remove conversation start" : "Mark as new start"}
               className={isConversationStart ? "text-amber-500" : undefined}
             />
             {isLastAssistantMessage && !isUser && (
-              <ActionBtn icon={<Eye size="0.625rem" />} onClick={() => onPeekPrompt?.()} title="Peek prompt" />
+              <ActionBtn
+                icon={<Eye size={MESSAGE_ACTION_ICON_SIZE} />}
+                onClick={() => onPeekPrompt?.()}
+                title="Peek prompt"
+              />
             )}
             {thinking && !isUser && (
-              <ActionBtn icon={<Brain size="0.625rem" />} onClick={() => setShowThinking(true)} title="View thoughts" />
+              <ActionBtn
+                icon={<Brain size={MESSAGE_ACTION_ICON_SIZE} />}
+                onClick={() => setShowThinking(true)}
+                title="View thoughts"
+              />
             )}
             {onBranch && (
               <ActionBtn
-                icon={<GitBranch size="0.625rem" />}
+                icon={<GitBranch size={MESSAGE_ACTION_ICON_SIZE} />}
                 onClick={() => onBranch(message.id)}
                 title="Branch from here"
               />
             )}
             {onCloneSceneFromHere && (
               <ActionBtn
-                icon={<GitBranch size="0.625rem" />}
+                icon={<GitBranch size={MESSAGE_ACTION_ICON_SIZE} />}
                 onClick={() => onCloneSceneFromHere(message.id)}
                 title="Clone from here"
                 disabled={isCloneSceneFromHereDisabled}
               />
             )}
             <ActionBtn
-              icon={<Trash2 size="0.625rem" />}
+              icon={<Trash2 size={MESSAGE_ACTION_ICON_SIZE} />}
               onClick={() => onDelete?.(message.id)}
               title="Delete"
               className="hover:text-[var(--destructive)]"
@@ -1797,17 +1848,25 @@ export const ChatMessage = memo(function ChatMessage({
               <ActionBtn
                 icon={
                   isLoadingThis ? (
-                    <Loader2 size="0.625rem" className="animate-spin" />
+                    <Loader2 size={MESSAGE_ACTION_ICON_SIZE} className="animate-spin" />
                   ) : isSpeakingThis ? (
-                    <VolumeX size="0.625rem" />
+                    <VolumeX size={MESSAGE_ACTION_ICON_SIZE} />
                   ) : (
-                    <Volume2 size="0.625rem" />
+                    <Volume2 size={MESSAGE_ACTION_ICON_SIZE} />
                   )
                 }
                 onClick={handleSpeak}
-                title={isLoadingThis ? "Loading…" : isSpeakingThis ? "Stop speaking" : "Speak"}
+                title={
+                  !ttsSpeakText
+                    ? "No dialogue to speak"
+                    : isLoadingThis
+                      ? "Loading…"
+                      : isSpeakingThis
+                        ? "Stop speaking"
+                        : "Speak"
+                }
                 className={isSpeakingThis ? "text-sky-500" : undefined}
-                disabled={ttsBusy && !isSpeakingThis}
+                disabled={!ttsSpeakText || (ttsBusy && !isSpeakingThis)}
               />
             )}
           </div>
@@ -1896,7 +1955,7 @@ function ActionBtn({
       title={title}
       disabled={disabled}
       className={cn(
-        "rounded-md p-1 transition-all active:scale-90 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-30",
+        "rounded-md p-[0.35em] text-[0.8125rem] transition-all active:scale-90 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-30",
         dark
           ? "text-foreground/40 hover:bg-foreground/10 hover:text-foreground/70"
           : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",

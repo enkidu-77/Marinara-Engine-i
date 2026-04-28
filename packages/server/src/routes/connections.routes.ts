@@ -83,8 +83,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
         }
         return {
           success: true,
-          message:
-            "Claude Agent SDK loaded. The first chat will fail if `claude login` has not been run on this host.",
+          message: "Claude Agent SDK loaded. The first chat will fail if `claude login` has not been run on this host.",
           latencyMs: Date.now() - start,
           modelName: conn.model,
         };
@@ -308,7 +307,13 @@ export async function connectionsRoutes(app: FastifyInstance) {
         height: 512,
         comfyWorkflow: conn.comfyuiWorkflow || undefined,
       });
-      return { success: true, base64: result.base64, mimeType: result.mimeType, latencyMs: Date.now() - start, prompt: BASE_PROMPT };
+      return {
+        success: true,
+        base64: result.base64,
+        mimeType: result.mimeType,
+        latencyMs: Date.now() - start,
+        prompt: BASE_PROMPT,
+      };
     } catch (err) {
       return {
         success: false,
@@ -342,7 +347,14 @@ export async function connectionsRoutes(app: FastifyInstance) {
 
     const start = Date.now();
     try {
-      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
+      const provider = createLLMProvider(
+        conn.provider,
+        baseUrl,
+        conn.apiKey,
+        conn.maxContext,
+        conn.openrouterProvider,
+        conn.maxTokensOverride,
+      );
 
       let fullResponse = "";
       for await (const chunk of provider.chat([{ role: "user", content: "hi" }], {

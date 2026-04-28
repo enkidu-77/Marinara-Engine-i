@@ -44,7 +44,7 @@ import {
   Upload,
   Download,
 } from "lucide-react";
-import { cn } from "../../lib/utils";
+import { cn, getAvatarCropStyle, type AvatarCrop } from "../../lib/utils";
 import { showAlertDialog, showConfirmDialog, showPromptDialog } from "../../lib/app-dialogs";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { ExpandedTextarea } from "../ui/ExpandedTextarea";
@@ -70,6 +70,9 @@ import {
   useChats,
   useConnectChat,
   useDisconnectChat,
+  useChatMemories,
+  useDeleteChatMemory,
+  useClearChatMemories,
   chatKeys,
 } from "../../hooks/use-chats";
 import { api } from "../../lib/api-client";
@@ -84,7 +87,7 @@ import {
   useApplyChatPreset,
   useImportChatPreset,
 } from "../../hooks/use-chat-presets";
-import type { AgentPhase, ChatMode, ChatPreset, ChatPresetSettings } from "@marinara-engine/shared";
+import type { AgentPhase, ChatMode, ChatMemoryChunk, ChatPreset, ChatPresetSettings } from "@marinara-engine/shared";
 import { useAgentConfigs, useCreateAgent, useUpdateAgent, type AgentConfigRow } from "../../hooks/use-agents";
 import { useAgentStore } from "../../stores/agent.store";
 import {
@@ -224,7 +227,10 @@ export function ChatSettingsDrawer({
   const { data: characterGroups } = useCharacterGroups();
   const { data: lorebooks } = useLorebooks();
   const { data: presets } = usePresets();
-  const { data: currentPromptPresetFull } = usePresetFull(chat.promptPresetId ?? null);
+  const chatMode = (chat as unknown as { mode?: string }).mode ?? "roleplay";
+  const isConversation = chatMode === "conversation";
+  const isGame = chatMode === "game";
+  const { data: currentPromptPresetFull } = usePresetFull(isConversation ? null : (chat.promptPresetId ?? null));
   const { data: connections } = useConnections();
   const imageConnectionsList = useMemo(
     () =>
@@ -253,9 +259,6 @@ export function ChatSettingsDrawer({
     () => (typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {})),
     [chat.metadata],
   );
-  const chatMode = (chat as unknown as { mode?: string }).mode ?? "roleplay";
-  const isConversation = chatMode === "conversation";
-  const isGame = chatMode === "game";
   const activeLorebookIds: string[] = metadata.activeLorebookIds ?? [];
   const activeAgentIds: string[] = metadata.activeAgentIds ?? [];
   const activeToolIds: string[] = metadata.activeToolIds ?? [];
@@ -410,6 +413,20 @@ export function ChatSettingsDrawer({
     (c: { id?: string; data: string; comment?: string | null }) => getCharacterTitle(getCharacterInfo(c)),
     [getCharacterInfo],
   );
+
+  const charAvatarCrop = useCallback((c: { data: unknown }) => {
+    try {
+      const parsed = typeof c.data === "string" ? JSON.parse(c.data) : c.data;
+      return (
+        ((parsed as { extensions?: { avatarCrop?: AvatarCrop | null } } | null)?.extensions?.avatarCrop as
+          | AvatarCrop
+          | null
+          | undefined) ?? null
+      );
+    } catch {
+      return null;
+    }
+  }, []);
 
   // ── First message confirm state ──
   const [firstMesConfirm, setFirstMesConfirm] = useState<{
@@ -630,6 +647,7 @@ export function ChatSettingsDrawer({
   const [showPersonaPicker, setShowPersonaPicker] = useState(false);
   const [showConnectionPicker, setShowConnectionPicker] = useState(false);
   const [showSummariesModal, setShowSummariesModal] = useState(false);
+  const [showMemoriesModal, setShowMemoriesModal] = useState(false);
   const [connectionSearch, setConnectionSearch] = useState("");
   const [personaSearch, setPersonaSearch] = useState("");
   const [pendingToolIds, setPendingToolIds] = useState<string[]>([]);
@@ -752,10 +770,10 @@ export function ChatSettingsDrawer({
   const snapshotCurrentPresetSettings = useCallback((): ChatPresetSettings => {
     return {
       connectionId: chat.connectionId ?? null,
-      promptPresetId: chat.promptPresetId ?? null,
+      promptPresetId: isConversation ? null : (chat.promptPresetId ?? null),
       metadata: { ...metadata },
     };
-  }, [chat.connectionId, chat.promptPresetId, metadata]);
+  }, [chat.connectionId, chat.promptPresetId, isConversation, metadata]);
 
   const handleSelectPreset = (id: string) => {
     if (!id || id === selectedChatPreset?.id) return;
@@ -873,6 +891,53 @@ export function ChatSettingsDrawer({
     setEditingName(false);
   };
 
+  const renderMemoryRecallControls = (defaultOn: boolean) => {
+    const effectiveValue = metadata.enableMemoryRecall !== undefined ? metadata.enableMemoryRecall === true : defaultOn;
+    return (
+      <div className="space-y-2">
+        <button
+          onClick={() => {
+            updateMeta.mutate({ id: chat.id, enableMemoryRecall: !effectiveValue });
+          }}
+          className={cn(
+            "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-all",
+            effectiveValue
+              ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
+              : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
+          )}
+        >
+          <div className="flex-1 min-w-0">
+            <span className="text-[0.6875rem] font-medium">Enable Memory Recall</span>
+            <p className="text-[0.625rem] text-[var(--muted-foreground)]">
+              Recall relevant fragments from earlier in this chat and inject them as context.
+            </p>
+          </div>
+          <div
+            className={cn(
+              "h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors",
+              effectiveValue ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/50",
+            )}
+          >
+            <div
+              className={cn(
+                "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                effectiveValue && "translate-x-3.5",
+              )}
+            />
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowMemoriesModal(true)}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--secondary)] px-3 py-2 text-[0.6875rem] font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+        >
+          <Brain size="0.75rem" />
+          Access memories for this chat
+        </button>
+      </div>
+    );
+  };
+
   if (!open) return null;
 
   return (
@@ -935,7 +1000,11 @@ export function ChatSettingsDrawer({
               )}
               <HelpTooltip
                 side="left"
-                text="Presets bundle this chat's connection, prompt preset, agents, tools, translation, memory recall, advanced parameters, and other settings. They never touch your characters, persona, lorebooks, sprites, summary, tags, or scene prompt — those stay tied to the chat."
+                text={
+                  isConversation
+                    ? "Presets bundle this chat's connection, tools, translation, memory recall, advanced parameters, and other settings. Prompt presets are not applied in conversation mode. Characters, persona, lorebooks, sprites, summary, tags, and scene prompt stay tied to the chat."
+                    : "Presets bundle this chat's connection, prompt preset, agents, tools, translation, memory recall, advanced parameters, and other settings. They never touch your characters, persona, lorebooks, sprites, summary, tags, or scene prompt — those stay tied to the chat."
+                }
               />
             </div>
             {/* Single row of all preset actions */}
@@ -1101,7 +1170,7 @@ export function ChatSettingsDrawer({
                   <option value="">None</option>
                   {((presets ?? []) as Array<{ id: string; name: string; isDefault?: boolean | string }>).map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.isDefault === true || p.isDefault === "true" ? "Default" : p.name}
+                      {p.name}
                     </option>
                   ))}
                 </select>
@@ -1540,12 +1609,15 @@ export function ChatSettingsDrawer({
                             title="Open character card"
                           >
                             {c.avatarPath ? (
-                              <img
-                                src={c.avatarPath}
-                                alt={name}
-                                loading="lazy"
-                                className="h-7 w-7 rounded-full object-cover"
-                              />
+                              <span className="block h-7 w-7 shrink-0 overflow-hidden rounded-full">
+                                <img
+                                  src={c.avatarPath}
+                                  alt={name}
+                                  loading="lazy"
+                                  className="h-full w-full object-cover"
+                                  style={getAvatarCropStyle(charAvatarCrop(c))}
+                                />
+                              </span>
                             ) : (
                               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accent)] text-[0.625rem] font-bold">
                                 {name[0]}
@@ -1615,7 +1687,15 @@ export function ChatSettingsDrawer({
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all hover:bg-[var(--accent)]"
                         >
                           {c.avatarPath ? (
-                            <img src={c.avatarPath} alt={name} className="h-6 w-6 rounded-full object-cover" />
+                            <span className="block h-6 w-6 shrink-0 overflow-hidden rounded-full">
+                              <img
+                                src={c.avatarPath}
+                                alt={name}
+                                loading="lazy"
+                                className="h-full w-full object-cover"
+                                style={getAvatarCropStyle(charAvatarCrop(c))}
+                              />
+                            </span>
                           ) : (
                             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)] text-[0.5625rem] font-bold">
                               {name[0]}
@@ -1712,44 +1792,97 @@ export function ChatSettingsDrawer({
             </Section>
           )}
 
-          {/* Group Chat Settings — only when 2+ characters, roleplay only (conversations always use merged, game mode handles it internally) */}
-          {chatCharIds.length > 1 && !isConversation && !isGame && (
+          {isConversation && (
+            <Section
+              label="Manual Replies"
+              icon={<MessageCircle size="0.875rem" />}
+              help="When enabled, conversation messages are saved without auto-generating a reply unless you @mention a character or trigger one from the input bar."
+            >
+              <button
+                onClick={() =>
+                  updateMeta.mutate({
+                    id: chat.id,
+                    groupResponseOrder: metadata.groupResponseOrder === "manual" ? "sequential" : "manual",
+                  })
+                }
+                className={cn(
+                  "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-all",
+                  metadata.groupResponseOrder === "manual"
+                    ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
+                    : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="text-[0.6875rem] font-medium">Only Reply When Mentioned</span>
+                  <p className="mt-0.5 text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]">
+                    {metadata.groupResponseOrder === "manual"
+                      ? "Characters will stay quiet until you type @Name or use the character picker."
+                      : "Characters reply automatically; @mentions focus the response on the mentioned character."}
+                  </p>
+                </div>
+                <div
+                  className={cn(
+                    "ml-3 h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors",
+                    metadata.groupResponseOrder === "manual"
+                      ? "bg-[var(--primary)]"
+                      : "bg-[var(--muted-foreground)]/50",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                      metadata.groupResponseOrder === "manual" && "translate-x-3.5",
+                    )}
+                  />
+                </div>
+              </button>
+            </Section>
+          )}
+
+          {/* Group Chat Settings — only when 2+ characters, game mode handles it internally */}
+          {chatCharIds.length > 1 && !isGame && !isConversation && (
             <Section
               label="Group Chat"
               icon={<Users size="0.875rem" />}
-              help="Configure how multiple characters interact. Merged mode combines all characters into one narrator; Individual mode has each character respond separately."
+              help={
+                isConversation
+                  ? "Configure whether group conversations reply automatically or wait for a manually triggered character response."
+                  : "Configure how multiple characters interact. Merged mode combines all characters into one narrator; Individual mode has each character respond separately."
+              }
             >
               {/* Mode selector */}
-              <div className="space-y-2">
-                <label className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Mode</label>
-                <div className="flex rounded-lg ring-1 ring-[var(--border)]">
-                  <button
-                    onClick={() => updateMeta.mutate({ id: chat.id, groupChatMode: "merged" })}
-                    className={cn(
-                      "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors rounded-l-lg",
-                      (metadata.groupChatMode ?? "merged") === "merged"
-                        ? "bg-[var(--primary)] text-white"
-                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
-                    )}
-                  >
-                    Merged (Narrator)
-                  </button>
-                  <button
-                    onClick={() => updateMeta.mutate({ id: chat.id, groupChatMode: "individual" })}
-                    className={cn(
-                      "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors rounded-r-lg",
-                      metadata.groupChatMode === "individual"
-                        ? "bg-[var(--primary)] text-white"
-                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
-                    )}
-                  >
-                    Individual
-                  </button>
+              {!isConversation && (
+                <div className="space-y-2">
+                  <label className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Mode</label>
+                  <div className="flex rounded-lg ring-1 ring-[var(--border)]">
+                    <button
+                      onClick={() => updateMeta.mutate({ id: chat.id, groupChatMode: "merged" })}
+                      className={cn(
+                        "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors rounded-l-lg",
+                        (metadata.groupChatMode ?? "merged") === "merged"
+                          ? "bg-[var(--primary)] text-white"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                      )}
+                    >
+                      Merged (Narrator)
+                    </button>
+                    <button
+                      onClick={() => updateMeta.mutate({ id: chat.id, groupChatMode: "individual" })}
+                      className={cn(
+                        "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors rounded-r-lg",
+                        metadata.groupChatMode === "individual"
+                          ? "bg-[var(--primary)] text-white"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                      )}
+                    >
+                      Individual
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Merged mode: speaker color option */}
-              {(metadata.groupChatMode ?? "merged") === "merged" && (
+              {!isConversation && (metadata.groupChatMode ?? "merged") === "merged" && (
                 <div className="mt-2">
                   <button
                     onClick={() => updateMeta.mutate({ id: chat.id, groupSpeakerColors: !metadata.groupSpeakerColors })}
@@ -1785,7 +1918,7 @@ export function ChatSettingsDrawer({
               )}
 
               {/* Individual mode: response order */}
-              {metadata.groupChatMode === "individual" && (
+              {!isConversation && metadata.groupChatMode === "individual" && (
                 <div className="mt-2 space-y-2">
                   <label className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Response Order</label>
                   <div className="flex rounded-lg ring-1 ring-[var(--border)]">
@@ -1834,43 +1967,47 @@ export function ChatSettingsDrawer({
               )}
 
               {/* Scenario Override */}
-              <div className="mt-2 space-y-1.5">
-                <label className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Scenario Override</label>
-                <div className="relative">
-                  <textarea
-                    value={groupScenarioDraft}
-                    onChange={(e) => setGroupScenarioDraft(e.target.value)}
-                    onBlur={() => {
+              {!isConversation && (
+                <div className="mt-2 space-y-1.5">
+                  <label className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
+                    Scenario Override
+                  </label>
+                  <div className="relative">
+                    <textarea
+                      value={groupScenarioDraft}
+                      onChange={(e) => setGroupScenarioDraft(e.target.value)}
+                      onBlur={() => {
+                        if (groupScenarioDraft !== (metadata.groupScenarioText ?? "")) {
+                          updateMeta.mutate({ id: chat.id, groupScenarioText: groupScenarioDraft });
+                        }
+                      }}
+                      placeholder="Replace individual character scenarios with a shared scenario for this group chat or leave empty to keep them…"
+                      rows={4}
+                      className="w-full resize-y rounded-lg bg-[var(--secondary)] px-3 py-2 pr-8 text-xs leading-relaxed outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
+                    />
+                    <button
+                      onClick={() => setGroupScenarioExpanded(true)}
+                      className="absolute right-1.5 top-1.5 rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                      title="Expand editor"
+                    >
+                      <Maximize2 size="0.75rem" />
+                    </button>
+                  </div>
+                  <ExpandedTextarea
+                    open={groupScenarioExpanded}
+                    onClose={() => {
+                      setGroupScenarioExpanded(false);
                       if (groupScenarioDraft !== (metadata.groupScenarioText ?? "")) {
                         updateMeta.mutate({ id: chat.id, groupScenarioText: groupScenarioDraft });
                       }
                     }}
+                    title="Group Scenario Override"
+                    value={groupScenarioDraft}
+                    onChange={setGroupScenarioDraft}
                     placeholder="Replace individual character scenarios with a shared scenario for this group chat or leave empty to keep them…"
-                    rows={4}
-                    className="w-full resize-y rounded-lg bg-[var(--secondary)] px-3 py-2 pr-8 text-xs leading-relaxed outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
                   />
-                  <button
-                    onClick={() => setGroupScenarioExpanded(true)}
-                    className="absolute right-1.5 top-1.5 rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-                    title="Expand editor"
-                  >
-                    <Maximize2 size="0.75rem" />
-                  </button>
                 </div>
-                <ExpandedTextarea
-                  open={groupScenarioExpanded}
-                  onClose={() => {
-                    setGroupScenarioExpanded(false);
-                    if (groupScenarioDraft !== (metadata.groupScenarioText ?? "")) {
-                      updateMeta.mutate({ id: chat.id, groupScenarioText: groupScenarioDraft });
-                    }
-                  }}
-                  title="Group Scenario Override"
-                  value={groupScenarioDraft}
-                  onChange={setGroupScenarioDraft}
-                  placeholder="Replace individual character scenarios with a shared scenario for this group chat or leave empty to keep them…"
-                />
-              </div>
+              )}
             </Section>
           )}
 
@@ -2074,8 +2211,7 @@ export function ChatSettingsDrawer({
                       isRegeneratingSchedulesRef.current = true;
                       setIsRegeneratingSchedules(true);
                       try {
-                        const scheduleGenerationPreferences =
-                          useUIStore.getState().scheduleGenerationPreferences;
+                        const scheduleGenerationPreferences = useUIStore.getState().scheduleGenerationPreferences;
                         await api.post("/conversation/schedule/generate", {
                           chatId: chat.id,
                           characterIds: chatCharIds,
@@ -2430,7 +2566,7 @@ export function ChatSettingsDrawer({
                     <span className="text-xs font-medium">{isGame ? "Enable Scene Analysis" : "Enable Agents"}</span>
                     <p className="text-[0.625rem] text-[var(--muted-foreground)]">
                       {isGame
-                        ? "Analyse scenes for backgrounds, music, effects, and expressions after each GM turn."
+                        ? "Analyse scenes for backgrounds, music, weather, and cinematic effects after each GM turn."
                         : "Run AI agents during generation (world state, expressions, etc.)"}
                     </p>
                     {isGame &&
@@ -2615,12 +2751,15 @@ export function ChatSettingsDrawer({
                                 title="Open character card"
                               >
                                 {character.avatarPath ? (
-                                  <img
-                                    src={character.avatarPath}
-                                    alt={name}
-                                    loading="lazy"
-                                    className="h-8 w-8 rounded-full object-cover"
-                                  />
+                                  <span className="block h-8 w-8 shrink-0 overflow-hidden rounded-full">
+                                    <img
+                                      src={character.avatarPath}
+                                      alt={name}
+                                      loading="lazy"
+                                      className="h-full w-full object-cover"
+                                      style={getAvatarCropStyle(charAvatarCrop(character))}
+                                    />
+                                  </span>
                                 ) : (
                                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent)] text-[0.625rem] font-bold">
                                     {name[0]}
@@ -3093,47 +3232,9 @@ export function ChatSettingsDrawer({
             <Section
               label="Memory Recall"
               icon={<Brain size="0.875rem" />}
-              help="When enabled, relevant fragments from past conversations with the same character(s) are automatically recalled and injected into the prompt as memories. Uses a local embedding model — no API cost."
+              help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses a local embedding model — no API cost."
             >
-              {(() => {
-                const isScene = metadata.sceneStatus === "active";
-                const defaultOn = isConversation || isScene;
-                const effectiveValue =
-                  metadata.enableMemoryRecall !== undefined ? metadata.enableMemoryRecall === true : defaultOn;
-                return (
-                  <button
-                    onClick={() => {
-                      updateMeta.mutate({ id: chat.id, enableMemoryRecall: !effectiveValue });
-                    }}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-all",
-                      effectiveValue
-                        ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
-                        : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
-                    )}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <span className="text-[0.6875rem] font-medium">Enable Memory Recall</span>
-                      <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                        Recall fragments from past conversations with the same characters and inject them as context.
-                      </p>
-                    </div>
-                    <div
-                      className={cn(
-                        "h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors",
-                        effectiveValue ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/50",
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                          effectiveValue && "translate-x-3.5",
-                        )}
-                      />
-                    </div>
-                  </button>
-                );
-              })()}
+              {renderMemoryRecallControls(true)}
             </Section>
           )}
 
@@ -3358,52 +3459,14 @@ export function ChatSettingsDrawer({
             </Section>
           )}
 
-          {/* Memory Recall — roleplay mode: show after Function Calling */}
+          {/* Memory Recall — roleplay/game modes: show after Function Calling */}
           {!isConversation && import.meta.env.VITE_MARINARA_LITE !== "true" && (
             <Section
               label="Memory Recall"
               icon={<Brain size="0.875rem" />}
-              help="When enabled, relevant fragments from past conversations with the same character(s) are automatically recalled and injected into the prompt as memories. Uses a local embedding model — no API cost."
+              help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses a local embedding model — no API cost."
             >
-              {(() => {
-                const isScene = metadata.sceneStatus === "active";
-                const defaultOn = isScene;
-                const effectiveValue =
-                  metadata.enableMemoryRecall !== undefined ? metadata.enableMemoryRecall === true : defaultOn;
-                return (
-                  <button
-                    onClick={() => {
-                      updateMeta.mutate({ id: chat.id, enableMemoryRecall: !effectiveValue });
-                    }}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-all",
-                      effectiveValue
-                        ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
-                        : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
-                    )}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <span className="text-[0.6875rem] font-medium">Enable Memory Recall</span>
-                      <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                        Recall fragments from past conversations with the same characters and inject them as context.
-                      </p>
-                    </div>
-                    <div
-                      className={cn(
-                        "h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors",
-                        effectiveValue ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/50",
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                          effectiveValue && "translate-x-3.5",
-                        )}
-                      />
-                    </div>
-                  </button>
-                );
-              })()}
+              {renderMemoryRecallControls(metadata.sceneStatus === "active")}
             </Section>
           )}
 
@@ -3664,6 +3727,13 @@ export function ChatSettingsDrawer({
       {/* Automatic summarization editor */}
       <SummariesEditorModal chat={chat} open={showSummariesModal} onClose={() => setShowSummariesModal(false)} />
 
+      {/* Memory recall chunk viewer */}
+      <MemoryRecallMemoriesModal
+        chatId={chat.id}
+        open={showMemoriesModal}
+        onClose={() => setShowMemoriesModal(false)}
+      />
+
       <Modal
         open={!!agentAddPreview}
         onClose={() => {
@@ -3821,6 +3891,141 @@ export function ChatSettingsDrawer({
         </div>
       )}
     </>
+  );
+}
+
+function formatMemoryDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function estimateMemoryTokens(memories: ChatMemoryChunk[]): number {
+  const text = memories.map((memory) => memory.content).join("\n\n");
+  return Math.ceil(text.length / 4);
+}
+
+const MEMORY_CONTENT_CLASS =
+  "max-h-56 overflow-y-auto whitespace-pre-wrap rounded-lg bg-[var(--secondary)]/50 px-3 py-2 text-[0.6875rem] leading-relaxed text-[var(--foreground)]";
+
+function MemoryRecallMemoriesModal({ chatId, open, onClose }: { chatId: string; open: boolean; onClose: () => void }) {
+  const memoriesQuery = useChatMemories(chatId, open);
+  const deleteMemory = useDeleteChatMemory(chatId);
+  const clearMemories = useClearChatMemories(chatId);
+  const memories = useMemo(() => memoriesQuery.data ?? [], [memoriesQuery.data]);
+  const totalTokens = useMemo(() => estimateMemoryTokens(memories), [memories]);
+
+  const handleDelete = async (memory: ChatMemoryChunk) => {
+    const ok = await showConfirmDialog({
+      title: "Forget Memory",
+      message: "Remove this recall memory from this chat?",
+      confirmLabel: "Forget",
+      tone: "destructive",
+    });
+    if (ok) deleteMemory.mutate(memory.id);
+  };
+
+  const handleClear = async () => {
+    if (memories.length === 0) return;
+    const ok = await showConfirmDialog({
+      title: "Clear Memories",
+      message: "Remove all recall memories for this chat? This does not delete chat messages.",
+      confirmLabel: "Clear",
+      tone: "destructive",
+    });
+    if (ok) clearMemories.mutate();
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Memories for This Chat" width="max-w-3xl">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[var(--secondary)]/70 px-3 py-2 ring-1 ring-[var(--border)]">
+          <div className="text-[0.6875rem] text-[var(--muted-foreground)]">
+            <span className="font-semibold text-[var(--foreground)]">{memories.length}</span>{" "}
+            {memories.length === 1 ? "memory chunk" : "memory chunks"}
+            {memories.length > 0 && (
+              <>
+                {" "}
+                · <span className="tabular-nums">~{totalTokens.toLocaleString()} tokens</span>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => void memoriesQuery.refetch()}
+              disabled={memoriesQuery.isFetching}
+              className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:opacity-50"
+              title="Refresh"
+            >
+              <RefreshCw size="0.8125rem" className={cn(memoriesQuery.isFetching && "animate-spin")} />
+            </button>
+            <button
+              type="button"
+              onClick={handleClear}
+              disabled={memories.length === 0 || clearMemories.isPending}
+              className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)] disabled:opacity-40"
+              title="Clear all memories"
+            >
+              <Trash2 size="0.8125rem" />
+            </button>
+          </div>
+        </div>
+
+        {memoriesQuery.isLoading && (
+          <div className="rounded-xl bg-[var(--secondary)]/60 px-4 py-8 text-center text-xs text-[var(--muted-foreground)]">
+            Loading memories...
+          </div>
+        )}
+
+        {memoriesQuery.error && (
+          <div className="rounded-xl bg-[var(--destructive)]/10 px-4 py-3 text-xs text-[var(--destructive)] ring-1 ring-[var(--destructive)]/25">
+            Failed to load memories.
+          </div>
+        )}
+
+        {!memoriesQuery.isLoading && !memoriesQuery.error && memories.length === 0 && (
+          <div className="rounded-xl bg-[var(--secondary)]/60 px-4 py-8 text-center text-xs text-[var(--muted-foreground)]">
+            No recall memories have been created for this chat yet. Marinara creates them after generation in groups of
+            5 messages.
+          </div>
+        )}
+
+        {memories.length > 0 && (
+          <div className="space-y-2">
+            {memories.map((memory) => (
+              <article key={memory.id} className="rounded-xl bg-[var(--card)] px-3 py-3 ring-1 ring-[var(--border)]">
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <div className="min-w-0 text-[0.625rem] text-[var(--muted-foreground)]">
+                    <div className="font-medium text-[var(--foreground)]">
+                      {formatMemoryDate(memory.firstMessageAt)} - {formatMemoryDate(memory.lastMessageAt)}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+                      <span>{memory.messageCount} messages</span>
+                      <span>{memory.hasEmbedding ? "Vectorized" : "Waiting for vector"}</span>
+                      <span>Created {formatMemoryDate(memory.createdAt)}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(memory)}
+                    disabled={deleteMemory.isPending}
+                    className="shrink-0 rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)] disabled:opacity-40"
+                    title="Forget this memory"
+                  >
+                    <Trash2 size="0.75rem" />
+                  </button>
+                </div>
+                <pre className={MEMORY_CONTENT_CLASS}>{memory.content}</pre>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 

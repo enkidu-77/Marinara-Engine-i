@@ -111,12 +111,7 @@ export async function botBrowserDatacatRoutes(app: FastifyInstance) {
       tagIds?: string;
     };
   }>("/datacat/recent", async (req) => {
-    const {
-      limit = "80",
-      offset = "0",
-      min_tokens = String(DEFAULT_MIN_TOTAL_TOKENS),
-      tagIds,
-    } = req.query;
+    const { limit = "80", offset = "0", min_tokens = String(DEFAULT_MIN_TOTAL_TOKENS), tagIds } = req.query;
     const params = new URLSearchParams();
     params.set("limit", limit);
     params.set("offset", offset);

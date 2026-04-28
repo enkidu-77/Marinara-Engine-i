@@ -594,49 +594,46 @@ export async function runSTBulkImport(
     }
   }
 
-	 // Build a name → characterId map for linking chats to characters
-	// We look at ALL characters in DB (including ones just imported)
-	const charNameToId = new Map<string, string>();
-	try {
-	  const allChars = await db.select().from(charactersTable);
-	  for (const ch of allChars) {
-		try {
-		  const data = JSON.parse(ch.data);
-		  const name = (data?.name ?? "").toLowerCase().trim();
-		  if (name) charNameToId.set(name, ch.id);
-		} catch {
-		  // skip
-		}
-	  }
-	} catch {
-	  // DB read failed, continue without linking
-	}
+  // Build a name → characterId map for linking chats to characters
+  // We look at ALL characters in DB (including ones just imported)
+  const charNameToId = new Map<string, string>();
+  try {
+    const allChars = await db.select().from(charactersTable);
+    for (const ch of allChars) {
+      try {
+        const data = JSON.parse(ch.data);
+        const name = (data?.name ?? "").toLowerCase().trim();
+        if (name) charNameToId.set(name, ch.id);
+      } catch {
+        // skip
+      }
+    }
+  } catch {
+    // DB read failed, continue without linking
+  }
 
-	// Also index by character card filename.
-	// Use ALL scanned characters, not just selectedCharacters, so chats can still
-	// link to already-existing characters even when they were not re-imported now.
-	for (const ch of scanResult.characters) {
-	  const displayNameKey = ch.name.toLowerCase().trim();
-	  const filenameKey = basename(ch.path, extname(ch.path)).toLowerCase().trim();
+  // Also index by character card filename.
+  // Use ALL scanned characters, not just selectedCharacters, so chats can still
+  // link to already-existing characters even when they were not re-imported now.
+  for (const ch of scanResult.characters) {
+    const displayNameKey = ch.name.toLowerCase().trim();
+    const filenameKey = basename(ch.path, extname(ch.path)).toLowerCase().trim();
 
-	  const charId =
-		charNameToId.get(displayNameKey) ??
-		charNameToId.get(filenameKey) ??
-		null;
+    const charId = charNameToId.get(displayNameKey) ?? charNameToId.get(filenameKey) ?? null;
 
-	  if (charId) {
-		if (displayNameKey && !charNameToId.has(displayNameKey)) {
-		  charNameToId.set(displayNameKey, charId);
-		}
-		if (filenameKey && !charNameToId.has(filenameKey)) {
-		  charNameToId.set(filenameKey, charId);
-		}
-	  }
-	}
+    if (charId) {
+      if (displayNameKey && !charNameToId.has(displayNameKey)) {
+        charNameToId.set(displayNameKey, charId);
+      }
+      if (filenameKey && !charNameToId.has(filenameKey)) {
+        charNameToId.set(filenameKey, charId);
+      }
+    }
+  }
 
-	  // Import chats (with character linking)
+  // Import chats (with character linking)
   // Group chats by character, but preserve each imported file's name as a branch label.
-    if (selectedChats.length > 0) {
+  if (selectedChats.length > 0) {
     const charGroupIds = new Map<string, string>();
     const total = selectedChats.length;
     let idx = 0;
@@ -654,10 +651,7 @@ export async function runSTBulkImport(
 
         // Prefer folder name first because ST chat folders usually track the
         // character card filename more reliably than character_name headers.
-        const charId =
-          charNameToId.get(normalizedFolderName) ??
-          charNameToId.get(normalizedCharacterName) ??
-          null;
+        const charId = charNameToId.get(normalizedFolderName) ?? charNameToId.get(normalizedCharacterName) ?? null;
 
         const groupKey = normalizedFolderName || normalizedCharacterName;
         let groupId = charGroupIds.get(groupKey);
@@ -680,7 +674,7 @@ export async function runSTBulkImport(
       }
     }
   }
-	
+
   // Import group chats
   if (selectedGroupChats.length > 0) {
     const gcGroupIds = new Map<string, string>();

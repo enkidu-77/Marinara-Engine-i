@@ -64,13 +64,10 @@ async function fetchJannyPage(path: string): Promise<string | null> {
   const proxyController = new AbortController();
   const proxyTimeout = setTimeout(() => proxyController.abort(), 15_000);
   try {
-    const proxied = await fetch(
-      `https://corsproxy.io/?url=${encodeURIComponent(`${JANNY_SITE_BASE}${path}`)}`,
-      {
-        headers: { Accept: "text/html,application/xhtml+xml,*/*" },
-        signal: proxyController.signal,
-      },
-    );
+    const proxied = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(`${JANNY_SITE_BASE}${path}`)}`, {
+      headers: { Accept: "text/html,application/xhtml+xml,*/*" },
+      signal: proxyController.signal,
+    });
     if (proxied.ok) return await proxied.text();
   } catch {
     /* fall through */

@@ -37,6 +37,8 @@ interface CombinedPlayerPanelProps {
   showCustomTracker: boolean;
   personaStats: CharacterStat[];
   onUpdatePersonaStats: (bars: CharacterStat[]) => void;
+  personaStatus?: string;
+  onUpdatePersonaStatus?: (status: string) => void;
   characters: PresentCharacter[];
   onUpdateCharacters: (chars: PresentCharacter[]) => void;
   inventory: InventoryItem[];
@@ -57,6 +59,8 @@ export function CombinedPlayerPanel({
   showCustomTracker,
   personaStats,
   onUpdatePersonaStats,
+  personaStatus = "",
+  onUpdatePersonaStatus,
   characters,
   onUpdateCharacters,
   inventory,
@@ -141,22 +145,24 @@ export function CombinedPlayerPanel({
         <span className="text-[0.625rem] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider flex items-center gap-1">
           <Swords size="0.625rem" /> Trackers
         </span>
-        <button onClick={onClose} className="text-[var(--muted-foreground)]/50 hover:text-[var(--foreground)] transition-colors">
+        <button
+          onClick={onClose}
+          className="text-[var(--muted-foreground)]/50 hover:text-[var(--foreground)] transition-colors"
+        >
           <X size="0.75rem" />
         </button>
       </div>
       <div className="overflow-y-auto max-h-[min(calc(75vh-2rem),30rem)] divide-y divide-[var(--border)]">
         {showPersona && (
           <div className="p-2">
+            <PersonaStatusField value={personaStatus} onSave={onUpdatePersonaStatus} />
             <div className="px-1 pb-1">
               <span className="text-[0.625rem] font-semibold text-violet-300/70 uppercase tracking-wider">
                 Persona Stats
               </span>
             </div>
             <div className="space-y-2">
-              {personaStats.length === 0 && (
-                <div className={EMPTY_STATE}>No stats tracked</div>
-              )}
+              {personaStats.length === 0 && <div className={EMPTY_STATE}>No stats tracked</div>}
               {personaStats.map((bar, idx) => (
                 <StatBarEditable
                   key={bar.name}
@@ -184,9 +190,7 @@ export function CombinedPlayerPanel({
               </button>
             </div>
             <div className="space-y-2">
-              {characters.length === 0 && (
-                <div className={EMPTY_STATE}>No characters in scene</div>
-              )}
+              {characters.length === 0 && <div className={EMPTY_STATE}>No characters in scene</div>}
               {characters.map((char, idx) => (
                 <div key={char.characterId ?? idx} className="rounded-lg bg-[var(--muted)]/20 p-2 space-y-1">
                   <div className="flex items-center gap-1.5">
@@ -271,9 +275,7 @@ export function CombinedPlayerPanel({
               </button>
             </div>
             <div className="space-y-1">
-              {inventory.length === 0 && (
-                <div className={EMPTY_STATE}>Inventory empty</div>
-              )}
+              {inventory.length === 0 && <div className={EMPTY_STATE}>Inventory empty</div>}
               {inventory.map((item, idx) => (
                 <div key={idx} className="flex items-center gap-1.5 rounded-lg bg-[var(--muted)]/20 px-2 py-1.5">
                   <Package size="0.625rem" className="shrink-0 text-amber-400/60" />
@@ -317,9 +319,7 @@ export function CombinedPlayerPanel({
               </button>
             </div>
             <div className="space-y-2">
-              {quests.length === 0 && (
-                <div className={EMPTY_STATE}>No active quests</div>
-              )}
+              {quests.length === 0 && <div className={EMPTY_STATE}>No active quests</div>}
               {quests.map((quest, idx) => (
                 <QuestCardEditable
                   key={quest.questEntryId || idx}
@@ -346,9 +346,7 @@ export function CombinedPlayerPanel({
               </button>
             </div>
             <div className="space-y-1">
-              {customTrackerFields.length === 0 && (
-                <div className={EMPTY_STATE}>No fields tracked</div>
-              )}
+              {customTrackerFields.length === 0 && <div className={EMPTY_STATE}>No fields tracked</div>}
               {customTrackerFields.map((field, idx) => (
                 <div key={idx} className="flex items-center gap-1.5 rounded-lg bg-[var(--muted)]/20 px-2 py-1.5">
                   <SlidersHorizontal size="0.625rem" className="shrink-0 text-cyan-400/60" />
@@ -385,9 +383,11 @@ export function CombinedPlayerPanel({
 interface PersonaStatsPanelProps {
   bars: CharacterStat[];
   onUpdate: (bars: CharacterStat[]) => void;
+  status?: string;
+  onUpdateStatus?: (status: string) => void;
 }
 
-export function PersonaStatsPanel({ bars, onUpdate }: PersonaStatsPanelProps) {
+export function PersonaStatsPanel({ bars, onUpdate, status = "", onUpdateStatus }: PersonaStatsPanelProps) {
   const updateBar = (idx: number, field: "value" | "max" | "name", val: number | string) => {
     const next = [...bars];
     next[idx] = { ...next[idx]!, [field]: val };
@@ -396,8 +396,13 @@ export function PersonaStatsPanel({ bars, onUpdate }: PersonaStatsPanelProps) {
 
   return (
     <>
+      <div className="border-b border-[var(--border)] p-2">
+        <PersonaStatusField value={status} onSave={onUpdateStatus} />
+      </div>
       <div className="border-b border-[var(--border)] px-3 py-1.5">
-        <span className="text-[0.625rem] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider">Persona Stats</span>
+        <span className="text-[0.625rem] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider">
+          Persona Stats
+        </span>
       </div>
       <div className="p-2 space-y-2">
         {bars.map((bar, idx) => (
@@ -511,7 +516,9 @@ export function CharactersPanel({ characters, onUpdate, chatId }: CharactersPane
               onClick={toggleAutoGenerate}
               className={cn(
                 "flex items-center gap-1 text-[0.5625rem] transition-colors",
-                autoGenEnabled ? "text-purple-400" : "text-[var(--muted-foreground)]/50 hover:text-[var(--muted-foreground)]",
+                autoGenEnabled
+                  ? "text-purple-400"
+                  : "text-[var(--muted-foreground)]/50 hover:text-[var(--muted-foreground)]",
               )}
               title={autoGenEnabled ? "Auto-generate avatars: ON" : "Auto-generate avatars: OFF"}
             >
@@ -528,9 +535,7 @@ export function CharactersPanel({ characters, onUpdate, chatId }: CharactersPane
         </div>
       </div>
       <div className="p-2 space-y-2">
-        {characters.length === 0 && (
-          <div className={cn(EMPTY_STATE, "py-2")}>No characters in scene</div>
-        )}
+        {characters.length === 0 && <div className={cn(EMPTY_STATE, "py-2")}>No characters in scene</div>}
         {characters.map((char, idx) => (
           <div key={char.characterId ?? idx} className="rounded-lg bg-[var(--muted)]/20 p-2 space-y-1">
             <div className="flex items-center gap-1.5">
@@ -789,9 +794,7 @@ export function CustomTrackerPanel({ fields, onUpdate }: CustomTrackerPanelProps
         </button>
       </div>
       <div className="p-2 space-y-1">
-        {fields.length === 0 && (
-          <div className={cn(EMPTY_STATE, "py-2")}>No fields tracked — add one above</div>
-        )}
+        {fields.length === 0 && <div className={cn(EMPTY_STATE, "py-2")}>No fields tracked — add one above</div>}
         {fields.map((field, idx) => (
           <div key={idx} className="flex items-center gap-1.5 rounded-lg bg-[var(--muted)]/20 px-2 py-1.5">
             <SlidersHorizontal size="0.625rem" className="shrink-0 text-cyan-400/60" />
@@ -861,7 +864,10 @@ export function CombinedWorldPanel({
         <span className="text-[0.625rem] font-semibold text-[var(--muted-foreground)] uppercase tracking-wider flex items-center gap-1">
           <CloudSun size="0.625rem" /> World State
         </span>
-        <button onClick={onClose} className="text-[var(--muted-foreground)]/50 hover:text-[var(--foreground)] transition-colors">
+        <button
+          onClick={onClose}
+          className="text-[var(--muted-foreground)]/50 hover:text-[var(--foreground)] transition-colors"
+        >
           <X size="0.75rem" />
         </button>
       </div>
@@ -911,11 +917,13 @@ function InlineEdit({
   onSave,
   placeholder,
   className,
+  scrollOnHover = false,
 }: {
   value: string;
   onSave: (v: string) => void;
   placeholder?: string;
   className?: string;
+  scrollOnHover?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -991,8 +999,22 @@ function InlineEdit({
         className,
       )}
     >
-      <span className="text-[0.625rem] text-[var(--foreground)]/70 overflow-x-auto whitespace-nowrap scrollbar-hide min-w-0">
-        {value || <span className="italic text-[var(--muted-foreground)]/50">{placeholder ?? "—"}</span>}
+      <span
+        className={cn(
+          "text-[0.625rem] text-[var(--foreground)]/70 overflow-hidden whitespace-nowrap scrollbar-hide min-w-0",
+          scrollOnHover && value && "roleplay-hud-scroll-field",
+        )}
+      >
+        {scrollOnHover && value ? (
+          <span className={cn("roleplay-hud-scroll-track", showTip && "roleplay-hud-scroll-track--active")}>
+            <span className="pr-6">{value}</span>
+            <span className="pr-6" aria-hidden>
+              {value}
+            </span>
+          </span>
+        ) : (
+          value || <span className="italic text-[var(--muted-foreground)]/50">{placeholder ?? "—"}</span>
+        )}
       </span>
       <Pencil size="0.4375rem" className="opacity-0 group-hover:opacity-40 shrink-0 transition-opacity" />
       {showTip && value && (
@@ -1001,6 +1023,26 @@ function InlineEdit({
         </span>
       )}
     </button>
+  );
+}
+
+function PersonaStatusField({ value, onSave }: { value: string; onSave?: (v: string) => void }) {
+  return (
+    <div className="mb-2 rounded-lg border border-violet-400/15 bg-violet-500/5 px-2 py-1.5">
+      <div className="mb-0.5 flex items-center gap-1.5">
+        <Sparkles size="0.5625rem" className="text-violet-300/60" />
+        <span className="text-[0.5625rem] font-semibold uppercase tracking-wide text-violet-200/65">
+          Current Status
+        </span>
+      </div>
+      <InlineEdit
+        value={value}
+        onSave={onSave ?? (() => {})}
+        className="w-full !text-[0.6875rem] !text-[var(--foreground)]/85"
+        placeholder="Status not tracked"
+        scrollOnHover
+      />
+    </div>
   );
 }
 
@@ -1164,7 +1206,7 @@ function LabeledEdit({ label, value, onSave }: { label: string; value: string; o
   return (
     <div className="flex items-center gap-1">
       <span className="text-[0.5625rem] text-[var(--muted-foreground)]/60 w-10 shrink-0">{label}</span>
-      <InlineEdit value={value} onSave={onSave} className="flex-1 min-w-0" placeholder="—" />
+      <InlineEdit value={value} onSave={onSave} className="flex-1 min-w-0" placeholder="—" scrollOnHover />
     </div>
   );
 }
@@ -1203,7 +1245,9 @@ function WorldFieldRow({
     <div className="flex items-center gap-2.5 px-3 py-2 group/row hover:bg-[var(--muted)]/20 transition-colors">
       <div className="shrink-0 w-5 flex items-center justify-center">{icon}</div>
       <div className="flex-1 min-w-0">
-        <div className="text-[0.5625rem] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]/60 mb-0.5">{label}</div>
+        <div className="text-[0.5625rem] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]/60 mb-0.5">
+          {label}
+        </div>
         {editing ? (
           <input
             ref={inputRef}

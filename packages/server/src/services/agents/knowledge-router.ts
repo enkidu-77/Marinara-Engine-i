@@ -200,9 +200,7 @@ export async function executeKnowledgeRouter(
   }
 
   const responseText =
-    typeof result.data === "string"
-      ? result.data
-      : ((result.data as { text?: string } | null)?.text ?? "");
+    typeof result.data === "string" ? result.data : ((result.data as { text?: string } | null)?.text ?? "");
   const selectedIds = parseRouterResponse(responseText);
 
   // Dedupe IDs in case the model repeats one — we don't want to inject the same
@@ -226,9 +224,7 @@ export async function executeKnowledgeRouter(
     };
   }
 
-  const injectionText = selectedEntries
-    .map((entry) => `### ${entry.name}\n${entry.content}`)
-    .join("\n\n");
+  const injectionText = selectedEntries.map((entry) => `### ${entry.name}\n${entry.content}`).join("\n\n");
 
   logger.debug(
     "[knowledge-router] selected %d/%d entries (%d ids returned, %d unique, %d unknown)",

@@ -269,6 +269,7 @@ export function RoleplayHUD({
   const presentCharacters = gameState?.presentCharacters ?? [];
   const personaStatBars = gameState?.personaStats ?? [];
   const playerStats = gameState?.playerStats ?? null;
+  const personaStatus = playerStats?.status ?? "";
   const inventory = playerStats?.inventory ?? [];
   const activeQuests = playerStats?.activeQuests ?? [];
   const customTrackerFields = playerStats?.customTrackerFields ?? [];
@@ -330,6 +331,8 @@ export function RoleplayHUD({
             showCustomTracker={enabledAgentTypes.has("custom-tracker")}
             personaStats={personaStatBars}
             onUpdatePersonaStats={(bars) => patchField("personaStats", bars)}
+            personaStatus={personaStatus}
+            onUpdatePersonaStatus={(status) => patchPlayerStats("status", status)}
             characters={presentCharacters}
             onUpdateCharacters={(chars) => {
               if (gameState) {
@@ -387,6 +390,8 @@ export function RoleplayHUD({
           <PersonaStatsWidget
             bars={personaStatBars}
             onUpdate={(bars) => patchField("personaStats", bars)}
+            status={personaStatus}
+            onUpdateStatus={(status) => patchPlayerStats("status", status)}
             layout={layout}
           />
         )}
@@ -647,6 +652,8 @@ function CombinedPlayerWidget({
   showCustomTracker,
   personaStats,
   onUpdatePersonaStats,
+  personaStatus,
+  onUpdatePersonaStatus,
   characters,
   onUpdateCharacters,
   inventory,
@@ -663,6 +670,8 @@ function CombinedPlayerWidget({
   showCustomTracker: boolean;
   personaStats: CharacterStat[];
   onUpdatePersonaStats: (bars: CharacterStat[]) => void;
+  personaStatus: string;
+  onUpdatePersonaStatus: (status: string) => void;
   characters: PresentCharacter[];
   onUpdateCharacters: (chars: PresentCharacter[]) => void;
   inventory: InventoryItem[];
@@ -706,6 +715,8 @@ function CombinedPlayerWidget({
             showCustomTracker={showCustomTracker}
             personaStats={personaStats}
             onUpdatePersonaStats={onUpdatePersonaStats}
+            personaStatus={personaStatus}
+            onUpdatePersonaStatus={onUpdatePersonaStatus}
             characters={characters}
             onUpdateCharacters={onUpdateCharacters}
             inventory={inventory}
@@ -857,7 +868,9 @@ function CharactersWidget({
               </span>
             ))}
             {characters.length > 3 && (
-              <span className="text-[0.4375rem] text-[var(--muted-foreground)]/60 ml-0.5">+{characters.length - 3}</span>
+              <span className="text-[0.4375rem] text-[var(--muted-foreground)]/60 ml-0.5">
+                +{characters.length - 3}
+              </span>
             )}
           </div>
         ) : (
@@ -885,10 +898,14 @@ function CharactersWidget({
 function PersonaStatsWidget({
   bars,
   onUpdate,
+  status,
+  onUpdateStatus,
   layout = "top",
 }: {
   bars: CharacterStat[];
   onUpdate: (bars: CharacterStat[]) => void;
+  status: string;
+  onUpdateStatus: (status: string) => void;
   layout?: HudPosition;
 }) {
   const [open, setOpen] = useState(false);
@@ -907,7 +924,10 @@ function PersonaStatsWidget({
             {bars.map((bar) => {
               const pct = bar.max > 0 ? Math.min(100, (bar.value / bar.max) * 100) : 0;
               return (
-                <div key={bar.name} className="h-1 max-md:h-px w-full rounded-full bg-[var(--muted)]/30 dark:bg-foreground/10 overflow-hidden">
+                <div
+                  key={bar.name}
+                  className="h-1 max-md:h-px w-full rounded-full bg-[var(--muted)]/30 dark:bg-foreground/10 overflow-hidden"
+                >
                   <div
                     className="h-full rounded-full transition-all duration-500"
                     style={{ width: `${pct}%`, backgroundColor: bar.color || "#8b5cf6" }}
@@ -932,7 +952,7 @@ function PersonaStatsWidget({
         className="w-60 max-h-80 overflow-y-auto"
       >
         <Suspense fallback={<DeferredHUDPanelFallback label="Loading persona stats…" />}>
-          <PersonaStatsPanel bars={bars} onUpdate={onUpdate} />
+          <PersonaStatsPanel bars={bars} onUpdate={onUpdate} status={status} onUpdateStatus={onUpdateStatus} />
         </Suspense>
       </WidgetPopover>
     </div>

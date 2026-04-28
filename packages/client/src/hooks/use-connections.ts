@@ -80,9 +80,14 @@ export function useTestMessage() {
 export function useTestImageGeneration() {
   return useMutation({
     mutationFn: (id: string) =>
-      api.post<{ success: boolean; base64: string | null; mimeType: string | null; latencyMs: number; prompt: string; error?: string }>(
-        `/connections/${id}/test-image`,
-      ),
+      api.post<{
+        success: boolean;
+        base64: string | null;
+        mimeType: string | null;
+        latencyMs: number;
+        prompt: string;
+        error?: string;
+      }>(`/connections/${id}/test-image`),
   });
 }
 
@@ -95,7 +100,7 @@ export function useFetchModels() {
 export function useSaveConnectionDefaults() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, params }: { id: string; params: Record<string, unknown> }) =>
+    mutationFn: ({ id, params }: { id: string; params: Record<string, unknown> | null }) =>
       api.put(`/connections/${id}/default-parameters`, params),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: connectionKeys.list() });

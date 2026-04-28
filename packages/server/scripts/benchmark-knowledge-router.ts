@@ -71,7 +71,9 @@ function makeFakeLorebook(n: number): LorebookEntry[] {
       lorebookId: "fake-book",
       name: `Entry ${i}`,
       content: "Lore content. ".repeat(Math.ceil(AVG_CONTENT_CHARS / 14)).slice(0, AVG_CONTENT_CHARS),
-      description: hasDescription ? `Short summary for entry ${i} that the router can use.`.padEnd(DESCRIPTION_CHARS, " ") : "",
+      description: hasDescription
+        ? `Short summary for entry ${i} that the router can use.`.padEnd(DESCRIPTION_CHARS, " ")
+        : "",
       keys: [`key${i}a`, `key${i}b`],
       secondaryKeys: [],
       enabled: true,

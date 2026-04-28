@@ -7,6 +7,7 @@ import { createPromptsStorage } from "../../services/storage/prompts.storage.js"
 import { createCharactersStorage } from "../../services/storage/characters.storage.js";
 import { createLorebooksStorage } from "../../services/storage/lorebooks.storage.js";
 import { createRegexScriptsStorage } from "../../services/storage/regex-scripts.storage.js";
+import { buildImpersonateInstruction } from "../../services/conversation/impersonate-prompt.js";
 import { processLorebooks } from "../../services/lorebook/index.js";
 import { injectAtDepth } from "../../services/lorebook/prompt-injector.js";
 import { createLLMProvider } from "../../services/llm/provider-registry.js";
@@ -14,17 +15,9 @@ import { getLocalSidecarProvider } from "../../services/llm/local-sidecar.js";
 import { assemblePrompt, type AssemblerInput } from "../../services/prompt/index.js";
 import { mergeAdjacentMessages } from "../../services/prompt/merger.js";
 import { wrapContent } from "../../services/prompt/format-engine.js";
-import {
-  fitMessagesToContext,
-  type BaseLLMProvider,
-  type ChatMessage,
-} from "../../services/llm/base-provider.js";
+import { fitMessagesToContext, type BaseLLMProvider, type ChatMessage } from "../../services/llm/base-provider.js";
 import { sendSseEvent, startSseReply } from "./sse.js";
-import {
-  findLastIndex,
-  parseExtra,
-  resolveBaseUrl,
-} from "../generate/generate-route-utils.js";
+import { findLastIndex, parseExtra, resolveBaseUrl } from "../generate/generate-route-utils.js";
 import { gameStateSnapshots as gameStateSnapshotsTable } from "../../db/schema/index.js";
 import { and, desc, eq } from "drizzle-orm";
 import { logger } from "../../lib/logger.js";
@@ -183,7 +176,8 @@ function wrapperMessages(
   key: string,
 ): { start?: { role: "system"; content: string }; end?: { role: "system"; content: string } } {
   if (wrapFormat === "none") return {};
-  if (wrapFormat === "xml") return { start: { role: "system", content: `<${key}>` }, end: { role: "system", content: `</${key}>` } };
+  if (wrapFormat === "xml")
+    return { start: { role: "system", content: `<${key}>` }, end: { role: "system", content: `</${key}>` } };
   // markdown
   return { start: { role: "system", content: `## ${key}` }, end: undefined };
 }
@@ -266,15 +260,24 @@ function wrapConversationHistoryAndLastMessageInPlace(
   if (!hasPresetWrapping) {
     if (wrapFormat === "xml") {
       if (historyEndIdx >= historyStartIdx) {
-        out[historyStartIdx] = { ...out[historyStartIdx]!, content: `<chat_history>\n${out[historyStartIdx]!.content}` };
+        out[historyStartIdx] = {
+          ...out[historyStartIdx]!,
+          content: `<chat_history>\n${out[historyStartIdx]!.content}`,
+        };
         out[historyEndIdx] = { ...out[historyEndIdx]!, content: `${out[historyEndIdx]!.content}\n</chat_history>` };
       }
       if (lastUserIdx >= 0) {
-        out[lastUserIdx] = { ...out[lastUserIdx]!, content: `<last_message>\n${out[lastUserIdx]!.content}\n</last_message>` };
+        out[lastUserIdx] = {
+          ...out[lastUserIdx]!,
+          content: `<last_message>\n${out[lastUserIdx]!.content}\n</last_message>`,
+        };
       }
     } else if (wrapFormat === "markdown") {
       if (historyEndIdx >= historyStartIdx) {
-        out[historyStartIdx] = { ...out[historyStartIdx]!, content: `## Chat History\n${out[historyStartIdx]!.content}` };
+        out[historyStartIdx] = {
+          ...out[historyStartIdx]!,
+          content: `## Chat History\n${out[historyStartIdx]!.content}`,
+        };
       }
       if (lastUserIdx >= 0) {
         out[lastUserIdx] = { ...out[lastUserIdx]!, content: `## Last Message\n${out[lastUserIdx]!.content}` };
@@ -666,6 +669,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     })();
 
     // Persona resolution (same strategy as generation; read-only)
+    let personaId: string | null = null;
     let personaName = "User";
     let personaDescription = "";
     let personaFields: Record<string, string> = {};
@@ -676,6 +680,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         ((chat as any).personaId ? allPersonas.find((p: any) => p.id === (chat as any).personaId) : null) ??
         allPersonas.find((p: any) => p.isActive === "true");
       if (persona) {
+        personaId = persona.id as string;
         personaName = persona.name;
         personaDescription = persona.description ?? "";
         // Append active alt description extensions
@@ -705,7 +710,11 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       /* non-critical */
     }
 
-    const effectivePresetId = skipPreset ? null : (presetIdOverride ?? (chat.promptPresetId as string | null) ?? null);
+    const chatMode = ((chat as { mode?: string }).mode ?? "conversation") as string;
+    const effectivePresetId =
+      skipPreset || chatMode === "conversation"
+        ? null
+        : (presetIdOverride ?? (chat.promptPresetId as string | null) ?? null);
 
     // Choice selections are stored per-chat (chat metadata), not per prompt preset.
     // If an extension overrides the prompt preset, reusing the chat's stored selections can make it
@@ -721,7 +730,9 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
     const chatChoicesFromMeta = (chatMeta.presetChoices ?? {}) as Record<string, string | string[]>;
     const isDifferentPresetOverride =
-      !!presetIdOverride && presetIdOverride !== ((chat.promptPresetId as string | null) ?? null);
+      chatMode !== "conversation" &&
+      !!presetIdOverride &&
+      presetIdOverride !== ((chat.promptPresetId as string | null) ?? null);
     const presetDefaultChoices = isDifferentPresetOverride
       ? skipPreset
         ? null
@@ -734,7 +745,11 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     const usePromptParts = !!promptParts;
     if (usePromptParts) {
       // Pick wrap format (default xml). If not specified, fall back to the selected preset's wrapFormat (if any).
-      if (promptParts.wrapFormat === "markdown" || promptParts.wrapFormat === "none" || promptParts.wrapFormat === "xml") {
+      if (
+        promptParts.wrapFormat === "markdown" ||
+        promptParts.wrapFormat === "none" ||
+        promptParts.wrapFormat === "xml"
+      ) {
         wrapFormat = promptParts.wrapFormat;
       } else if (effectivePresetId) {
         const preset = await presets.getById(effectivePresetId);
@@ -797,7 +812,8 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
       // Precompute parts (strings/messages) so order is deterministic.
       const extensionBlocksRaw =
-        parseJsonArray(promptParts.extensionBlocks) ?? (Array.isArray(promptParts.extensionBlocks) ? promptParts.extensionBlocks : null);
+        parseJsonArray(promptParts.extensionBlocks) ??
+        (Array.isArray(promptParts.extensionBlocks) ? promptParts.extensionBlocks : null);
       const extensionBlocks: Array<{ role: "system"; content: string }> = [];
       if (extensionBlocksRaw?.length) {
         for (const block of extensionBlocksRaw) {
@@ -809,14 +825,13 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       }
 
       const partsPresetText = typeof promptParts.presetText === "string" ? promptParts.presetText : "";
-      const presetTextBlock =
-        partsPresetText.trim()
-          ? wrapFormat === "xml"
-            ? `<extension_preset>\n${partsPresetText.trim()}\n</extension_preset>`
-            : wrapFormat === "markdown"
-              ? `## Extension Preset\n${partsPresetText.trim()}`
-              : partsPresetText.trim()
-          : "";
+      const presetTextBlock = partsPresetText.trim()
+        ? wrapFormat === "xml"
+          ? `<extension_preset>\n${partsPresetText.trim()}\n</extension_preset>`
+          : wrapFormat === "markdown"
+            ? `## Extension Preset\n${partsPresetText.trim()}`
+            : partsPresetText.trim()
+        : "";
 
       const personaBlock = (() => {
         if (!includePersona) return "";
@@ -876,11 +891,14 @@ export async function registerDryRunRoute(app: FastifyInstance) {
             const lorebookResult = await processLorebooks(app.db, scanMessages, null, {
               chatId,
               characterIds,
+              personaId,
               activeLorebookIds,
               chatEmbedding: null,
               entryStateOverrides: undefined,
             });
-            const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter].filter(Boolean).join("\n");
+            const loreContent = [lorebookResult.worldInfoBefore, lorebookResult.worldInfoAfter]
+              .filter(Boolean)
+              .join("\n");
             const loreBlock = loreContent ? `<lore>\n${loreContent}\n</lore>` : "";
             return { loreBlock, depthEntries: lorebookResult.depthEntries };
           })()
@@ -986,13 +1004,18 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         if (key === "lorebook") {
           if (!lorebookPayload.loreBlock) continue;
           // Lorebook already comes as `<lore> ... </lore>`.
-          const insertChunks: Array<{ role: "system"; content: string }> = [{ role: "system", content: lorebookPayload.loreBlock }];
+          const insertChunks: Array<{ role: "system"; content: string }> = [
+            { role: "system", content: lorebookPayload.loreBlock },
+          ];
 
           const firstUserIdx = finalMessages.findIndex((m) => m.role === "user" || m.role === "assistant");
           const insertAt = firstUserIdx >= 0 ? firstUserIdx : finalMessages.length;
           finalMessages.splice(insertAt, 0, ...insertChunks);
           // Depth entries only make sense if there are chat messages already present.
-          if (lorebookPayload.depthEntries.length > 0 && finalMessages.some((m) => m.role === "user" || m.role === "assistant")) {
+          if (
+            lorebookPayload.depthEntries.length > 0 &&
+            finalMessages.some((m) => m.role === "user" || m.role === "assistant")
+          ) {
             finalMessages = injectAtDepth(finalMessages as any, lorebookPayload.depthEntries) as any;
           }
           continue;
@@ -1024,6 +1047,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
           chatChoices,
           chatId,
           characterIds,
+          personaId,
           personaName,
           personaDescription,
           personaFields,
@@ -1037,11 +1061,13 @@ export async function registerDryRunRoute(app: FastifyInstance) {
             }
           })(),
           chatMessages: mappedMessages,
-          chatSummary: resolvedInjectChatSummary ? (((chatMeta.summary as string) ?? "").trim() || null) : null,
+          chatSummary: resolvedInjectChatSummary ? ((chatMeta.summary as string) ?? "").trim() || null : null,
           enableAgents: false,
           activeAgentIds: [],
           activeLorebookIds: resolvedInjectLorebook
-            ? (Array.isArray(chatMeta.activeLorebookIds) ? (chatMeta.activeLorebookIds as string[]) : [])
+            ? Array.isArray(chatMeta.activeLorebookIds)
+              ? (chatMeta.activeLorebookIds as string[])
+              : []
             : [],
           chatEmbedding: null,
           entryStateOverrides: undefined,
@@ -1112,6 +1138,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       const lorebookResult = await processLorebooks(app.db, scanMessages, null, {
         chatId,
         characterIds,
+        personaId,
         activeLorebookIds,
         chatEmbedding: null,
         entryStateOverrides: undefined,
@@ -1129,9 +1156,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     }
 
     // Optional injection: tracker context (read-only snapshot)
-    const resolvedInjectTrackersForRun = usePromptParts
-      ? false
-      : resolvedInjectTrackers;
+    const resolvedInjectTrackersForRun = usePromptParts ? false : resolvedInjectTrackers;
     if (resolvedInjectTrackersForRun) {
       const snap = await loadLatestGameSnapshot(app, chatId);
       const contextBlock = snap ? formatTrackersContextBlock({ wrapFormat, snap, chatMeta }) : null;
@@ -1142,22 +1167,12 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
     // ── Impersonate: same instruction block as POST /api/generate (no DB writes) ──
     if (impersonate) {
-      const rawImpersonationDirection = userMessage.trim();
-      const legacyDirectionMatch = rawImpersonationDirection.match(
-        /^\[Impersonation instruction — write \{\{user\}\}'s next response, steering it toward the following:\s*([\s\S]+?)\]$/,
-      );
-      const impersonationDirection = legacyDirectionMatch ? legacyDirectionMatch[1]!.trim() : rawImpersonationDirection;
-      const impersonateInstruction = [
-        `<instruction>`,
-        `You are now writing as ${personaName}, the user's character.`,
-        `Study ${personaName}'s previous messages in the conversation and replicate their voice, mannerisms, speech patterns, and style as closely as possible.`,
-        personaDescription ? `Character description: ${personaDescription}` : "",
-        impersonationDirection ? `Additional direction for this reply: ${impersonationDirection}` : "",
-        `Write a single in-character response from ${personaName}'s perspective. Do NOT break character or add meta-commentary. Respond exactly as ${personaName} would.`,
-        `</instruction>`,
-      ]
-        .filter(Boolean)
-        .join("\n");
+      const impersonateInstruction = buildImpersonateInstruction({
+        customPrompt: chatMeta.impersonatePrompt,
+        direction: userMessage,
+        personaName,
+        personaDescription,
+      });
       finalMessages.push({ role: "user", content: impersonateInstruction });
     }
 
@@ -1176,8 +1191,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       reasoningEffort !== "maximum" ? reasoningEffort : null;
     if (reasoningEffort === "maximum") {
       const modelLower = (conn.model ?? "").toLowerCase();
-      const supportsXhigh =
-        modelLower.startsWith("gpt-5.4") || /claude-opus-4-(?:[7-9]|\d{2,})/.test(modelLower);
+      const supportsXhigh = modelLower.startsWith("gpt-5.4") || /claude-opus-4-(?:[7-9]|\d{2,})/.test(modelLower);
       resolvedEffort = supportsXhigh ? "xhigh" : "high";
     }
 
@@ -1224,19 +1238,73 @@ export async function registerDryRunRoute(app: FastifyInstance) {
             conn.maxTokensOverride,
           );
 
-    // Prompt preview mode: return the assembled messages without calling the provider.
+    // ── Mirror /api/generate: normalize + fit prompt to context ──
+    const connectionMaxContext = normalizeMaxContext(conn.maxContext);
+
+    // Collapse 3+ consecutive blank lines to save tokens
+    for (const m of finalMessages) {
+      m.content = m.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
+    }
+
+    const toProviderMessages = (
+      promptMessages: Array<{
+        role: "system" | "user" | "assistant";
+        content: string;
+        contextKind?: "prompt" | "history" | "injection";
+        images?: string[];
+        providerMetadata?: Record<string, unknown>;
+      }>,
+    ): ChatMessage[] =>
+      promptMessages.map((message) => ({
+        role: message.role,
+        content: message.content,
+        ...(message.contextKind ? { contextKind: message.contextKind } : {}),
+        ...(message.images?.length ? { images: message.images } : {}),
+        ...(message.providerMetadata ? { providerMetadata: message.providerMetadata } : {}),
+      }));
+
+    const prepareProviderMessages = (messages: ChatMessage[]): ChatMessage[] => {
+      // Convert mid-prompt system messages to user role after context fitting.
+      // This mirrors /api/generate while keeping prompt/injection blocks protected
+      // during history trimming.
+      let pastLeadingSystem = false;
+      const converted = messages.map((m) => {
+        if (!pastLeadingSystem) {
+          if (m.role !== "system") pastLeadingSystem = true;
+          return m;
+        }
+        if (m.role === "system") return { ...m, role: "user" as const };
+        return m;
+      });
+      return mergeAdjacentMessages(converted as any) as ChatMessage[];
+    };
+
+    const fit = fitMessagesToContext(
+      toProviderMessages(finalMessages as any),
+      { maxContext: effectiveMaxContext, maxTokens },
+      connectionMaxContext,
+    );
+    const providerMessages = prepareProviderMessages(fit.messages);
+    const maxTokensForSend = fit.maxTokens ?? maxTokens;
+
+    // Prompt preview mode: return the exact prompt shape that would be sent.
     if (returnPrompt) {
       return reply.send({
         prompt: {
-          messages: finalMessages,
+          messages: providerMessages.map((message) => ({
+            role: message.role,
+            content: message.content,
+            ...(message.images?.length ? { images: message.images } : {}),
+            ...(message.providerMetadata ? { providerMetadata: message.providerMetadata } : {}),
+          })),
           wrapFormat,
         },
         parameters: {
           provider: conn.provider,
           model: conn.model,
           temperature,
-          maxTokens,
-          maxContext: effectiveMaxContext,
+          maxTokens: maxTokensForSend,
+          maxContext: effectiveMaxContext ?? connectionMaxContext,
           topP,
           topK: topK || undefined,
           frequencyPenalty: frequencyPenalty || undefined,
@@ -1248,52 +1316,6 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         },
       });
     }
-
-    // ── Mirror /api/generate: normalize + fit prompt to context ──
-    const connectionMaxContext = normalizeMaxContext(conn.maxContext);
-
-    // Convert mid-prompt system messages to user role (keep only leading system block).
-    // Matches /api/generate behavior to avoid provider alternation issues after injections.
-    let pastLeadingSystem = false;
-    finalMessages = finalMessages.map((m: any) => {
-      if (!pastLeadingSystem) {
-        if (m.role !== "system") pastLeadingSystem = true;
-        return m;
-      }
-      if (m.role === "system") return { ...m, role: "user" as const };
-      return m;
-    });
-
-    // Merge adjacent same-role messages (especially system→user converted blocks)
-    finalMessages = mergeAdjacentMessages(finalMessages as any) as typeof finalMessages;
-
-    // Collapse 3+ consecutive blank lines to save tokens
-    for (const m of finalMessages) {
-      m.content = m.content.replace(/\n([ \t]*\n){2,}/g, "\n\n");
-    }
-
-    const toProviderMessages = (
-      promptMessages: Array<{
-        role: "system" | "user" | "assistant";
-        content: string;
-        images?: string[];
-        providerMetadata?: Record<string, unknown>;
-      }>,
-    ): ChatMessage[] =>
-      promptMessages.map((message) => ({
-        role: message.role,
-        content: message.content,
-        ...(message.images?.length ? { images: message.images } : {}),
-        ...(message.providerMetadata ? { providerMetadata: message.providerMetadata } : {}),
-      }));
-
-    const fit = fitMessagesToContext(
-      toProviderMessages(finalMessages as any),
-      { maxContext: effectiveMaxContext, maxTokens },
-      connectionMaxContext,
-    );
-    const providerMessages = fit.messages;
-    const maxTokensForSend = fit.maxTokens ?? maxTokens;
 
     // SSE streaming mode
     if (streaming) {
@@ -1424,4 +1446,3 @@ export async function registerDryRunRoute(app: FastifyInstance) {
     }
   });
 }
-

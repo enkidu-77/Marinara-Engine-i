@@ -23,9 +23,7 @@ const SHORTCUT_TITLE = "Marinara Engine";
 const SPAWN_TIMEOUT_MS = 5_000;
 
 function readShortcutTarget(lnkPath: string): string | null {
-  const cmd =
-    "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); " +
-    "Write-Output $s.TargetPath";
+  const cmd = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); " + "Write-Output $s.TargetPath";
   const res = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmd],
@@ -66,9 +64,7 @@ function rewriteShortcut(lnkPath: string, exe: string, args: string, workDir: st
 }
 
 function readShortcutIconLocation(lnkPath: string): string | null {
-  const cmd =
-    "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); " +
-    "Write-Output $s.IconLocation";
+  const cmd = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); " + "Write-Output $s.IconLocation";
   const res = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmd],
@@ -128,7 +124,9 @@ export function migrateTaskbarShortcuts(installDir: string): void {
   const userProfile = process.env.USERPROFILE;
   const candidates: string[] = [];
   if (appData) {
-    candidates.push(join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Marinara Engine", "Marinara Engine.lnk"));
+    candidates.push(
+      join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Marinara Engine", "Marinara Engine.lnk"),
+    );
   }
   if (userProfile) {
     candidates.push(join(userProfile, "Desktop", "Marinara Engine.lnk"));
@@ -136,7 +134,10 @@ export function migrateTaskbarShortcuts(installDir: string): void {
   // Test-only escape hatch — comma/semicolon-delimited extra .lnk paths to consider.
   const extra = process.env.MARINARA_LAUNCHER_TEST_LNKS;
   if (extra) {
-    for (const p of extra.split(/[;,]/).map((s) => s.trim()).filter(Boolean)) {
+    for (const p of extra
+      .split(/[;,]/)
+      .map((s) => s.trim())
+      .filter(Boolean)) {
       candidates.push(p);
     }
   }
@@ -186,11 +187,7 @@ export function migrateTaskbarShortcuts(installDir: string): void {
     }
 
     if (!pathsEqual(currentTarget, startBat)) {
-      logger.debug(
-        "Taskbar migration: %s targets %s (not this install), skipping",
-        lnk,
-        currentTarget,
-      );
+      logger.debug("Taskbar migration: %s targets %s (not this install), skipping", lnk, currentTarget);
       continue;
     }
 

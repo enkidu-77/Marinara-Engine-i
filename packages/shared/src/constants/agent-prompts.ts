@@ -436,7 +436,7 @@ Schema:
   html: `If fitting, include inline HTML, CSS, and JS segments whenever they enhance visual storytelling (in-world screens, posters, books, letters, signs, crests, labels, maps, and so on). Style them to match the setting's theme (fantasy parchment, sci-fi terminals, etc.), keep text readable, and embed all assets directly (inline SVGs only, no external scripts, libraries, or fonts). Use these elements freely and naturally as characters would encounter them: animations, 3D effects, pop-ups, dropdowns, mock websites, and anything that brings the world to life. Do NOT wrap HTML/CSS/JS in code fences.`,
 
   /* ────────────────────────────────────────── */
-  "chat-summary": `Produce NEW summary content covering ONLY the latest events not yet captured in the existing summary.
+  "chat-summary": `Stop the roleplay immediately. You are now about to create a summary. Produce NEW summary content covering ONLY the latest events not yet captured in the existing summary.
 1. Do NOT rewrite or rephrase the existing summary. Do NOT repeat information already covered.
 2. Focus on:
    - New plot events and turning points since the last summary.

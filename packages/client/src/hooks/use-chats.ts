@@ -9,7 +9,14 @@ import { useGameStateStore } from "../stores/game-state.store";
 import { useEncounterStore } from "../stores/encounter.store";
 import { useUIStore } from "../stores/ui.store";
 import { clearBrowserRuntimeCaches } from "../lib/browser-runtime";
-import type { Chat, Message, MessageSwipe, DaySummaryEntry, WeekSummaryEntry } from "@marinara-engine/shared";
+import type {
+  Chat,
+  ChatMemoryChunk,
+  Message,
+  MessageSwipe,
+  DaySummaryEntry,
+  WeekSummaryEntry,
+} from "@marinara-engine/shared";
 
 export const chatKeys = {
   all: ["chats"] as const,
@@ -17,6 +24,7 @@ export const chatKeys = {
   detail: (id: string) => [...chatKeys.all, "detail", id] as const,
   messages: (chatId: string) => [...chatKeys.all, "messages", chatId] as const,
   messageCount: (chatId: string) => [...chatKeys.all, "messageCount", chatId] as const,
+  memories: (chatId: string) => [...chatKeys.all, "memories", chatId] as const,
   group: (groupId: string) => [...chatKeys.all, "group", groupId] as const,
 };
 
@@ -90,6 +98,35 @@ export function useChatMessageCount(chatId: string | null) {
   });
 }
 
+export function useChatMemories(chatId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: chatKeys.memories(chatId ?? ""),
+    queryFn: () => api.get<ChatMemoryChunk[]>(`/chats/${chatId}/memories`),
+    enabled: !!chatId && enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useDeleteChatMemory(chatId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (memoryId: string) => api.delete(`/chats/${chatId}/memories/${memoryId}`),
+    onSuccess: () => {
+      if (chatId) qc.invalidateQueries({ queryKey: chatKeys.memories(chatId) });
+    },
+  });
+}
+
+export function useClearChatMemories(chatId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`/chats/${chatId}/memories`),
+    onSuccess: () => {
+      if (chatId) qc.invalidateQueries({ queryKey: chatKeys.memories(chatId) });
+    },
+  });
+}
+
 export function useChatGroup(groupId: string | null) {
   return useQuery({
     queryKey: chatKeys.group(groupId ?? ""),
@@ -128,9 +165,7 @@ export function useDeleteChat() {
       qc.setQueryData<Chat[]>(chatKeys.list(), (old) => old?.filter((c) => c.id !== id));
 
       if (deletedChat?.groupId) {
-        qc.setQueryData<Chat[]>(chatKeys.group(deletedChat.groupId), (old) =>
-          old?.filter((c) => c.id !== id),
-        );
+        qc.setQueryData<Chat[]>(chatKeys.group(deletedChat.groupId), (old) => old?.filter((c) => c.id !== id));
       }
 
       return { previous, deletedChat };

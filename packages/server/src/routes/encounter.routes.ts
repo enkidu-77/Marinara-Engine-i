@@ -414,7 +414,14 @@ export async function encounterRoutes(app: FastifyInstance) {
       if (!chat) return reply.status(404).send({ error: "Chat not found" });
 
       const { conn, baseUrl } = await resolveConnection(connections, connectionId, chat.connectionId);
-      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
+      const provider = createLLMProvider(
+        conn.provider,
+        baseUrl,
+        conn.apiKey,
+        conn.maxContext,
+        conn.openrouterProvider,
+        conn.maxTokensOverride,
+      );
 
       const characterIds: string[] = JSON.parse(chat.characterIds as string);
       const characterCtx = await buildCharacterContext(chars, characterIds);
@@ -473,7 +480,14 @@ export async function encounterRoutes(app: FastifyInstance) {
       if (!chat) return reply.status(404).send({ error: "Chat not found" });
 
       const { conn, baseUrl } = await resolveConnection(connections, connectionId, chat.connectionId);
-      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
+      const provider = createLLMProvider(
+        conn.provider,
+        baseUrl,
+        conn.apiKey,
+        conn.maxContext,
+        conn.openrouterProvider,
+        conn.maxTokensOverride,
+      );
 
       const characterIds: string[] = JSON.parse(chat.characterIds as string);
       const characterCtx = await buildCharacterContext(chars, characterIds);
@@ -564,7 +578,14 @@ export async function encounterRoutes(app: FastifyInstance) {
       if (!chat) return reply.status(404).send({ error: "Chat not found" });
 
       const { conn, baseUrl } = await resolveConnection(connections, connectionId, chat.connectionId);
-      const provider = createLLMProvider(conn.provider, baseUrl, conn.apiKey, conn.maxContext, conn.openrouterProvider, conn.maxTokensOverride);
+      const provider = createLLMProvider(
+        conn.provider,
+        baseUrl,
+        conn.apiKey,
+        conn.maxContext,
+        conn.openrouterProvider,
+        conn.maxTokensOverride,
+      );
 
       const characterIds: string[] = JSON.parse(chat.characterIds as string);
       const characterCtx = await buildCharacterContext(chars, characterIds);

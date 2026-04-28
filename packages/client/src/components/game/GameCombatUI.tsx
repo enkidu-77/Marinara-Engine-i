@@ -72,6 +72,8 @@ interface GameCombatUIProps {
   onCombatEnd: (outcome: "victory" | "defeat" | "flee", summary: CombatSummary) => void;
   /** GM narration to display alongside combat. */
   narration?: string;
+  /** Suggested sprite focus for the full-body overlay. */
+  onSpriteSuggestionChange?: (suggestion: { name: string; pose: string } | null) => void;
   /** Whether we're waiting for a GM response. */
   _isStreaming?: boolean;
 }
@@ -161,6 +163,7 @@ export function GameCombatUI({
   enemies: initialEnemies,
   onCombatEnd,
   narration,
+  onSpriteSuggestionChange,
 }: GameCombatUIProps) {
   // Combat state
   const [phase, setPhase] = useState<CombatPhase>("intro");
@@ -231,6 +234,56 @@ export function GameCombatUI({
   const activePlayer = party[activePlayerIndex] ?? null;
   const selectedSkill = activePlayer?.skills?.find((skill) => skill.id === selectedSkillId) ?? null;
   const selectingAllyTarget = selectedAction === "skill" && selectedSkill?.type === "heal";
+
+  const combatSpriteSuggestion = useMemo(() => {
+    if (phase === "victory") {
+      const celebrant = activePlayer ?? party.find((member) => member.hp > 0) ?? party[0] ?? null;
+      return celebrant ? { name: celebrant.name, pose: "victory" } : null;
+    }
+
+    if (phase === "defeat") {
+      const fallenMember = activePlayer ?? party[0] ?? null;
+      return fallenMember ? { name: fallenMember.name, pose: "hurt" } : null;
+    }
+
+    if (phase === "animating" && roundResult && animatingActionIndex >= 0) {
+      const action = roundResult.actions[animatingActionIndex] ?? null;
+      if (action) {
+        const attacker = allCombatants.find((combatant) => combatant.id === action.attackerId) ?? null;
+        const defender = allCombatants.find((combatant) => combatant.id === action.defenderId) ?? null;
+
+        if (attacker?.side === "player") {
+          return { name: attacker.name, pose: action.skillName ? "casting" : "attack" };
+        }
+        if (defender?.side === "player") {
+          return { name: defender.name, pose: action.isHeal ? "casting" : "hurt" };
+        }
+      }
+    }
+
+    if (activePlayer) {
+      if (phase === "resolving") {
+        if (selectedAction === "defend") return { name: activePlayer.name, pose: "defend" };
+        if (selectedAction === "skill") return { name: activePlayer.name, pose: "casting" };
+        if (selectedAction === "attack") return { name: activePlayer.name, pose: "attack" };
+      }
+
+      if (phase === "skill-select" || (phase === "target-select" && selectedAction === "skill")) {
+        return { name: activePlayer.name, pose: "casting" };
+      }
+
+      return { name: activePlayer.name, pose: "battle_stance" };
+    }
+
+    return null;
+  }, [activePlayer, allCombatants, animatingActionIndex, party, phase, roundResult, selectedAction]);
+
+  useEffect(() => {
+    onSpriteSuggestionChange?.(combatSpriteSuggestion);
+    return () => {
+      onSpriteSuggestionChange?.(null);
+    };
+  }, [combatSpriteSuggestion, onSpriteSuggestionChange]);
 
   // ── Play SFX helper ──
   const playSfx = useCallback(

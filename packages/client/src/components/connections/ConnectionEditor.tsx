@@ -13,6 +13,7 @@ import {
   useTestMessage,
   useTestImageGeneration,
   useFetchModels,
+  useSaveConnectionDefaults,
 } from "../../hooks/use-connections";
 import {
   ArrowLeft,
@@ -40,6 +41,13 @@ import { cn } from "../../lib/utils";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { DraftNumberInput } from "../ui/DraftNumberInput";
 import { HelpTooltip } from "../ui/HelpTooltip";
+import {
+  GenerationParametersFields,
+  ROLEPLAY_PARAMETER_DEFAULTS,
+  getEditableGenerationParameters,
+  parseEditableGenerationParameters,
+  type EditableGenerationParameters,
+} from "../ui/GenerationParametersEditor";
 import {
   PROVIDERS,
   MODEL_LISTS,
@@ -74,6 +82,7 @@ export function ConnectionEditor() {
   const testMessage = useTestMessage();
   const testImageGeneration = useTestImageGeneration();
   const fetchModels = useFetchModels();
+  const saveConnectionDefaults = useSaveConnectionDefaults();
   const { data: allConnections } = useConnections();
 
   const [dirty, setDirty] = useState(false);
@@ -102,6 +111,9 @@ export function ConnectionEditor() {
   const [localComfyuiWorkflow, setLocalComfyuiWorkflow] = useState("");
   const [localImageService, setLocalImageService] = useState<string | null>(null);
   const [localMaxTokensOverride, setLocalMaxTokensOverride] = useState<number | null>(null);
+  const [localDefaultParametersEnabled, setLocalDefaultParametersEnabled] = useState(false);
+  const [localDefaultParameters, setLocalDefaultParameters] =
+    useState<EditableGenerationParameters>(ROLEPLAY_PARAMETER_DEFAULTS);
 
   // Test results
   const [testResult, setTestResult] = useState<{ success: boolean; message: string; latencyMs: number } | null>(null);
@@ -196,6 +208,8 @@ export function ConnectionEditor() {
     setLocalComfyuiWorkflow((c.comfyuiWorkflow as string) ?? "");
     setLocalImageService(((c.imageService as string | null) ?? (c.imageGenerationSource as string | null)) || null);
     setLocalMaxTokensOverride(typeof c.maxTokensOverride === "number" ? (c.maxTokensOverride as number) : null);
+    setLocalDefaultParametersEnabled(!!parseEditableGenerationParameters(c.defaultParameters));
+    setLocalDefaultParameters(getEditableGenerationParameters(ROLEPLAY_PARAMETER_DEFAULTS, c.defaultParameters));
     setDirty(false);
     setSaveError(null);
     setTestResult(null);
@@ -322,6 +336,12 @@ export function ConnectionEditor() {
     }
     try {
       await updateConnection.mutateAsync(payload as { id: string } & Record<string, unknown>);
+      if (localProvider !== "image_generation") {
+        await saveConnectionDefaults.mutateAsync({
+          id: connectionDetailId,
+          params: localDefaultParametersEnabled ? (localDefaultParameters as unknown as Record<string, unknown>) : null,
+        });
+      }
       setDirty(false);
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 1500);
@@ -346,7 +366,10 @@ export function ConnectionEditor() {
     localComfyuiWorkflow,
     localImageService,
     localMaxTokensOverride,
+    localDefaultParametersEnabled,
+    localDefaultParameters,
     updateConnection,
+    saveConnectionDefaults,
   ]);
 
   const handleDelete = useCallback(async () => {
@@ -418,10 +441,24 @@ export function ConnectionEditor() {
     testImageGeneration.mutate(connectionDetailId, {
       onSuccess: (data) =>
         setImgTestResult(
-          data as { success: boolean; base64: string | null; mimeType: string | null; latencyMs: number; prompt: string; error?: string },
+          data as {
+            success: boolean;
+            base64: string | null;
+            mimeType: string | null;
+            latencyMs: number;
+            prompt: string;
+            error?: string;
+          },
         ),
       onError: (err) =>
-        setImgTestResult({ success: false, base64: null, mimeType: null, latencyMs: 0, prompt: "", error: err instanceof Error ? err.message : "Failed" }),
+        setImgTestResult({
+          success: false,
+          base64: null,
+          mimeType: null,
+          latencyMs: 0,
+          prompt: "",
+          error: err instanceof Error ? err.message : "Failed",
+        }),
     });
   }, [connectionDetailId, dirty, handleSave, testImageGeneration]);
 
@@ -532,7 +569,7 @@ export function ConnectionEditor() {
           )}
           <button
             onClick={handleSave}
-            disabled={updateConnection.isPending}
+            disabled={updateConnection.isPending || saveConnectionDefaults.isPending}
             className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-400 to-blue-500 px-4 py-2 text-xs font-medium text-white shadow-md transition-all hover:shadow-lg active:scale-[0.98] disabled:opacity-50"
           >
             <Save size="0.8125rem" /> <span className="max-md:hidden">Save</span>
@@ -644,9 +681,8 @@ export function ConnectionEditor() {
               <p className="flex items-start gap-1.5 text-[0.6875rem] text-sky-300">
                 <AlertCircle size="0.75rem" className="mt-px shrink-0" />
                 <span>
-                  Routes chat through your local <strong>Claude Code</strong> install so it bills against your
-                  Anthropic <strong>Pro / Max</strong> subscription instead of an API key. Prerequisites on the
-                  Marinara host:
+                  Routes chat through your local <strong>Claude Code</strong> install so it bills against your Anthropic{" "}
+                  <strong>Pro / Max</strong> subscription instead of an API key. Prerequisites on the Marinara host:
                 </span>
               </p>
               <ol className="mt-1.5 ml-4 list-decimal space-y-0.5 text-[0.625rem] text-[var(--muted-foreground)]">
@@ -1136,26 +1172,30 @@ export function ConnectionEditor() {
                   )}
                 </p>
               )}
-              {comfyWorkflowValidation && !comfyWorkflowValidation.parseError && comfyWorkflowValidation.missing.length > 0 && (
-                <p className="mt-1 flex items-start gap-1 text-[0.625rem] text-amber-400">
-                  <AlertCircle size="0.625rem" className="mt-px shrink-0" />
-                  <span>
-                    {comfyWorkflowValidation.missing.some((m) => m.critical) && (
-                      <><strong>%prompt%</strong> placeholder not found — prompts won&apos;t be injected. </>
-                    )}
-                    {comfyWorkflowValidation.missing.some((m) => !m.critical) && (
-                      <>
-                        Unused:{" "}
-                        {comfyWorkflowValidation.missing
-                          .filter((m) => !m.critical)
-                          .map((m) => m.label)
-                          .join(", ")}
-                        .
-                      </>
-                    )}
-                  </span>
-                </p>
-              )}
+              {comfyWorkflowValidation &&
+                !comfyWorkflowValidation.parseError &&
+                comfyWorkflowValidation.missing.length > 0 && (
+                  <p className="mt-1 flex items-start gap-1 text-[0.625rem] text-amber-400">
+                    <AlertCircle size="0.625rem" className="mt-px shrink-0" />
+                    <span>
+                      {comfyWorkflowValidation.missing.some((m) => m.critical) && (
+                        <>
+                          <strong>%prompt%</strong> placeholder not found — prompts won&apos;t be injected.{" "}
+                        </>
+                      )}
+                      {comfyWorkflowValidation.missing.some((m) => !m.critical) && (
+                        <>
+                          Unused:{" "}
+                          {comfyWorkflowValidation.missing
+                            .filter((m) => !m.critical)
+                            .map((m) => m.label)
+                            .join(", ")}
+                          .
+                        </>
+                      )}
+                    </span>
+                  </p>
+                )}
               <p className="text-[0.55rem] text-[var(--muted-foreground)] mt-1">
                 Export your workflow from ComfyUI using <strong>Save (API Format)</strong> in the menu. Placeholders
                 like <code>%prompt%</code> will be replaced at generation time.
@@ -1212,9 +1252,51 @@ export function ConnectionEditor() {
                 </span>
               </div>
               <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
-                Set to 0 or leave empty to disable. When set, no request to this connection will exceed this token
-                limit — including batched agent calls.
+                Set to 0 or leave empty to disable. When set, no request to this connection will exceed this token limit
+                — including batched agent calls.
               </p>
+            </FieldGroup>
+          )}
+
+          {/* ── Default Chat Parameters ── */}
+          {localProvider !== "image_generation" && (
+            <FieldGroup
+              label="Default Chat Parameters"
+              icon={<Zap size="0.875rem" className="text-purple-400" />}
+              help="Default generation settings for chats that use this connection. Individual chats can still override these in Chat Settings."
+            >
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl p-2 transition-colors hover:bg-[var(--secondary)]/50">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={localDefaultParametersEnabled}
+                    onChange={(e) => {
+                      setLocalDefaultParametersEnabled(e.target.checked);
+                      markDirty();
+                    }}
+                    className="peer sr-only"
+                  />
+                  <div className="h-5 w-9 rounded-full bg-[var(--border)] transition-colors peer-checked:bg-purple-400/70" />
+                  <div className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
+                </div>
+                <span className="text-sm">Use custom defaults for this connection</span>
+              </label>
+
+              {localDefaultParametersEnabled ? (
+                <div className="rounded-xl bg-[var(--secondary)]/40 p-3 ring-1 ring-[var(--border)]">
+                  <GenerationParametersFields
+                    value={localDefaultParameters}
+                    onChange={(next) => {
+                      setLocalDefaultParameters(next);
+                      markDirty();
+                    }}
+                  />
+                </div>
+              ) : (
+                <p className="rounded-xl bg-[var(--secondary)]/40 px-3 py-2 text-[0.625rem] text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
+                  This connection is using the mode defaults from conversation, roleplay, and game setup.
+                </p>
+              )}
             </FieldGroup>
           )}
 

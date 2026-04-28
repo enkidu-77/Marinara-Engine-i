@@ -52,6 +52,7 @@ import { BUILT_IN_AGENTS } from "@marinara-engine/shared";
 import { useTranslationStore } from "../../stores/translation.store";
 import { ttsService } from "../../lib/tts-service";
 import { useTTSConfig } from "../../hooks/use-tts";
+import { buildTTSMessageText, resolveTTSVoiceForSpeaker } from "../../lib/tts-dialogue";
 import { mirrorSpritePlacements, normalizeSpritePlacements } from "./sprite-placement";
 import type { CharacterMap, MessageSelectionToggle, MessageWithSwipes, PeekPromptData } from "./chat-area.types";
 import { RecentChats } from "./RecentChats";
@@ -382,9 +383,7 @@ export function ChatArea() {
   useEffect(() => {
     if (!chat?.id) return;
     const bg = chatMeta.background as string | null | undefined;
-    useUIStore
-      .getState()
-      .setChatBackground(bg ? `/api/backgrounds/file/${encodeURIComponent(bg)}` : null);
+    useUIStore.getState().setChatBackground(bg ? `/api/backgrounds/file/${encodeURIComponent(bg)}` : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat?.id]);
 
@@ -673,8 +672,13 @@ export function ChatArea() {
         const hasInput = currentInput ? currentInput.trim().length > 0 : false;
         await generate(
           guideGenerations && hasInput
-          ? { chatId: activeChatId, connectionId: null, regenerateMessageId: messageId, generationGuide: currentInput?.toString() }
-          : { chatId: activeChatId, connectionId: null, regenerateMessageId: messageId }
+            ? {
+                chatId: activeChatId,
+                connectionId: null,
+                regenerateMessageId: messageId,
+                generationGuide: currentInput?.toString(),
+              }
+            : { chatId: activeChatId, connectionId: null, regenerateMessageId: messageId },
         );
       } catch {
         // Error toast is shown by the generate hook
@@ -872,11 +876,7 @@ export function ChatArea() {
 
     const mode = chatModeRef.current;
     const shouldAutoplay =
-      mode === "roleplay" || mode === "visual_novel"
-        ? cfg.autoplayRP
-        : mode === "game"
-          ? cfg.autoplayGame
-          : cfg.autoplayConvo;
+      mode === "roleplay" || mode === "visual_novel" ? cfg.autoplayRP : mode === "game" ? false : cfg.autoplayConvo;
     if (!shouldAutoplay) return;
 
     const msgs = messagesRef.current ?? [];
@@ -890,8 +890,14 @@ export function ChatArea() {
     }
     if (!lastMsg?.content) return;
 
-    void ttsService.speak(lastMsg.content, lastMsg.id);
-  }, [isStreaming]);
+    const fallbackSpeaker = lastMsg.characterId ? characterMap.get(lastMsg.characterId)?.name : undefined;
+    const ttsText = buildTTSMessageText(lastMsg.content, cfg, fallbackSpeaker);
+    if (!ttsText) return;
+    const ttsVoice = resolveTTSVoiceForSpeaker(cfg, fallbackSpeaker, lastMsg.characterId);
+    if (cfg.source === "elevenlabs" && !ttsVoice) return;
+
+    void ttsService.speak(ttsText, lastMsg.id, { speaker: fallbackSpeaker, voice: ttsVoice });
+  }, [characterMap, isStreaming]);
 
   const newestMsgId = msgData?.pages[0]?.[msgData.pages[0].length - 1]?.id;
   const newestMsgSwipeIndex = msgData?.pages[0]?.[msgData.pages[0].length - 1]?.activeSwipeIndex;
@@ -1135,11 +1141,11 @@ export function ChatArea() {
 
               {/* Special thanks */}
               <p className="mt-1 max-w-xs text-center text-[0.625rem] leading-relaxed text-[var(--muted-foreground)]/40">
-                Special thanks to Cha1latte, Javedz678, Teuku, Shadota, Romu, Mm14141, MagicGoddess, John, Pwildani,
-                Romu, Felor, MuniMuni, Guybrush01, Joshellis625, LukaTheHero, Coxde, JorgeLTE, Seele The Seal King,
-                Loungemeister, Kale, Tabris, GREGOR OVECH, Coins, Tacoman, Jorge, Promansis, Kitsumiro, Sheep, Pod042,
-                Prolix, PlutoMayhem, Mezzeh, Kuc0, Exalted, Yang Best Girl, MidnightSleeper, Geechan, TheLonelyDevil,
-                Artus, and you!
+                Special thanks to Jorge, Cha1latte, Javedz678, Teuku, Shadota, Romu, Mm14141, MagicGoddess, John,
+                Pwildani, Romu, Felor, MuniMuni, Guybrush01, Joshellis625, LukaTheHero, Coxde, JorgeLTE, Seele The Seal
+                King, Loungemeister, Kale, Tabris, GREGOR OVECH, Coins, Tacoman, Jorge, Promansis, Kitsumiro, Sheep,
+                Pod042, Prolix, PlutoMayhem, Mezzeh, Kuc0, Exalted, Yang Best Girl, MidnightSleeper, Geechan,
+                TheLonelyDevil, Artus, and you!
               </p>
 
               {/* Restart tutorial */}
@@ -1220,6 +1226,7 @@ export function ChatArea() {
                 name: display.name,
                 comment: display.comment,
                 avatarUrl: c.avatarPath ?? undefined,
+                avatarCrop: parsed.extensions?.avatarCrop || null,
                 description: parsed.description ?? "",
                 personality: parsed.personality ?? "",
                 backstory: parsed.extensions?.backstory ?? "",

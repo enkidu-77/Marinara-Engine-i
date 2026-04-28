@@ -413,10 +413,7 @@ function WorldInfoButton({ chatId }: { chatId: string | null }) {
               onTouchStart={(e) => e.stopPropagation()}
             >
               <div className="absolute inset-0 bg-black/30" onClick={() => setOpen(false)} />
-              <div
-                className={PANEL_CONTAINER}
-                onClick={(e) => e.stopPropagation()}
-              >
+              <div className={PANEL_CONTAINER} onClick={(e) => e.stopPropagation()}>
                 <Suspense
                   fallback={
                     <div className="flex items-center gap-2 py-4 text-xs text-[var(--muted-foreground)]">
@@ -503,10 +500,7 @@ function AuthorNotesButton({ chatId, chatMeta }: { chatId: string | null; chatMe
               onTouchStart={(e) => e.stopPropagation()}
             >
               <div className="absolute inset-0 bg-black/30" onClick={() => setOpen(false)} />
-              <div
-                className={PANEL_CONTAINER}
-                onClick={(e) => e.stopPropagation()}
-              >
+              <div className={PANEL_CONTAINER} onClick={(e) => e.stopPropagation()}>
                 <Suspense
                   fallback={
                     <div className="flex items-center gap-2 py-4 text-xs text-[var(--muted-foreground)]">
@@ -1126,7 +1120,12 @@ export function ChatRoleplaySurface({
                     chatCharIds.length > 1
                       ? chatCharIds.map((id) => {
                           const info = characterMap.get(id);
-                          return { id, name: info?.name ?? "Unknown", avatarUrl: info?.avatarUrl ?? null };
+                          return {
+                            id,
+                            name: info?.name ?? "Unknown",
+                            avatarUrl: info?.avatarUrl ?? null,
+                            avatarCrop: info?.avatarCrop ?? null,
+                          };
                         })
                       : undefined
                   }
