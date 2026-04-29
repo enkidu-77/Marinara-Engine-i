@@ -122,6 +122,14 @@ interface GameSegmentVoiceRequest {
   chunks: string[];
 }
 
+type GameSideLine = PartyDialogueLine & {
+  voiceSourceMessageId?: string | null;
+  voiceSourceSegmentIndex?: number | null;
+  voiceSourceRole?: Message["role"] | null;
+};
+
+const EMPTY_GAME_SIDE_LINES: GameSideLine[] = [];
+
 interface GameVoiceAudioJob {
   cacheKey: string;
   textCacheKey: string;
@@ -129,6 +137,12 @@ interface GameVoiceAudioJob {
   speaker?: string;
   tone?: string;
   voice?: string;
+}
+
+interface GameVoiceEntryPlan {
+  key: string;
+  audioJobs: GameVoiceAudioJob[];
+  controller: AbortController;
 }
 
 interface GameNarrationProps {
@@ -326,6 +340,7 @@ function buildVoiceConfigSignature(config?: TTSConfig | null): string {
     JSON.stringify(config.npcDefaultMaleVoices ?? []),
     JSON.stringify(config.npcDefaultFemaleVoices ?? []),
     config.speed,
+    config.elevenLabsStability,
     config.dialogueOnly ? "dialogue" : "all-text",
     config.dialogueScope,
     config.dialogueCharacterName,
@@ -341,6 +356,7 @@ function buildVoiceLineTextCacheKey(
     config.baseUrl,
     config.model,
     config.speed,
+    config.elevenLabsStability,
     job.voice ?? "",
     job.speaker ?? "",
     job.tone ?? "",
@@ -353,12 +369,37 @@ function buildVoiceLineSegmentCacheKey(segmentVoiceKey: string, jobIndex: number
   return `game-voice-line-v2:${segmentVoiceKey}:${jobIndex}`;
 }
 
+function buildGameVoiceAudioJobs(
+  key: string,
+  requests: GameSegmentVoiceRequest[],
+  config: TTSConfig,
+): GameVoiceAudioJob[] {
+  let voiceJobIndex = 0;
+  return requests.flatMap((request) =>
+    request.chunks.map((chunk) => {
+      const jobIndex = voiceJobIndex;
+      voiceJobIndex += 1;
+      const job = {
+        chunk,
+        speaker: request.speaker,
+        tone: request.tone,
+        voice: request.voice,
+      };
+      return {
+        ...job,
+        cacheKey: buildVoiceLineSegmentCacheKey(key, jobIndex),
+        textCacheKey: buildVoiceLineTextCacheKey(config, job),
+      };
+    }),
+  );
+}
+
 function findNpcVoiceHint(speaker: string | null | undefined, gameNpcs: GameNpc[]) {
   const normalizedSpeaker = speaker?.trim().toLowerCase();
   if (!normalizedSpeaker) return null;
   const npc = gameNpcs.find((candidate) => candidate.name.trim().toLowerCase() === normalizedSpeaker);
   if (!npc) return null;
-  return { name: npc.name, description: npc.description, notes: npc.notes };
+  return { name: npc.name, description: npc.description, gender: npc.gender, pronouns: npc.pronouns, notes: npc.notes };
 }
 
 function getGameSegmentVoiceRequest(
@@ -406,6 +447,22 @@ function getGameSegmentVoiceKeyForRequests(
 ): string | null {
   if (!segment.sourceMessageId || segment.sourceSegmentIndex == null || requests.length === 0) return null;
   return `${segment.sourceMessageId}:${segment.sourceSegmentIndex}:${hashVoiceKey(configSignature)}`;
+}
+
+function getGameSideLineVoiceKeyForRequests(
+  segment: NarrationSegment,
+  line: GameSideLine,
+  sideIndex: number,
+  configSignature: string,
+  requests: GameSegmentVoiceRequest[],
+): string | null {
+  if (requests.length === 0) return null;
+  const sourceMessageId = line.voiceSourceMessageId ?? segment.sourceMessageId;
+  const sourceSegmentIndex = line.voiceSourceSegmentIndex ?? segment.sourceSegmentIndex;
+  if (!sourceMessageId || sourceSegmentIndex == null) return null;
+
+  const suffix = line.voiceSourceSegmentIndex == null ? `:side:${sideIndex}` : "";
+  return `${sourceMessageId}:${sourceSegmentIndex}${suffix}:${hashVoiceKey(configSignature)}`;
 }
 
 function withSegmentSource(
@@ -558,7 +615,9 @@ export function GameNarration({
   const gameVoicePendingRef = useRef<Map<string, AbortController>>(new Map());
   const gameVoiceAudioRef = useRef<HTMLAudioElement | null>(null);
   const gameVoiceSequenceRef = useRef(0);
+  const gameVoiceGenerationTailRef = useRef<Promise<void>>(Promise.resolve());
   const lastAutoPlayedVoiceKeyRef = useRef<string | null>(null);
+  const lastAutoPlayedSideVoiceGroupRef = useRef<string | null>(null);
 
   // Clear edit state when the active segment changes
   useEffect(() => {
@@ -933,7 +992,7 @@ export function GameNarration({
   // Map segment index → side/extra lines that should appear with it as overlay boxes.
   // Sources: inline GM party lines (from parseNarrationSegments) + party-chat side lines.
   const sideLineMap = useMemo(() => {
-    const map = new Map<number, PartyDialogueLine[]>();
+    const map = new Map<number, GameSideLine[]>();
 
     const userName = personaInfo?.name || "You";
     const subMacros = (text: string, speaker: string | null): string =>
@@ -963,6 +1022,9 @@ export function GameNarration({
             content: subMacros(seg.content, seg.speaker ?? null),
             expression: seg.sprite,
             target: seg.whisperTarget,
+            voiceSourceMessageId: latestAssistant.id,
+            voiceSourceSegmentIndex: rawIndex,
+            voiceSourceRole: latestAssistant.role,
           });
           map.set(lastMainIdx, arr);
         } else {
@@ -998,6 +1060,11 @@ export function GameNarration({
             ...line,
             character: editedCharacter,
             content: subMacros(editedContent, editedCharacter),
+            voiceSourceMessageId: partyChatMessageId,
+            voiceSourceSegmentIndex: partySegmentIndex,
+            voiceSourceRole: partyChatMessageId
+              ? (sourceMessagesById.get(partyChatMessageId)?.role ?? "assistant")
+              : null,
           });
           map.set(lastPartySegIdx, arr);
           partySegmentIndex += 1;
@@ -1026,6 +1093,7 @@ export function GameNarration({
     segmentEdits,
     segments,
     speakerColors,
+    sourceMessagesById,
   ]);
 
   const active = segments[activeIndex] ?? null;
@@ -1048,24 +1116,45 @@ export function GameNarration({
     setGameVoicePlayingKey(null);
   }, []);
 
-  const playGameVoiceKey = useCallback(
-    (key: string) => {
-      const entry = gameVoiceCacheRef.current.get(key);
-      if (!entry || entry.status !== "ready" || entry.urls.length === 0) return;
+  const playGameVoiceKeys = useCallback(
+    (keys: string[]) => {
+      const playableKeys = keys.filter((key) => {
+        const entry = gameVoiceCacheRef.current.get(key);
+        return entry?.status === "ready" && entry.urls.length > 0;
+      });
+      if (playableKeys.length === 0) return;
 
       stopGameVoicePlayback();
       const sequence = ++gameVoiceSequenceRef.current;
+      let keyIndex = 0;
       let urlIndex = 0;
-      setGameVoicePlayingKey(key);
 
       const playNext = () => {
         if (gameVoiceSequenceRef.current !== sequence) return;
-        const url = entry.urls[urlIndex];
-        if (!url) {
+        const key = playableKeys[keyIndex];
+        if (!key) {
           setGameVoicePlayingKey(null);
+          gameVoiceAudioRef.current = null;
           return;
         }
 
+        const entry = gameVoiceCacheRef.current.get(key);
+        if (!entry || entry.status !== "ready" || entry.urls.length === 0) {
+          keyIndex += 1;
+          urlIndex = 0;
+          playNext();
+          return;
+        }
+
+        const url = entry.urls[urlIndex];
+        if (!url) {
+          keyIndex += 1;
+          urlIndex = 0;
+          playNext();
+          return;
+        }
+
+        setGameVoicePlayingKey(key);
         const audio = new Audio(url);
         audio.volume = normalizedGameVoiceVolume;
         audio.muted = normalizedGameVoiceVolume <= 0;
@@ -1092,6 +1181,8 @@ export function GameNarration({
     [normalizedGameVoiceVolume, stopGameVoicePlayback],
   );
 
+  const playGameVoiceKey = useCallback((key: string) => playGameVoiceKeys([key]), [playGameVoiceKeys]);
+
   useEffect(() => {
     if (!gameVoiceAudioRef.current) return;
     gameVoiceAudioRef.current.volume = normalizedGameVoiceVolume;
@@ -1109,15 +1200,6 @@ export function GameNarration({
     [gameVoicePlayingKey, playGameVoiceKey, stopGameVoicePlayback],
   );
 
-  const sideLinesBySegmentId = useMemo(() => {
-    const map = new Map<string, PartyDialogueLine[]>();
-    for (const [index, lines] of sideLineMap.entries()) {
-      const segment = segments[index];
-      if (segment && lines.length > 0) map.set(segment.id, lines);
-    }
-    return map;
-  }, [segments, sideLineMap]);
-
   const getVoiceRequestsForSegment = useCallback(
     (segment: NarrationSegment): GameSegmentVoiceRequest[] => {
       if (!ttsConfig) return [];
@@ -1126,25 +1208,30 @@ export function GameNarration({
       const baseRequest = getGameSegmentVoiceRequest(segment, ttsConfig, gameNpcs);
       if (baseRequest) requests.push(baseRequest);
 
-      const sideLines = sideLinesBySegmentId.get(segment.id) ?? [];
-      for (const [index, line] of sideLines.entries()) {
-        const sideSegment: NarrationSegment = {
-          id: `${segment.id}-side-voice-${index}`,
-          type: "dialogue",
-          speaker: line.character,
-          sprite: line.expression,
-          content: line.content,
-          partyType: line.type,
-          whisperTarget: line.target,
-          sourceRole: "assistant",
-        };
-        const sideRequest = getGameSegmentVoiceRequest(sideSegment, ttsConfig, gameNpcs);
-        if (sideRequest) requests.push(sideRequest);
-      }
-
       return requests;
     },
-    [gameNpcs, sideLinesBySegmentId, ttsConfig],
+    [gameNpcs, ttsConfig],
+  );
+
+  const getVoiceRequestForSideLine = useCallback(
+    (segment: NarrationSegment, line: GameSideLine, index: number): GameSegmentVoiceRequest[] => {
+      if (!ttsConfig) return [];
+      const sideSegment: NarrationSegment = {
+        id: `${segment.id}-side-voice-${index}`,
+        type: "dialogue",
+        speaker: line.character,
+        sprite: line.expression,
+        content: line.content,
+        partyType: line.type,
+        whisperTarget: line.target,
+        sourceMessageId: line.voiceSourceMessageId ?? segment.sourceMessageId,
+        sourceSegmentIndex: line.voiceSourceSegmentIndex ?? segment.sourceSegmentIndex,
+        sourceRole: line.voiceSourceRole ?? "assistant",
+      };
+      const request = getGameSegmentVoiceRequest(sideSegment, ttsConfig, gameNpcs);
+      return request ? [request] : [];
+    },
+    [gameNpcs, ttsConfig],
   );
 
   const getVoiceKeyForSegment = useCallback(
@@ -1153,6 +1240,15 @@ export function GameNarration({
       return getGameSegmentVoiceKeyForRequests(segment, gameVoiceConfigSignature, getVoiceRequestsForSegment(segment));
     },
     [gameVoiceConfigSignature, getVoiceRequestsForSegment, ttsConfig],
+  );
+
+  const getVoiceKeyForSideLine = useCallback(
+    (segment: NarrationSegment, line: GameSideLine, index: number) => {
+      if (!ttsConfig) return null;
+      const requests = getVoiceRequestForSideLine(segment, line, index);
+      return getGameSideLineVoiceKeyForRequests(segment, line, index, gameVoiceConfigSignature, requests);
+    },
+    [gameVoiceConfigSignature, getVoiceRequestForSideLine, ttsConfig],
   );
 
   // When a segment's content changes in-place (user edited it), snap visibleChars
@@ -1584,30 +1680,11 @@ export function GameNarration({
   useEffect(() => {
     if (!ttsConfig || !gameVoiceEnabled || isStreaming || generationFailed) return;
 
-    for (const segment of segments) {
-      const requests = getVoiceRequestsForSegment(segment);
-      const key = getGameSegmentVoiceKeyForRequests(segment, gameVoiceConfigSignature, requests);
-      if (!key || gameVoiceCacheRef.current.has(key) || gameVoicePendingRef.current.has(key)) continue;
-
-      let voiceJobIndex = 0;
-      const audioJobs: GameVoiceAudioJob[] = requests.flatMap((request) =>
-        request.chunks.map((chunk) => {
-          const jobIndex = voiceJobIndex;
-          voiceJobIndex += 1;
-          const job = {
-            chunk,
-            speaker: request.speaker,
-            tone: request.tone,
-            voice: request.voice,
-          };
-          return {
-            ...job,
-            cacheKey: buildVoiceLineSegmentCacheKey(key, jobIndex),
-            textCacheKey: buildVoiceLineTextCacheKey(ttsConfig, job),
-          };
-        }),
-      );
-      if (audioJobs.length === 0) continue;
+    const plans: GameVoiceEntryPlan[] = [];
+    const queuePlan = (key: string | null, requests: GameSegmentVoiceRequest[]) => {
+      if (!key || gameVoiceCacheRef.current.has(key) || gameVoicePendingRef.current.has(key)) return;
+      const audioJobs = buildGameVoiceAudioJobs(key, requests, ttsConfig);
+      if (audioJobs.length === 0) return;
 
       const controller = new AbortController();
       gameVoicePendingRef.current.set(key, controller);
@@ -1618,68 +1695,115 @@ export function GameNarration({
         tone: audioJobs[0]?.tone,
         voice: audioJobs[0]?.voice,
       });
-      setGameVoiceVersion((version) => version + 1);
+      plans.push({ key, audioJobs, controller });
+    };
 
-      void Promise.all(
-        audioJobs.map((job) =>
-          getOrCreateCachedTTSAudioBlob(
-            job.cacheKey,
-            () =>
-              ttsService.generateAudio(job.chunk, {
-                speaker: job.speaker,
-                tone: job.tone,
-                voice: job.voice,
-              }),
-            [job.textCacheKey],
-          ),
-        ),
-      )
-        .then((blobs) => {
+    for (const [segmentIndex, segment] of segments.entries()) {
+      const requests = getVoiceRequestsForSegment(segment);
+      queuePlan(getGameSegmentVoiceKeyForRequests(segment, gameVoiceConfigSignature, requests), requests);
+
+      const sideLines = sideLineMap.get(segmentIndex) ?? [];
+      for (const [sideIndex, line] of sideLines.entries()) {
+        const sideRequests = getVoiceRequestForSideLine(segment, line, sideIndex);
+        queuePlan(
+          getGameSideLineVoiceKeyForRequests(segment, line, sideIndex, gameVoiceConfigSignature, sideRequests),
+          sideRequests,
+        );
+      }
+    }
+
+    if (plans.length === 0) return;
+    setGameVoiceVersion((version) => version + 1);
+
+    const runPlans = async () => {
+      for (const plan of plans) {
+        const { key, audioJobs, controller } = plan;
+        if (controller.signal.aborted) continue;
+
+        const blobs: Blob[] = [];
+        for (const job of audioJobs) {
+          if (controller.signal.aborted) break;
+          try {
+            const blob = await getOrCreateCachedTTSAudioBlob(
+              job.cacheKey,
+              () =>
+                ttsService.generateAudio(job.chunk, {
+                  speaker: job.speaker,
+                  tone: job.tone,
+                  voice: job.voice,
+                  signal: controller.signal,
+                }),
+              [job.textCacheKey],
+            );
+            blobs.push(blob);
+          } catch (err) {
+            if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) break;
+            console.warn("[game-tts] Failed to generate voice line", err);
+          }
+        }
+
+        try {
           if (controller.signal.aborted) return;
           const urls = blobs.map((blob) => URL.createObjectURL(blob));
-          gameVoiceCacheRef.current.set(key, {
-            status: "ready",
-            chunks: audioJobs.map((job) => job.chunk),
-            speaker: audioJobs[0]?.speaker,
-            tone: audioJobs[0]?.tone,
-            voice: audioJobs[0]?.voice,
-            urls,
-          });
-        })
-        .catch(() => {
-          if (controller.signal.aborted) return;
-          gameVoiceCacheRef.current.set(key, {
-            status: "error",
-            chunks: audioJobs.map((job) => job.chunk),
-            speaker: audioJobs[0]?.speaker,
-            tone: audioJobs[0]?.tone,
-            voice: audioJobs[0]?.voice,
-          });
-        })
-        .finally(() => {
+          if (urls.length > 0) {
+            gameVoiceCacheRef.current.set(key, {
+              status: "ready",
+              chunks: audioJobs.map((job) => job.chunk),
+              speaker: audioJobs[0]?.speaker,
+              tone: audioJobs[0]?.tone,
+              voice: audioJobs[0]?.voice,
+              urls,
+            });
+          } else {
+            gameVoiceCacheRef.current.set(key, {
+              status: "error",
+              chunks: audioJobs.map((job) => job.chunk),
+              speaker: audioJobs[0]?.speaker,
+              tone: audioJobs[0]?.tone,
+              voice: audioJobs[0]?.voice,
+            });
+          }
+        } finally {
           gameVoicePendingRef.current.delete(key);
           if (!controller.signal.aborted) {
             setGameVoiceVersion((version) => version + 1);
           }
-        });
-    }
+        }
+      }
+    };
+
+    gameVoiceGenerationTailRef.current = gameVoiceGenerationTailRef.current.catch(() => undefined).then(runPlans);
+    void gameVoiceGenerationTailRef.current;
   }, [
     gameNpcs,
     gameVoiceConfigSignature,
     gameVoiceEnabled,
     generationFailed,
+    getVoiceRequestForSideLine,
     getVoiceRequestsForSegment,
     isStreaming,
+    sideLineMap,
     segments,
     ttsConfig,
   ]);
 
   const activeVoiceKey = active ? getVoiceKeyForSegment(active) : null;
+  const activeSideLines = useMemo(
+    () => (active ? (sideLineMap.get(activeIndex) ?? EMPTY_GAME_SIDE_LINES) : EMPTY_GAME_SIDE_LINES),
+    [active, activeIndex, sideLineMap],
+  );
+  const activeSideVoiceKeys = useMemo(() => {
+    if (!active) return [];
+    return activeSideLines
+      .map((line, index) => getVoiceKeyForSideLine(active, line, index))
+      .filter((key): key is string => Boolean(key));
+  }, [active, activeSideLines, getVoiceKeyForSideLine]);
 
   useEffect(() => {
     lastAutoPlayedVoiceKeyRef.current = null;
+    lastAutoPlayedSideVoiceGroupRef.current = null;
     stopGameVoicePlayback();
-  }, [activeVoiceKey, stopGameVoicePlayback]);
+  }, [activeIndex, activeVoiceKey, stopGameVoicePlayback]);
 
   useEffect(() => {
     if (gameVoiceEnabled && !isStreaming && !scenePreparing && !directionsActive && !autoPlayBlocked) return;
@@ -1702,6 +1826,42 @@ export function GameNarration({
     gameVoiceVersion,
     isStreaming,
     playGameVoiceKey,
+    scenePreparing,
+  ]);
+
+  useEffect(() => {
+    if (!gameVoiceEnabled || activeSideVoiceKeys.length === 0) return;
+    if (!doneTyping || isStreaming || scenePreparing || directionsActive || autoPlayBlocked) return;
+
+    const sideVoiceGroupKey = activeSideVoiceKeys.join("|");
+    if (lastAutoPlayedSideVoiceGroupRef.current === sideVoiceGroupKey) return;
+
+    if (activeVoiceKey) {
+      const parentEntry = gameVoiceCacheRef.current.get(activeVoiceKey);
+      if (!parentEntry || parentEntry.status === "loading") return;
+      if (parentEntry.status === "ready") {
+        if (lastAutoPlayedVoiceKeyRef.current !== activeVoiceKey) return;
+        if (gameVoicePlayingKey === activeVoiceKey) return;
+      }
+    }
+
+    const entries = activeSideVoiceKeys.map((key) => gameVoiceCacheRef.current.get(key));
+    if (entries.some((entry) => !entry || entry.status === "loading")) return;
+
+    const playableKeys = activeSideVoiceKeys.filter((key, index) => entries[index]?.status === "ready");
+    lastAutoPlayedSideVoiceGroupRef.current = sideVoiceGroupKey;
+    if (playableKeys.length > 0) playGameVoiceKeys(playableKeys);
+  }, [
+    activeVoiceKey,
+    activeSideVoiceKeys,
+    autoPlayBlocked,
+    directionsActive,
+    doneTyping,
+    gameVoiceEnabled,
+    gameVoicePlayingKey,
+    gameVoiceVersion,
+    isStreaming,
+    playGameVoiceKeys,
     scenePreparing,
   ]);
 
@@ -1897,9 +2057,6 @@ export function GameNarration({
     // Fall back to base avatar
     return findNamedMapValue(speakerAvatarInfos, active.speaker) ?? null;
   }, [active, speakerAvatarInfos, spriteMap]);
-
-  // Side lines paired with the active segment
-  const activeSideLines = sideLineMap.get(activeIndex) ?? [];
 
   const NARRATION_ACTION_BTN =
     "flex items-center gap-1.5 rounded-lg bg-[var(--muted)]/30 px-3 py-1.5 text-xs text-[var(--foreground)]/70 transition-colors hover:bg-[var(--muted)]/50 hover:text-[var(--foreground)] dark:bg-white/10 dark:text-white/70 dark:hover:bg-white/20 dark:hover:text-white";
@@ -2613,7 +2770,7 @@ export function GameNarration({
                             }
                           }}
                           className={cn(
-                            "absolute top-1.5 rounded p-1 text-white/20 opacity-0 transition-all group-hover/logseg:opacity-100 hover:bg-red-500/20 hover:text-red-400",
+                            "absolute top-1.5 z-10 rounded p-1 text-white/45 opacity-100 transition-all hover:bg-red-500/20 hover:text-red-400 md:text-white/20 md:opacity-0 md:group-hover/logseg:opacity-100",
                             canEdit ? "right-7" : "right-1.5",
                           )}
                           title={canDeleteThisSegment ? "Delete segment" : "Delete message"}
@@ -2693,7 +2850,7 @@ export function GameNarration({
                                   });
                                 })()
                               }
-                              className="absolute right-1.5 top-1.5 rounded p-1 text-white/20 opacity-0 transition-all group-hover/logseg:opacity-100 hover:bg-white/10 hover:text-white/60"
+                              className="absolute right-1.5 top-1.5 z-10 rounded p-1 text-white/45 opacity-100 transition-all hover:bg-white/10 hover:text-white/60 md:text-white/20 md:opacity-0 md:group-hover/logseg:opacity-100"
                               title="Edit"
                             >
                               <Pencil size={11} />

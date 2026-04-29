@@ -2188,6 +2188,8 @@ export async function gameRoutes(app: FastifyInstance) {
           emoji: (n.emoji as string) || "🧑",
           description: (n.description as string) || "",
           descriptionSource: n.description ? "model" : undefined,
+          gender: typeof n.gender === "string" ? n.gender : null,
+          pronouns: typeof n.pronouns === "string" ? n.pronouns : null,
           location: (n.location as string) || "Unknown",
           reputation: (n.reputation as number) || 0,
           met: false,

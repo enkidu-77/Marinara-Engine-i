@@ -550,9 +550,9 @@ export function GameCombatUI({
   // ── Render ──
 
   return (
-    <div className="absolute inset-0 z-30 flex flex-col overflow-hidden">
+    <div className="absolute inset-0 z-30 flex min-h-0 flex-col overflow-hidden">
       {/* ── Battle scene ── */}
-      <div className="relative flex flex-1 flex-col">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Intro overlay */}
         {phase === "intro" && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 animate-in fade-in duration-300">
@@ -566,7 +566,7 @@ export function GameCombatUI({
 
         {/* Turn order bar */}
         {turnOrder.length > 0 && phase !== "intro" && (
-          <div className="absolute left-0 right-0 top-0 z-20 flex items-center gap-1 bg-black/60 px-3 py-1.5 backdrop-blur-sm">
+          <div className="absolute left-0 right-0 top-0 z-20 flex items-center gap-1 overflow-x-auto bg-black/60 px-3 py-1.5 backdrop-blur-sm">
             <span className="mr-2 text-[0.6rem] font-semibold uppercase tracking-widest text-white/50">Turn</span>
             {turnOrder.map((entry, i) => {
               const isParty = party.some((p) => p.id === entry.id);
@@ -601,7 +601,7 @@ export function GameCombatUI({
         )}
 
         {/* ── Enemy area (top section) ── */}
-        <div className="relative flex flex-1 items-start justify-center gap-6 px-6 pt-14">
+        <div className="relative flex min-h-0 flex-1 items-start justify-center gap-3 overflow-hidden px-3 pt-14 sm:gap-6 sm:px-6">
           {enemies.map((enemy) => (
             <CombatantCard
               key={enemy.id}
@@ -616,7 +616,7 @@ export function GameCombatUI({
         </div>
 
         {/* ── Party area (bottom section) ── */}
-        <div className="relative flex items-end justify-center gap-6 px-6 pb-4">
+        <div className="relative flex shrink-0 items-end justify-center gap-3 overflow-hidden px-3 pb-3 sm:gap-6 sm:px-6 sm:pb-4">
           {party.map((member, i) => (
             <CombatantCard
               key={member.id}
@@ -637,7 +637,7 @@ export function GameCombatUI({
       </div>
 
       {/* ── Bottom panel: Action menu / Narration ── */}
-      <div className="relative z-20 border-t border-white/10 bg-gradient-to-t from-black/90 to-black/70 backdrop-blur-md">
+      <div className="relative z-20 max-h-[52svh] shrink-0 overflow-y-auto border-t border-white/10 bg-gradient-to-t from-black/90 to-black/70 backdrop-blur-md sm:max-h-none">
         {/* Resolving / animating state */}
         {(phase === "resolving" || phase === "animating") && (
           <div className="flex flex-col gap-2 px-4 py-3">
@@ -781,7 +781,7 @@ export function GameCombatUI({
 
         {/* Victory overlay */}
         {phase === "victory" && (
-          <div className="flex flex-col items-center gap-3 px-4 py-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="flex flex-col items-center gap-3 px-3 py-4 animate-in fade-in slide-in-from-bottom-4 duration-500 sm:px-4 sm:py-6">
             <Trophy className="h-8 w-8 text-amber-400" />
             <AnimatedText html="{bounce:Victory!}" className="text-lg font-bold text-amber-200" />
             {loot && loot.length > 0 && (
@@ -804,7 +804,7 @@ export function GameCombatUI({
 
         {/* Defeat overlay */}
         {phase === "defeat" && (
-          <div className="flex flex-col items-center gap-3 px-4 py-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="flex flex-col items-center gap-3 px-3 py-4 animate-in fade-in slide-in-from-bottom-4 duration-500 sm:px-4 sm:py-6">
             <SkullIcon className="h-8 w-8 text-red-400" />
             <AnimatedText html="{shake:Defeat...}" className="text-lg font-bold text-red-200" />
             <AnimatedText html="{pulse:Your party has fallen.}" className="text-xs text-white/50" />

@@ -29,6 +29,8 @@ export const ttsConfigSchema = z.object({
   model: z.string().default("tts-1"),
   /** 0.25 – 4.0 */
   speed: z.number().min(0.25).max(4.0).default(1.0),
+  /** ElevenLabs only: 0.0 = more expressive/creative, 1.0 = more stable/robust */
+  elevenLabsStability: z.number().min(0).max(1).default(0.5),
   voiceMode: ttsVoiceModeSchema.default("single"),
   voiceAssignments: z.array(ttsVoiceAssignmentSchema).default([]),
   npcDefaultVoicesEnabled: z.boolean().default(false),

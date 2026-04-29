@@ -1367,11 +1367,13 @@ export function GameSurface({
     label: string;
   } | null>(null);
   const [viewedMapId, setViewedMapId] = useState<string | null>(null);
+  const [startGameRequested, setStartGameRequested] = useState(false);
   const [startSessionRequested, setStartSessionRequested] = useState(false);
   const [activeReadable, setActiveReadable] = useState<JournalReadable | null>(null);
   const readableQueueRef = useRef<JournalReadable[]>([]);
   const recentMusicHistoryRef = useRef<string[]>(normalizeRecentMusicHistory(chatMeta.gameRecentMusic));
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startGameGuardRef = useRef(false);
   const startSessionGuardRef = useRef(false);
   const processedPartyChangeCommandsRef = useRef<Set<string>>(new Set());
   const appliedCombatStatusMessageIdsRef = useRef<Set<string>>(new Set());
@@ -1501,6 +1503,8 @@ export function GameSurface({
   const mobileVolumePopoverRef = useRef<HTMLDivElement>(null);
   const retryMenuRef = useRef<HTMLDivElement>(null);
   const hudSurfaceRef = useRef<HTMLDivElement>(null);
+  const compactHudWidgetsRef = useRef(compactHudWidgets);
+  const compactHudReleaseWidthRef = useRef<number | null>(null);
   const lastProcessedMsgRef = useRef<string | null>(null);
   const weatherMsgRef = useRef<string | null>(null);
   const sceneAnalysisTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -4877,9 +4881,17 @@ export function GameSurface({
 
   useEffect(() => {
     if (combatUiActive || normalizedWidgets.length === 0) {
+      compactHudWidgetsRef.current = false;
+      compactHudReleaseWidthRef.current = null;
       setCompactHudWidgets(false);
       return;
     }
+
+    const setCompactLayout = (nextCompact: boolean) => {
+      if (compactHudWidgetsRef.current === nextCompact) return;
+      compactHudWidgetsRef.current = nextCompact;
+      setCompactHudWidgets(nextCompact);
+    };
 
     const updateWidgetLayout = () => {
       const surface = hudSurfaceRef.current;
@@ -4891,6 +4903,7 @@ export function GameSurface({
       const leftRail = surface.querySelector<HTMLElement>('[data-game-widget-rail="left"]');
       const rightRail = surface.querySelector<HTMLElement>('[data-game-widget-rail="right"]');
       const buffer = 8;
+      const currentCompact = compactHudWidgetsRef.current;
 
       const measuredOverlap =
         !!dialogueRect &&
@@ -4901,26 +4914,48 @@ export function GameSurface({
       const widgetRailWidth = 176;
       const sideInsets = 24;
       const estimatedOverlap = surfaceRect.width < estimatedDialogueWidth + widgetRailWidth * 2 + sideInsets + buffer;
-      const nextCompact = surfaceRect.width < 768 || measuredOverlap || estimatedOverlap;
+      const measuredOverlapWidth = measuredOverlap ? Math.ceil(surfaceRect.width + 80) : null;
+      if (measuredOverlapWidth) {
+        compactHudReleaseWidthRef.current = Math.max(compactHudReleaseWidthRef.current ?? 0, measuredOverlapWidth);
+      }
 
-      setCompactHudWidgets((current) => (current === nextCompact ? current : nextCompact));
+      const heldByPreviousOverlap =
+        currentCompact &&
+        compactHudReleaseWidthRef.current != null &&
+        surfaceRect.width < compactHudReleaseWidthRef.current;
+      if (!measuredOverlap && !heldByPreviousOverlap && !estimatedOverlap) {
+        compactHudReleaseWidthRef.current = null;
+      }
+
+      const nextCompact = surfaceRect.width < 768 || estimatedOverlap || measuredOverlap || heldByPreviousOverlap;
+
+      setCompactLayout(nextCompact);
     };
 
-    updateWidgetLayout();
-    const frame = requestAnimationFrame(updateWidgetLayout);
-    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateWidgetLayout) : null;
+    let frame: number | null = null;
+    const scheduleWidgetLayoutUpdate = () => {
+      if (frame != null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        updateWidgetLayout();
+      });
+    };
+
+    scheduleWidgetLayoutUpdate();
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleWidgetLayoutUpdate) : null;
     const surface = hudSurfaceRef.current;
     if (resizeObserver && surface instanceof Element) {
       resizeObserver.observe(surface);
       const dialogue = surface.querySelector<HTMLElement>('[data-tour="game-dialogue"]');
       if (dialogue instanceof Element) resizeObserver.observe(dialogue);
     }
-    window.addEventListener("resize", updateWidgetLayout);
+    window.addEventListener("resize", scheduleWidgetLayoutUpdate);
 
     return () => {
-      cancelAnimationFrame(frame);
+      if (frame != null) cancelAnimationFrame(frame);
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateWidgetLayout);
+      window.removeEventListener("resize", scheduleWidgetLayoutUpdate);
     };
   }, [combatUiActive, normalizedWidgets.length]);
 
@@ -4965,6 +5000,13 @@ export function GameSurface({
     () => messages.some((m) => (m.role === "assistant" || m.role === "narrator") && m.content),
     [messages],
   );
+
+  useEffect(() => {
+    if (!startGameRequested) return;
+    if (sessionStatus !== "active" || !hasEverHadContent) return;
+    startGameGuardRef.current = false;
+    setStartGameRequested(false);
+  }, [hasEverHadContent, sessionStatus, startGameRequested]);
 
   // Does this chat need initial game creation?
   const needsCreation = !chatMeta.gameId;
@@ -5032,11 +5074,16 @@ export function GameSurface({
   // Don't auto-dismiss: wait for user to click Continue after typewriter finishes.
 
   const awaitingFirstTurn = sessionStatus === "active" && !introPresented;
-  if ((sessionStatus === "ready" && !introPresented) || startGame.isPending || awaitingFirstTurn) {
+  if (
+    (sessionStatus === "ready" && !introPresented) ||
+    startGame.isPending ||
+    startGameRequested ||
+    awaitingFirstTurn
+  ) {
     const worldOverview = (chatMeta.gameWorldOverview as string) || null;
     const setupConfig = chatMeta.gameSetupConfig as Record<string, unknown> | undefined;
     // Phase: "idle" = show Start button over overview, "intro" = typewriter reveal after clicking Start
-    const introPhase = startGame.isPending || awaitingFirstTurn ? "intro" : "idle";
+    const introPhase = startGame.isPending || startGameRequested || awaitingFirstTurn ? "intro" : "idle";
     const SURFACE_BTN =
       "flex items-center gap-2 rounded-lg bg-[var(--muted)]/30 px-4 py-2 text-xs text-[var(--foreground)]/70 transition-colors hover:bg-[var(--muted)]/50 hover:text-[var(--foreground)] dark:bg-white/10 dark:text-white/70 dark:hover:bg-white/20 dark:hover:text-white";
     return (
@@ -5133,6 +5180,9 @@ export function GameSurface({
             ) : (
               <button
                 onClick={() => {
+                  if (startGame.isPending || startGameRequested || startGameGuardRef.current) return;
+                  startGameGuardRef.current = true;
+                  setStartGameRequested(true);
                   console.log("[GameSurface] Start Game clicked, chatId:", activeChatId);
                   startGame.mutate(
                     { chatId: activeChatId },
@@ -5143,12 +5193,14 @@ export function GameSurface({
                         console.log("[GameSurface] sendMessage called");
                       },
                       onError: (err) => {
+                        startGameGuardRef.current = false;
+                        setStartGameRequested(false);
                         console.error("[GameSurface] startGame failed:", err);
                       },
                     },
                   );
                 }}
-                disabled={startGame.isPending}
+                disabled={startGame.isPending || startGameRequested}
                 className="group flex items-center gap-2 rounded-xl bg-[var(--primary)] px-6 py-3 text-sm font-semibold text-white transition-all hover:scale-105 hover:shadow-lg hover:shadow-[var(--primary)]/30 disabled:opacity-50 disabled:hover:scale-100"
               >
                 <Play size={18} className="transition-transform group-hover:scale-110" />

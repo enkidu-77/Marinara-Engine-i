@@ -210,6 +210,7 @@ Export chats as JSONL or plain text. Fully local SQLite database — all data st
 - [Adunato](https://github.com/adunato)
 - [DarthTheMonster](https://github.com/DarthTheMonster)
 - [Morgul](https://github.com/Morgul)
+- [Kevin Ho](https://github.com/kevin-ho)
 
 ---
 

@@ -23,6 +23,8 @@ export type TTSNpcVoiceGender = "male" | "female" | "unknown";
 export interface TTSNpcVoiceHint {
   name: string;
   description?: string | null;
+  gender?: string | null;
+  pronouns?: string | null;
   notes?: string[] | null;
 }
 
@@ -42,6 +44,11 @@ function stableTTSIndex(seed: string, length: number): number {
 }
 
 export function inferTTSNpcVoiceGender(hint?: TTSNpcVoiceHint | null): TTSNpcVoiceGender {
+  const explicitText = [hint?.gender, hint?.pronouns].filter(Boolean).join(" ");
+  if (/\b(she|her|hers|female|feminine|woman|girl)\b/i.test(explicitText)) return "female";
+  if (/\b(he|him|his|male|masculine|man|boy)\b/i.test(explicitText)) return "male";
+  if (/\b(they|them|their|nonbinary|non-binary|neutral|unknown)\b/i.test(explicitText)) return "unknown";
+
   const text = [hint?.name, hint?.description, ...(hint?.notes ?? [])].filter(Boolean).join(" ");
   if (!text.trim()) return "unknown";
 
@@ -50,6 +57,12 @@ export function inferTTSNpcVoiceGender(hint?: TTSNpcVoiceHint | null): TTSNpcVoi
   if (female && !male) return "female";
   if (male && !female) return "male";
   return "unknown";
+}
+
+function sameVoicePool(left: string[], right: string[]): boolean {
+  if (left.length === 0 || right.length === 0 || left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((voice) => rightSet.has(voice));
 }
 
 function resolveNpcDefaultVoice(
@@ -63,16 +76,17 @@ function resolveNpcDefaultVoice(
   const maleVoices = (config.npcDefaultMaleVoices ?? []).filter(Boolean);
   const femaleVoices = (config.npcDefaultFemaleVoices ?? []).filter(Boolean);
   const gender = inferTTSNpcVoiceGender(npcHint);
+  const poolsAreUnpartitioned = sameVoicePool(maleVoices, femaleVoices);
   const pool =
     gender === "female"
-      ? femaleVoices.length > 0
+      ? !poolsAreUnpartitioned && femaleVoices.length > 0
         ? femaleVoices
-        : maleVoices
+        : []
       : gender === "male"
-        ? maleVoices.length > 0
+        ? !poolsAreUnpartitioned && maleVoices.length > 0
           ? maleVoices
-          : femaleVoices
-        : [...femaleVoices, ...maleVoices];
+          : []
+        : [...new Set([...femaleVoices, ...maleVoices])];
 
   if (pool.length === 0) return "";
   const seed = normalizeTTSCharacterName(npcHint.name) || npcHint.name;
@@ -108,7 +122,10 @@ export function resolveTTSVoiceForSpeaker(
     if (assignment?.voice) return assignment.voice;
   }
 
-  return resolveNpcDefaultVoice(config, npcHint) || fallbackVoice;
+  const npcDefaultVoice = resolveNpcDefaultVoice(config, npcHint);
+  if (npcDefaultVoice) return npcDefaultVoice;
+  if (config.source === "elevenlabs" && config.npcDefaultVoicesEnabled && npcHint) return "";
+  return fallbackVoice;
 }
 
 export function cleanTTSInputText(value: string): string {

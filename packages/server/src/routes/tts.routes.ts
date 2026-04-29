@@ -422,6 +422,7 @@ export async function ttsRoutes(app: FastifyInstance) {
                 text: providerText,
                 model_id: model,
                 voice_settings: {
+                  stability: cfg.elevenLabsStability,
                   speed: cfg.speed,
                 },
               })

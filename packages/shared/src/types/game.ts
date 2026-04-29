@@ -108,6 +108,10 @@ export interface GameNpc {
   description: string;
   /** Origin of the description. Only "model" descriptions should be treated as canonical profile text. */
   descriptionSource?: "model" | "library" | "narration" | "user";
+  /** Optional presentation hint used for systems like NPC voice matching. */
+  gender?: string | null;
+  /** Optional pronoun hint used for systems like NPC voice matching. */
+  pronouns?: string | null;
   location: string;
   /** Party reputation with this NPC: -100 (hostile) to 100 (devoted) */
   reputation: number;

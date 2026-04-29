@@ -204,6 +204,12 @@ function isElevenLabsVoiceForGender(option: VoiceOption, gender: "male" | "femal
   return names.has(normalizedName) || names.has(normalizedId);
 }
 
+function sameStringSet(left: string[], right: string[]): boolean {
+  if (left.length === 0 || right.length === 0 || left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((value) => rightSet.has(value));
+}
+
 function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="flex cursor-pointer items-center justify-between rounded-lg p-1.5 transition-colors hover:bg-[var(--secondary)]/50">
@@ -284,6 +290,7 @@ export function TTSConfigCard() {
   const [npcDefaultMaleVoices, setNpcDefaultMaleVoices] = useState<string[]>([]);
   const [npcDefaultFemaleVoices, setNpcDefaultFemaleVoices] = useState<string[]>([]);
   const [speed, setSpeed] = useState(1.0);
+  const [elevenLabsStability, setElevenLabsStability] = useState(0.5);
   const [autoplayRP, setAutoplayRP] = useState(false);
   const [autoplayConvo, setAutoplayConvo] = useState(false);
   const [autoplayGame, setAutoplayGame] = useState(false);
@@ -323,6 +330,7 @@ export function TTSConfigCard() {
     setNpcDefaultMaleVoices(savedConfig.npcDefaultMaleVoices ?? []);
     setNpcDefaultFemaleVoices(savedConfig.npcDefaultFemaleVoices ?? []);
     setSpeed(savedConfig.speed);
+    setElevenLabsStability(savedConfig.elevenLabsStability ?? 0.5);
     setAutoplayRP(savedConfig.autoplayRP);
     setAutoplayConvo(savedConfig.autoplayConvo);
     setAutoplayGame(savedConfig.autoplayGame);
@@ -363,6 +371,7 @@ export function TTSConfigCard() {
     npcDefaultMaleVoices,
     npcDefaultFemaleVoices,
     speed,
+    elevenLabsStability,
     autoplayRP,
     autoplayConvo,
     autoplayGame,
@@ -483,19 +492,19 @@ export function TTSConfigCard() {
     elevenLabsMatchedFemaleVoiceOptions.length > 0 ? elevenLabsMatchedFemaleVoiceOptions : voiceOptions;
   const maleNpcVoiceFallbackNote =
     voiceOptions.length > 0 && elevenLabsMatchedMaleVoiceOptions.length === 0
-      ? "No male-labeled defaults were detected, so all loaded ElevenLabs voices are available here."
+      ? "No male-labeled defaults were detected, so choose male voices manually here."
       : undefined;
   const femaleNpcVoiceFallbackNote =
     voiceOptions.length > 0 && elevenLabsMatchedFemaleVoiceOptions.length === 0
-      ? "No female-labeled defaults were detected, so all loaded ElevenLabs voices are available here."
+      ? "No female-labeled defaults were detected, so choose female voices manually here."
       : undefined;
   const defaultMaleVoiceIds = useMemo(
-    () => elevenLabsNpcMaleVoiceOptions.map((option) => option.id),
-    [elevenLabsNpcMaleVoiceOptions],
+    () => elevenLabsMatchedMaleVoiceOptions.map((option) => option.id),
+    [elevenLabsMatchedMaleVoiceOptions],
   );
   const defaultFemaleVoiceIds = useMemo(
-    () => elevenLabsNpcFemaleVoiceOptions.map((option) => option.id),
-    [elevenLabsNpcFemaleVoiceOptions],
+    () => elevenLabsMatchedFemaleVoiceOptions.map((option) => option.id),
+    [elevenLabsMatchedFemaleVoiceOptions],
   );
   const characterOptions = useMemo<CharacterOption[]>(() => {
     return ((characters ?? []) as Array<{ id?: string; data?: unknown; comment?: string | null }>)
@@ -576,9 +585,15 @@ export function TTSConfigCard() {
   };
 
   const toggleNpcDefaultVoices = (enabled: boolean) => {
-    const nextMaleVoices = enabled && npcDefaultMaleVoices.length === 0 ? defaultMaleVoiceIds : npcDefaultMaleVoices;
+    const poolsAreUnpartitioned = sameStringSet(npcDefaultMaleVoices, npcDefaultFemaleVoices);
+    const nextMaleVoices =
+      enabled && (npcDefaultMaleVoices.length === 0 || poolsAreUnpartitioned)
+        ? defaultMaleVoiceIds
+        : npcDefaultMaleVoices;
     const nextFemaleVoices =
-      enabled && npcDefaultFemaleVoices.length === 0 ? defaultFemaleVoiceIds : npcDefaultFemaleVoices;
+      enabled && (npcDefaultFemaleVoices.length === 0 || poolsAreUnpartitioned)
+        ? defaultFemaleVoiceIds
+        : npcDefaultFemaleVoices;
 
     setNpcDefaultVoicesEnabled(enabled);
     setNpcDefaultMaleVoices(nextMaleVoices);
@@ -966,6 +981,32 @@ export function TTSConfigCard() {
               <span>4.0×</span>
             </div>
           </FieldRow>
+
+          {source === "elevenlabs" && (
+            <FieldRow
+              label={`Stability — ${Math.round(elevenLabsStability * 100)}%`}
+              help="ElevenLabs voice stability. Lower values are more expressive and creative; higher values are more consistent and robust."
+            >
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={elevenLabsStability}
+                onChange={(e) => {
+                  const next = parseFloat(e.target.value);
+                  setElevenLabsStability(next);
+                  mark({ elevenLabsStability: next });
+                }}
+                className="w-full accent-rose-400"
+              />
+              <div className="flex justify-between text-[0.6rem] text-[var(--muted-foreground)]">
+                <span>Creative</span>
+                <span>Natural</span>
+                <span>Robust</span>
+              </div>
+            </FieldRow>
+          )}
 
           {/* Auto-play */}
           <div className="space-y-1">
