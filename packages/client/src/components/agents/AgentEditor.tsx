@@ -398,7 +398,7 @@ export function AgentEditor() {
       promptTemplate: localPrompt,
       settings: {
         ...(localContextSize !== "" ? { contextSize: Number(localContextSize) } : {}),
-        ...(localMaxTokens !== "" ? { maxTokens: Number(localMaxTokens) } : {}),
+        ...(localMaxTokens !== "" ? { maxTokens: clampAgentMaxTokens(localMaxTokens) } : {}),
         ...(localRunInterval !== "" ? { runInterval: Number(localRunInterval) } : {}),
         ...(localInjectAsSection ? { injectAsSection: true } : {}),
         enabledTools: localEnabledTools,

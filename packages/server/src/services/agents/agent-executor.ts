@@ -340,13 +340,16 @@ export async function executeAgentBatch(
 
     // Each agent reserves its own configured output budget. The context fitter
     // may still reduce this further if the prompt needs more room.
-    const maxTokensPerAgent = Math.max(...configs.map((c) => normalizeAgentMaxTokens(c.settings.maxTokens)));
+    const perAgentTokens = configs.map((c) => normalizeAgentMaxTokens(c.settings.maxTokens));
     const temperature = Math.min(...configs.map((c) => (c.settings.temperature as number) ?? 0.3));
-    const rawBatchMaxTokens = Math.min(maxTokensPerAgent * configs.length, MAX_AGENT_MAX_TOKENS);
+    const rawBatchMaxTokens = Math.min(
+      perAgentTokens.reduce((sum, tokens) => sum + tokens, 0),
+      MAX_AGENT_MAX_TOKENS,
+    );
     const batchMaxTokens = applyProviderMaxTokensOverride(provider, rawBatchMaxTokens);
     const streamResponses = context.streaming !== false;
     logger.info(
-      `[agent-batch] maxTokens: ${batchMaxTokens} (${maxTokensPerAgent} × ${configs.length} agents${provider.maxTokensOverrideValue !== null ? `, capped at ${provider.maxTokensOverrideValue}` : ""})`,
+      `[agent-batch] maxTokens: ${batchMaxTokens} (sum=${rawBatchMaxTokens} from [${perAgentTokens.join(", ")}]${provider.maxTokensOverrideValue !== null ? `, capped at ${provider.maxTokensOverrideValue}` : ""})`,
     );
 
     logger.debug(`\n[agent-batch] ═══ BATCH PROMPT — [${configs.map((c) => c.type).join(", ")}] — ${model} ═══`);

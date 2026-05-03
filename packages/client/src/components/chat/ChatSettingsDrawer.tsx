@@ -759,12 +759,13 @@ export function ChatSettingsDrawer({
     if (!agentAddPreview) return;
 
     const { agent, config, contextSize, maxTokens, runInterval } = agentAddPreview;
+    const normalizedMaxTokens = normalizeAgentMaxTokens(maxTokens);
     const builtInMeta = BUILT_IN_AGENTS.find((entry) => entry.id === agent.id) ?? null;
     const nextSettings: Record<string, unknown> = {
       ...getDefaultBuiltInAgentSettings(agent.id),
       ...parseAgentSettings(config?.settings),
       contextSize,
-      maxTokens,
+      maxTokens: normalizedMaxTokens,
     };
     const intervalMeta = getAgentRunIntervalMeta(agent.id, !!builtInMeta);
     if (intervalMeta && runInterval != null) {
