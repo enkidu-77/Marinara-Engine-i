@@ -36,6 +36,7 @@ import { sidecarProcessService } from "./services/sidecar/sidecar-process.servic
 const isLite = process.env.MARINARA_LITE === "true" || process.env.MARINARA_LITE === "1";
 const REVALIDATE_FILES = new Set(["index.html"]);
 const NO_STORE_FILES = new Set(["manifest.json", "sw.js", "registerSW.js"]);
+const MAX_UPLOAD_BYTES = 256 * 1024 * 1024;
 
 export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   const corsConfig = getCorsConfig();
@@ -44,7 +45,7 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
       level: getLogLevel(),
       transport: getNodeEnv() !== "production" ? { target: "pino-pretty", options: { colorize: true } } : undefined,
     },
-    bodyLimit: 50 * 1024 * 1024, // 50 MB — needed for PNG character cards with embedded avatar
+    bodyLimit: MAX_UPLOAD_BYTES, // Large profile imports can include many base64 avatars.
     ...(https && { https }),
   });
 
@@ -53,7 +54,7 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
 
   await app.register(multipart, {
     limits: {
-      fileSize: 50 * 1024 * 1024, // 50 MB max upload
+      fileSize: MAX_UPLOAD_BYTES,
     },
   });
 

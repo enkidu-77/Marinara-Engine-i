@@ -19,6 +19,7 @@ import { flushDB } from "../db/connection.js";
 
 /** Directories inside DATA_DIR that should be included in every backup. */
 const BACKUP_DIRS = ["storage", "avatars", "sprites", "backgrounds", "gallery", "fonts", "knowledge-sources"];
+const PROFILE_IMPORT_BODY_LIMIT_BYTES = 256 * 1024 * 1024;
 
 function resolveBackupDir(dataDir: string, dirName: string) {
   return dirName === "storage" ? getFileStorageDir() : join(dataDir, dirName);
@@ -266,7 +267,7 @@ export async function backupRoutes(app: FastifyInstance) {
 
   // ── Profile Import ──
   // Accepts a profile JSON envelope and creates all entities.
-  app.post("/import-profile", async (req, reply) => {
+  app.post("/import-profile", { bodyLimit: PROFILE_IMPORT_BODY_LIMIT_BYTES }, async (req, reply) => {
     const envelope = req.body as ExportEnvelope;
     if (!envelope || envelope.type !== "marinara_profile" || envelope.version !== 1) {
       return reply.status(400).send({ error: "Invalid profile export" });
