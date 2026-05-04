@@ -99,6 +99,7 @@ const EditTextarea = memo(function EditTextarea({
       />
       <div className="flex items-center gap-1.5 justify-end">
         <button
+          type="button"
           onClick={onCancel}
           aria-label="Cancel edit"
           className="rounded-md p-1 text-white/40 hover:bg-white/10 hover:text-white/70"
@@ -107,6 +108,7 @@ const EditTextarea = memo(function EditTextarea({
           <X size="0.8125rem" />
         </button>
         <button
+          type="button"
           onClick={handleSave}
           aria-label="Save edit"
           className="rounded-md p-1 text-emerald-400/70 hover:bg-emerald-400/10 hover:text-emerald-400"
@@ -1124,6 +1126,7 @@ export const ChatMessage = memo(function ChatMessage({
         <div className="relative">
           {!multiSelectMode && onDelete && (
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(message.id);
@@ -1184,6 +1187,7 @@ export const ChatMessage = memo(function ChatMessage({
               {/* Delete button */}
               {!multiSelectMode && onDelete && (
                 <button
+                  type="button"
                   onClick={() => onDelete(message.id)}
                   aria-label="Delete message"
                   className={cn(
@@ -1497,6 +1501,7 @@ export const ChatMessage = memo(function ChatMessage({
                         />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleRemoveAttachment(i)}
                         aria-label="Remove image from message"
                         title="Remove from message"
@@ -1670,6 +1675,7 @@ export const ChatMessage = memo(function ChatMessage({
               className="max-h-[85vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
             />
             <button
+              type="button"
               onClick={() => setAvatarLightbox(null)}
               aria-label="Close image"
               className="absolute right-3 top-3 rounded-lg bg-black/60 p-2 text-white transition-colors hover:bg-black/80"
@@ -1872,6 +1878,7 @@ export const ChatMessage = memo(function ChatMessage({
                       />
                     </button>
                     <button
+                      type="button"
                       onClick={() => handleRemoveAttachment(i)}
                       aria-label="Remove image from message"
                       title="Remove from message"
@@ -2041,6 +2048,7 @@ export const ChatMessage = memo(function ChatMessage({
             className="max-h-[85vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
           />
           <button
+            type="button"
             onClick={() => setAvatarLightbox(null)}
             aria-label="Close image"
             className="absolute right-3 top-3 rounded-lg bg-black/60 p-2 text-white transition-colors hover:bg-black/80"
@@ -2070,6 +2078,7 @@ function ThinkingModal({ thinking, onClose }: { thinking: string; onClose: () =>
             Model Thoughts
           </div>
           <button
+            type="button"
             onClick={onClose}
             aria-label="Close thoughts"
             className="rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"

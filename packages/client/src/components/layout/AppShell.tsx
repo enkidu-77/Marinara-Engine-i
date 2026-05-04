@@ -229,18 +229,23 @@ export function AppShell() {
         sidebarDragWidthRef.current = nextWidth;
         setSidebarDragWidth(nextWidth);
       };
-      const onUp = () => {
+      let finished = false;
+      const finishResize = () => {
+        if (finished) return;
+        finished = true;
         setSidebarWidth(sidebarDragWidthRef.current ?? useUIStore.getState().sidebarWidth);
         sidebarDragWidthRef.current = null;
         setSidebarDragWidth(null);
         document.body.style.cursor = originalCursor;
         document.body.style.userSelect = originalUserSelect;
         window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+        window.removeEventListener("mouseup", finishResize);
+        window.removeEventListener("blur", finishResize);
       };
 
       window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      window.addEventListener("mouseup", finishResize);
+      window.addEventListener("blur", finishResize);
     },
     [isMobile, setSidebarWidth, sidebarWidth],
   );
@@ -257,22 +262,31 @@ export function AppShell() {
       setRightPanelDragWidth(rightPanelWidth);
 
       const onMove = (moveEvent: MouseEvent) => {
-        const nextWidth = clampWidth(window.innerWidth - moveEvent.clientX, RIGHT_PANEL_WIDTH_MIN, RIGHT_PANEL_WIDTH_MAX);
+        const nextWidth = clampWidth(
+          window.innerWidth - moveEvent.clientX,
+          RIGHT_PANEL_WIDTH_MIN,
+          RIGHT_PANEL_WIDTH_MAX,
+        );
         rightPanelDragWidthRef.current = nextWidth;
         setRightPanelDragWidth(nextWidth);
       };
-      const onUp = () => {
+      let finished = false;
+      const finishResize = () => {
+        if (finished) return;
+        finished = true;
         setRightPanelWidth(rightPanelDragWidthRef.current ?? useUIStore.getState().rightPanelWidth);
         rightPanelDragWidthRef.current = null;
         setRightPanelDragWidth(null);
         document.body.style.cursor = originalCursor;
         document.body.style.userSelect = originalUserSelect;
         window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+        window.removeEventListener("mouseup", finishResize);
+        window.removeEventListener("blur", finishResize);
       };
 
       window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      window.addEventListener("mouseup", finishResize);
+      window.addEventListener("blur", finishResize);
     },
     [isMobile, rightPanelWidth, setRightPanelWidth],
   );
