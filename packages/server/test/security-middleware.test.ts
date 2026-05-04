@@ -200,6 +200,48 @@ test("CSRF protection allows private literal network origins with the CSRF heade
     }
   }));
 
+test("CSRF protection allows private literal Docker host-port origins", async () =>
+  withEnv({ ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK: "true", IP_ALLOWLIST: undefined }, async () => {
+    const app = await buildHookApp();
+    try {
+      const allowed = await app.inject({
+        method: "POST",
+        url: "/api/mutate",
+        remoteAddress: "192.168.1.50",
+        headers: {
+          host: "192.168.1.10:3004",
+          origin: "http://192.168.1.10:3004",
+          "sec-fetch-site": "same-origin",
+          [CSRF_HEADER]: CSRF_HEADER_VALUE,
+        },
+      });
+      assert.equal(allowed.statusCode, 200);
+    } finally {
+      await app.close();
+    }
+  }));
+
+test("CSRF protection allows explicit wildcard trusted origins with the CSRF header", async () =>
+  withEnv({ CSRF_TRUSTED_ORIGINS: "*" }, async () => {
+    const app = await buildHookApp();
+    try {
+      const allowed = await app.inject({
+        method: "POST",
+        url: "/api/mutate",
+        remoteAddress: "127.0.0.1",
+        headers: {
+          host: "127.0.0.1:7860",
+          origin: "https://trusted-by-wildcard.example",
+          "sec-fetch-site": "cross-site",
+          [CSRF_HEADER]: CSRF_HEADER_VALUE,
+        },
+      });
+      assert.equal(allowed.statusCode, 200);
+    } finally {
+      await app.close();
+    }
+  }));
+
 test("CSRF protection still rejects private-network DNS rebinding-style origins", async () =>
   withEnv({ ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK: "true", IP_ALLOWLIST: undefined }, async () => {
     const app = await buildHookApp();
@@ -243,7 +285,50 @@ test("CSRF protection does not trust Host as an origin allowlist", async () =>
   }));
 
 test("privileged gate requires ADMIN_SECRET", async () =>
-  withEnv({ ADMIN_SECRET: "top-secret" }, async () => {
+  withEnv(
+    { ADMIN_SECRET: "top-secret", ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK: "true", IP_ALLOWLIST: undefined },
+    async () => {
+      const app = await buildHookApp();
+      try {
+        const missing = await app.inject({
+          method: "POST",
+          url: "/api/adminish",
+          remoteAddress: "192.168.1.50",
+          headers: { [CSRF_HEADER]: CSRF_HEADER_VALUE },
+        });
+        assert.equal(missing.statusCode, 403);
+
+        const allowed = await app.inject({
+          method: "POST",
+          url: "/api/adminish",
+          remoteAddress: "192.168.1.50",
+          headers: { [CSRF_HEADER]: CSRF_HEADER_VALUE, "x-admin-secret": "top-secret" },
+        });
+        assert.equal(allowed.statusCode, 200);
+      } finally {
+        await app.close();
+      }
+    },
+  ));
+
+test("privileged gate allows loopback without ADMIN_SECRET by default", async () =>
+  withEnv({ ADMIN_SECRET: undefined, MARINARA_REQUIRE_ADMIN_SECRET_ON_LOOPBACK: undefined }, async () => {
+    const app = await buildHookApp();
+    try {
+      const allowed = await app.inject({
+        method: "POST",
+        url: "/api/adminish",
+        remoteAddress: "127.0.0.1",
+        headers: { [CSRF_HEADER]: CSRF_HEADER_VALUE },
+      });
+      assert.equal(allowed.statusCode, 200);
+    } finally {
+      await app.close();
+    }
+  }));
+
+test("privileged gate can require ADMIN_SECRET on loopback", async () =>
+  withEnv({ ADMIN_SECRET: "top-secret", MARINARA_REQUIRE_ADMIN_SECRET_ON_LOOPBACK: "true" }, async () => {
     const app = await buildHookApp();
     try {
       const missing = await app.inject({

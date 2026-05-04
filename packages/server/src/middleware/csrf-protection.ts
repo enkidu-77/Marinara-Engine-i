@@ -31,9 +31,34 @@ function isTrustedLiteralHostname(hostname: string): boolean {
   return isLoopbackHostname(normalized) || isPrivateNetworkIp(normalized);
 }
 
+function getRequestProtocol(request: FastifyRequest): string {
+  const forwardedProto = firstHeader(request.headers["x-forwarded-proto"]);
+  if (forwardedProto === "https") return "https";
+  if (forwardedProto === "http") return "http";
+  return getServerProtocol();
+}
+
+function getRequestHostOrigin(request: FastifyRequest): string | null {
+  const host = firstHeader(request.headers.host);
+  if (!host) return null;
+
+  const protocol = getRequestProtocol(request);
+  try {
+    const parsed = new URL(`${protocol}://${host}`);
+    if (!isTrustedLiteralHostname(parsed.hostname)) return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
 function originUsesServerPort(origin: URL): boolean {
   const port = origin.port ? Number.parseInt(origin.port, 10) : origin.protocol === "https:" ? 443 : 80;
   return port === getPort();
+}
+
+function hasWildcardTrustedOrigin(): boolean {
+  return getCsrfTrustedOrigins().some((trusted) => trusted === "*");
 }
 
 function configuredOrigins(): Set<string> {
@@ -58,7 +83,9 @@ function configuredOrigins(): Set<string> {
 function isAllowedOrigin(originValue: string, request: FastifyRequest): boolean {
   const origin = normalizeOrigin(originValue);
   if (!origin) return false;
+  if (hasWildcardTrustedOrigin()) return true;
   if (configuredOrigins().has(origin)) return true;
+  if (origin === getRequestHostOrigin(request)) return true;
 
   try {
     const parsed = new URL(origin);
@@ -81,20 +108,26 @@ export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply,
   if (!UNSAFE_METHODS.has(request.method.toUpperCase())) return done();
   if (!request.url.startsWith("/api/")) return done();
 
+  const origin = firstHeader(request.headers.origin);
+  const referer = firstHeader(request.headers.referer);
+  let originTrusted = false;
+  if (origin) {
+    originTrusted = isAllowedOrigin(origin, request);
+  } else if (referer) {
+    originTrusted = isAllowedOrigin(referer, request);
+  }
   const secFetchSite = firstHeader(request.headers["sec-fetch-site"]);
-  if (secFetchSite && !SAFE_FETCH_SITES.has(secFetchSite.toLowerCase())) {
+  if (secFetchSite && !SAFE_FETCH_SITES.has(secFetchSite.toLowerCase()) && !originTrusted) {
     reply.status(403).send({ error: "Cross-site unsafe requests are not allowed" });
     return;
   }
 
-  const origin = firstHeader(request.headers.origin);
-  if (origin && !isAllowedOrigin(origin, request)) {
+  if (origin && !originTrusted) {
     reply.status(403).send({ error: "Request origin is not trusted" });
     return;
   }
 
-  const referer = firstHeader(request.headers.referer);
-  if (!origin && referer && !isAllowedOrigin(referer, request)) {
+  if (!origin && referer && !originTrusted) {
     reply.status(403).send({ error: "Request referer is not trusted" });
     return;
   }

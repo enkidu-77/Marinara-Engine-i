@@ -107,6 +107,23 @@ const EXPUNGE_SCOPE_OPTIONS: Array<{ id: ExpungeScope; label: string; descriptio
   },
 ];
 
+async function readSettingsResponseError(res: Response, fallback: string) {
+  const contentType = res.headers.get("content-type") ?? "";
+
+  try {
+    if (contentType.includes("application/json")) {
+      const payload = (await res.json()) as { error?: unknown; message?: unknown };
+      const message = typeof payload.message === "string" ? payload.message : payload.error;
+      return typeof message === "string" && message.trim() ? message : fallback;
+    }
+
+    const text = (await res.text()).trim();
+    return text ? text.slice(0, 500) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 const ROLEPLAY_AVATAR_STYLE_OPTIONS: Array<{ id: RoleplayAvatarStyle; label: string; desc: string }> = [
   {
     id: "circles",
@@ -2410,7 +2427,7 @@ function AdvancedSettings() {
       const res = await fetch(`/api/backup/export-profile?format=${format}`, {
         headers: getAdminSecretHeader(),
       });
-      if (!res.ok) throw new Error("Export failed");
+      if (!res.ok) throw new Error(await readSettingsResponseError(res, "Export failed"));
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -2419,8 +2436,8 @@ function AdvancedSettings() {
       a.click();
       URL.revokeObjectURL(url);
       toast.success(format === "compatible" ? "Compatible export created!" : "Profile exported!");
-    } catch {
-      toast.error("Failed to export profile");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to export profile");
     } finally {
       setExportingProfile(false);
     }
@@ -2461,7 +2478,7 @@ function AdvancedSettings() {
         method: "POST",
         headers: getAdminSecretHeader(),
       });
-      if (!res.ok) throw new Error("Backup failed");
+      if (!res.ok) throw new Error(await readSettingsResponseError(res, "Backup failed"));
 
       // Pull the filename from Content-Disposition if provided
       const disposition = res.headers.get("content-disposition") ?? "";
@@ -2515,8 +2532,8 @@ function AdvancedSettings() {
       URL.revokeObjectURL(url);
       toast.success("Backup downloaded!");
       qc.invalidateQueries({ queryKey: ["backups"] });
-    } catch {
-      toast.error("Failed to create backup");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create backup");
     } finally {
       setCreatingBackup(false);
     }

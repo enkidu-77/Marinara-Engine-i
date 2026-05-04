@@ -20,6 +20,7 @@ import type {
   APIProvider,
   CharacterStat,
   GameState,
+  HapticDeviceCommand,
   PlayerStats,
 } from "@marinara-engine/shared";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
@@ -194,6 +195,46 @@ function getEnabledConversationSchedules(meta: Record<string, any>): Record<stri
   return areConversationSchedulesEnabled(meta) && hasConversationSchedules(meta.characterSchedules)
     ? meta.characterSchedules
     : {};
+}
+
+function normalizeHapticAgentAction(action: unknown): HapticDeviceCommand["action"] | null {
+  if (typeof action !== "string") return null;
+  const key = action
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+  if (key === "positionwithduration" || key === "hwpositionwithduration" || key === "linear") return "position";
+  if (key === "vibrate") return "vibrate";
+  if (key === "rotate") return "rotate";
+  if (key === "oscillate") return "oscillate";
+  if (key === "constrict") return "constrict";
+  if (key === "inflate") return "inflate";
+  if (key === "position") return "position";
+  if (key === "stop") return "stop";
+  return null;
+}
+
+function normalizeHapticAgentNumber(value: unknown): number | undefined {
+  const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function normalizeHapticAgentDeviceIndex(value: unknown): HapticDeviceCommand["deviceIndex"] {
+  if (value === "all" || value === undefined || value === null) return "all";
+  const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isInteger(numeric) && numeric >= 0 ? numeric : "all";
+}
+
+function normalizeHapticAgentCommand(command: Record<string, unknown>): HapticDeviceCommand | null {
+  const action = normalizeHapticAgentAction(command.action);
+  if (!action) return null;
+
+  return {
+    deviceIndex: normalizeHapticAgentDeviceIndex(command.deviceIndex),
+    action,
+    intensity: normalizeHapticAgentNumber(command.intensity),
+    duration: normalizeHapticAgentNumber(command.duration),
+  };
 }
 
 const COMPLETE_OUTPUT_END_RE = /[.!?…。！？]["'”’)\]}»›]*$/;
@@ -6882,18 +6923,37 @@ export async function generateRoutes(app: FastifyInstance) {
                 if (cmds && cmds.length > 0) {
                   const { hapticService } = await import("../services/haptic/buttplug-service.js");
                   if (hapticService.connected) {
+                    const executedCommands: HapticDeviceCommand[] = [];
                     for (const cmd of cmds) {
-                      await hapticService.executeCommand({
-                        deviceIndex: (cmd.deviceIndex as number | "all") ?? "all",
-                        action: (cmd.action as string) ?? "vibrate",
-                        intensity: typeof cmd.intensity === "number" ? cmd.intensity : 0.5,
-                        duration: typeof cmd.duration === "number" ? cmd.duration : undefined,
-                      } as any);
+                      const hapticCommand = normalizeHapticAgentCommand(cmd);
+                      if (!hapticCommand) {
+                        logger.warn("[haptic] Agent produced unsupported command action: %s", String(cmd.action));
+                        continue;
+                      }
+
+                      try {
+                        await hapticService.executeCommand(hapticCommand);
+                        executedCommands.push(hapticCommand);
+                      } catch (commandErr) {
+                        logger.warn(commandErr, "[haptic] Agent command %s skipped", hapticCommand.action);
+                      }
                     }
-                    reply.raw.write(
-                      `data: ${JSON.stringify({ type: "haptic_command", data: { commands: cmds, reasoning: hData.reasoning } })}\n\n`,
-                    );
-                    logger.info(`[haptic] Agent executed ${cmds.length} command(s): ${hData.reasoning ?? ""}`);
+                    if (executedCommands.length > 0) {
+                      reply.raw.write(
+                        `data: ${JSON.stringify({ type: "haptic_command", data: { commands: executedCommands, reasoning: hData.reasoning } })}\n\n`,
+                      );
+                      logger.info(
+                        "[haptic] Agent executed %d command(s): %s",
+                        executedCommands.length,
+                        hData.reasoning ?? "",
+                      );
+                    } else {
+                      logger.warn(
+                        "[haptic] Agent produced %d command(s), but none could be executed: %s",
+                        cmds.length,
+                        hData.reasoning ?? "",
+                      );
+                    }
                   } else {
                     logger.warn(
                       `[haptic] Agent produced ${cmds.length} command(s) but Intiface Central is disconnected — commands dropped`,

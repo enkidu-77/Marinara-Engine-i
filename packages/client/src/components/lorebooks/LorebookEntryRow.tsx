@@ -21,8 +21,8 @@ import {
   Hash,
   Key,
   Lock,
+  MoreHorizontal,
   Regex,
-  Save,
   Settings2,
   ToggleLeft,
   ToggleRight,
@@ -112,6 +112,7 @@ const STATUS_DOT_COLOR: Record<EntryStatus, string> = {
 };
 
 const ENTRY_STATUS_ORDER: EntryStatus[] = ["normal", "constant", "selective"];
+const ENTRY_AUTOSAVE_DELAY_MS = 850;
 
 const FILTER_MODE_LABEL: Record<LorebookFilterMode, string> = {
   any: "Any",
@@ -185,6 +186,9 @@ export function LorebookEntryRow({
   const [localProbability, setLocalProbability] = useState<number>(entry.probability ?? 100);
   const [localName, setLocalName] = useState(entry.name);
   const [localUseRegex, setLocalUseRegex] = useState(entry.useRegex ?? false);
+  const [showVectorStatus, setShowVectorStatus] = useState(false);
+  const [showMobileControls, setShowMobileControls] = useState(false);
+  const mobileControlsRef = useRef<HTMLDivElement>(null);
 
   // Re-sync local state when the upstream entry changes (e.g. after refetch)
   // so we don't show stale values, but avoid clobbering an in-flight edit.
@@ -201,6 +205,29 @@ export function LorebookEntryRow({
     setLocalName(entry.name);
     setLocalUseRegex(entry.useRegex ?? false);
   }, [entry]);
+
+  useEffect(() => {
+    if (!showMobileControls) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!mobileControlsRef.current?.contains(event.target as Node)) {
+        setShowMobileControls(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowMobileControls(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showMobileControls]);
 
   const patch = useCallback(
     (changes: Partial<LorebookEntry>) => {
@@ -274,6 +301,8 @@ export function LorebookEntryRow({
 
   const showDepthInput = localPosition === 2;
   const isVectorized = Array.isArray(entry.embedding) && entry.embedding.length > 0;
+  const vectorStatusLabel = isVectorized ? "Vectorized" : "Not vectorized";
+  const vectorStatusTitle = isVectorized ? "This entry has been vectorized" : "This entry has not been vectorized yet";
 
   return (
     <div
@@ -289,7 +318,7 @@ export function LorebookEntryRow({
       onDragEnd={onDragEnd}
     >
       {/* ── Compact row ── */}
-      <div className="group flex cursor-pointer items-center gap-2 px-2 py-1.5" onClick={onToggleExpand}>
+      <div className="group flex cursor-pointer items-center gap-1 px-2 py-1.5 sm:gap-2" onClick={onToggleExpand}>
         {/* Drag handle */}
         <button
           type="button"
@@ -379,35 +408,137 @@ export function LorebookEntryRow({
           }}
           onClick={(e) => e.stopPropagation()}
           placeholder="Untitled entry"
-          className="min-w-0 flex-1 truncate bg-transparent px-1 text-sm font-medium outline-none transition-colors hover:bg-[var(--accent)]/40 focus:bg-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--ring)] rounded"
+          className="min-w-[4rem] flex-1 truncate rounded bg-transparent px-1 text-sm font-medium outline-none transition-colors hover:bg-[var(--accent)]/40 focus:bg-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--ring)] sm:min-w-[7rem]"
         />
 
-        <span
+        <button
+          type="button"
           className={cn(
-            "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[0.5625rem] font-medium ring-1",
+            "relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[0.625rem] ring-1 transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)]",
             isVectorized
               ? "bg-emerald-400/10 text-emerald-400 ring-emerald-400/20"
-              : "bg-[var(--background)]/55 text-[var(--muted-foreground)] ring-[var(--border)]",
+              : "bg-[var(--background)]/55 text-[var(--muted-foreground)] ring-[var(--border)] hover:text-[var(--foreground)]",
           )}
-          title={isVectorized ? "This entry has been vectorized" : "This entry has not been vectorized yet"}
-          aria-label={isVectorized ? "Entry vectorized" : "Entry not vectorized"}
+          title={vectorStatusTitle}
+          aria-label={vectorStatusTitle}
+          onMouseEnter={() => setShowVectorStatus(true)}
+          onMouseLeave={() => setShowVectorStatus(false)}
+          onFocus={() => setShowVectorStatus(true)}
+          onBlur={() => setShowVectorStatus(false)}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowVectorStatus(true);
+          }}
         >
-          {isVectorized ? <CheckCircle2 size="0.625rem" /> : <CircleDashed size="0.625rem" />}
-          <span className="hidden sm:inline">{isVectorized ? "Vectorized" : "Not vectorized"}</span>
-        </span>
+          {isVectorized ? <CheckCircle2 size="0.75rem" /> : <CircleDashed size="0.75rem" />}
+          {showVectorStatus && (
+            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-[var(--popover)] px-2 py-1 text-[0.625rem] font-medium text-[var(--popover-foreground)] shadow-lg ring-1 ring-[var(--border)]">
+              {vectorStatusLabel}
+            </span>
+          )}
+        </button>
+
+        <div ref={mobileControlsRef} className="relative shrink-0 md:hidden" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            aria-label="Entry quick controls"
+            aria-expanded={showMobileControls}
+            title="Entry quick controls"
+            onClick={() => setShowMobileControls((current) => !current)}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]",
+              showMobileControls && "bg-[var(--accent)] text-[var(--foreground)]",
+            )}
+          >
+            <MoreHorizontal size="0.875rem" />
+          </button>
+
+          {showMobileControls && (
+            <div className="absolute right-0 top-full z-30 mt-1 w-64 max-w-[calc(100vw-2rem)] space-y-2 rounded-xl border border-[var(--border)] bg-[var(--popover)] p-3 text-[var(--popover-foreground)] shadow-xl">
+              <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
+                <p className="text-[0.6875rem] font-semibold">Entry controls</p>
+                <button
+                  type="button"
+                  onClick={() => setShowMobileControls(false)}
+                  className="rounded px-1.5 py-0.5 text-[0.625rem] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                >
+                  Done
+                </button>
+              </div>
+
+              <MobileSelect
+                label="Position"
+                value={String(localPosition)}
+                onChange={(v) => {
+                  const n = Number(v);
+                  setLocalPosition(n);
+                  patch({ position: n });
+                }}
+                options={[
+                  { value: "0", label: "Before chat" },
+                  { value: "1", label: "After chat" },
+                  { value: "2", label: "@ Depth" },
+                ]}
+              />
+              {showDepthInput && (
+                <MobileNumber
+                  label="Depth"
+                  value={localDepth}
+                  onCommit={(n) => {
+                    setLocalDepth(n);
+                    patch({ depth: n });
+                  }}
+                  min={0}
+                  max={9999}
+                />
+              )}
+              <MobileNumber
+                label="Order"
+                value={localOrder}
+                onCommit={(n) => {
+                  setLocalOrder(n);
+                  patch({ order: n });
+                }}
+              />
+              <MobileNumber
+                label="Probability"
+                value={localProbability}
+                onCommit={(n) => {
+                  const clamped = Math.max(0, Math.min(100, n));
+                  setLocalProbability(clamped);
+                  patch({ probability: clamped === 100 ? null : clamped });
+                }}
+                min={0}
+                max={100}
+                suffix="%"
+              />
+              {folders.length > 0 && (
+                <MobileSelect
+                  label="Folder"
+                  value={entry.folderId ?? ""}
+                  onChange={(v) => patch({ folderId: v === "" ? null : v })}
+                  options={[{ value: "", label: "(none)" }, ...folders.map((f) => ({ value: f.id, label: f.name }))]}
+                />
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Lock badge (display-only on the row; toggled inside the drawer) */}
         {entry.locked && (
-          <span className="hidden shrink-0 items-center rounded bg-sky-400/15 px-1.5 py-0.5 text-[0.5625rem] font-medium text-sky-400 sm:inline-flex">
-            <Lock size="0.5rem" className="mr-0.5" />
-            LOCKED
+          <span
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-sky-400/15 text-sky-400 ring-1 ring-sky-400/20"
+            title="Locked entry"
+            aria-label="Locked entry"
+          >
+            <Lock size="0.75rem" />
           </span>
         )}
 
         {/* ── Inline editable controls cluster ── */}
         {/* Hidden on very narrow viewports to keep the row from overflowing.
             Users on mobile can expand the drawer to access them. */}
-        <div className="hidden shrink-0 items-center gap-1 md:flex" onClick={(e) => e.stopPropagation()}>
+        <div className="hidden shrink-0 items-center gap-0.5 md:flex" onClick={(e) => e.stopPropagation()}>
           <CompactSelect
             value={String(localPosition)}
             onChange={(v) => {
@@ -421,6 +552,7 @@ export function LorebookEntryRow({
               { value: "1", label: "↓Char" },
               { value: "2", label: "@Depth" },
             ]}
+            className="w-[4.35rem]"
           />
           {showDepthInput && (
             <CompactNumber
@@ -468,6 +600,7 @@ export function LorebookEntryRow({
               onChange={(v) => patch({ folderId: v === "" ? null : v })}
               title="Move this entry to a different folder. (none) = root level."
               options={[{ value: "", label: "(none)" }, ...folders.map((f) => ({ value: f.id, label: f.name }))]}
+              className="w-[5.5rem] sm:w-[6.25rem]"
             />
           )}
         </div>
@@ -509,18 +642,23 @@ function CompactSelect({
   onChange,
   options,
   title,
+  className,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: Array<{ value: string; label: string }>;
   title?: string;
+  className?: string;
 }) {
   return (
     <select
       value={value}
       title={title}
       onChange={(e) => onChange(e.target.value)}
-      className="h-6 rounded-md bg-[var(--secondary)] px-1.5 text-[0.6875rem] ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] hover:ring-amber-400/40 transition-colors"
+      className={cn(
+        "h-6 min-w-0 truncate rounded-md bg-[var(--secondary)] px-1 text-[0.625rem] ring-1 ring-[var(--border)] transition-colors hover:ring-amber-400/40 focus:outline-none focus:ring-2 focus:ring-[var(--ring)]",
+        className,
+      )}
     >
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>
@@ -575,7 +713,7 @@ function CompactNumber({
 
   return (
     <label
-      className="flex h-6 items-center gap-0.5 rounded-md bg-[var(--secondary)] px-1.5 text-[0.6875rem] ring-1 ring-[var(--border)] hover:ring-amber-400/40 transition-colors focus-within:ring-2 focus-within:ring-[var(--ring)]"
+      className="flex h-6 items-center gap-px rounded-md bg-[var(--secondary)] px-1 text-[0.625rem] ring-1 ring-[var(--border)] transition-colors hover:ring-amber-400/40 focus-within:ring-2 focus-within:ring-[var(--ring)]"
       title={title}
     >
       {prefix && <span className="text-[var(--muted-foreground)]">{prefix}:</span>}
@@ -593,9 +731,100 @@ function CompactNumber({
         }}
         min={min}
         max={max}
-        className="w-10 bg-transparent text-right tabular-nums outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        className="w-8 bg-transparent text-right tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       {suffix && <span className="text-[var(--muted-foreground)]">{suffix}</span>}
+    </label>
+  );
+}
+
+function MobileSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-center gap-2 text-[0.6875rem]">
+      <span className="text-[var(--muted-foreground)]">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-9 w-full min-w-0 rounded-lg bg-[var(--secondary)] px-2 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function MobileNumber({
+  label,
+  value,
+  onCommit,
+  min,
+  max,
+  suffix,
+}: {
+  label: string;
+  value: number;
+  onCommit: (v: number) => void;
+  min?: number;
+  max?: number;
+  suffix?: string;
+}) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const parsed = parseInt(draft, 10);
+    if (Number.isNaN(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+
+    let clamped = parsed;
+    if (min !== undefined && clamped < min) clamped = min;
+    if (max !== undefined && clamped > max) clamped = max;
+    setDraft(String(clamped));
+    if (clamped !== value) {
+      onCommit(clamped);
+    }
+  };
+
+  return (
+    <label className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-center gap-2 text-[0.6875rem]">
+      <span className="text-[var(--muted-foreground)]">{label}</span>
+      <span className="flex h-9 min-w-0 items-center rounded-lg bg-[var(--secondary)] px-2 ring-1 ring-[var(--border)] focus-within:ring-2 focus-within:ring-[var(--ring)]">
+        <input
+          type="number"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              (e.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+          min={min}
+          max={max}
+          className="w-full min-w-0 bg-transparent text-right text-xs tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        {suffix && <span className="pl-1 text-xs text-[var(--muted-foreground)]">{suffix}</span>}
+      </span>
     </label>
   );
 }
@@ -603,6 +832,36 @@ function CompactNumber({
 function toggleStringValue(values: string[] | undefined, value: string) {
   const current = values ?? [];
   return current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
+}
+
+function buildEntrySavePayload(form: Partial<LorebookEntry>) {
+  return {
+    name: form.name,
+    content: form.content,
+    description: form.description,
+    keys: form.keys,
+    secondaryKeys: form.secondaryKeys,
+    selectiveLogic: form.selectiveLogic,
+    matchWholeWords: form.matchWholeWords,
+    caseSensitive: form.caseSensitive,
+    useRegex: form.useRegex,
+    characterFilterMode: form.characterFilterMode,
+    characterFilterIds: form.characterFilterIds,
+    characterTagFilterMode: form.characterTagFilterMode,
+    characterTagFilters: form.characterTagFilters,
+    generationTriggerFilterMode: form.generationTriggerFilterMode,
+    generationTriggerFilters: form.generationTriggerFilters,
+    additionalMatchingSources: form.additionalMatchingSources,
+    role: form.role,
+    sticky: form.sticky,
+    cooldown: form.cooldown,
+    delay: form.delay,
+    ephemeral: form.ephemeral,
+    group: form.group,
+    tag: form.tag,
+    locked: form.locked,
+    preventRecursion: form.preventRecursion,
+  };
 }
 
 function FilterModeSelect({
@@ -668,8 +927,8 @@ function FilterPills({
 
 // ─────────────────────────────────────────────────────
 // Expanded drawer — keys, content, advanced toggles, timing, group/tag.
-// Manages its own dirty state and Save button so users see explicit commit
-// for the heavier fields (especially the content textarea).
+// Autosaves heavier fields after edits, with immediate flushes when focus
+// leaves the drawer or fullscreen editor closes.
 // ─────────────────────────────────────────────────────
 
 function ExpandedDrawer({
@@ -683,69 +942,146 @@ function ExpandedDrawer({
   characters: Array<{ id: string; name: string; tags: string[] }>;
   characterTags: string[];
 }) {
-  const updateEntry = useUpdateLorebookEntry();
+  const { mutate: mutateEntry, mutateAsync: mutateEntryAsync } = useUpdateLorebookEntry();
   const [form, setForm] = useState<Partial<LorebookEntry>>(() => ({ ...entry }));
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const loadedEntryIdRef = useRef(entry.id);
+  const formRef = useRef<Partial<LorebookEntry>>({ ...entry });
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+  const changeVersionRef = useRef(0);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  const saveNowRef = useRef<() => Promise<void>>(async () => {});
   const drawerStatus = deriveStatus(entry);
+
+  const clearAutosaveTimer = useCallback(() => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+  }, []);
+
+  const queueAutosave = useCallback(
+    (delay = ENTRY_AUTOSAVE_DELAY_MS) => {
+      clearAutosaveTimer();
+      autosaveTimerRef.current = setTimeout(() => {
+        void saveNowRef.current();
+      }, delay);
+    },
+    [clearAutosaveTimer],
+  );
+
+  const saveNow = useCallback(async () => {
+    clearAutosaveTimer();
+    if (!dirtyRef.current || savingRef.current) return;
+
+    const versionAtStart = changeVersionRef.current;
+    const entryIdAtStart = loadedEntryIdRef.current;
+    const snapshot = formRef.current;
+    savingRef.current = true;
+    if (mountedRef.current) {
+      setSaving(true);
+      setSaveError(false);
+    }
+
+    try {
+      await mutateEntryAsync({
+        lorebookId,
+        entryId: entryIdAtStart,
+        ...buildEntrySavePayload(snapshot),
+      });
+
+      if (!mountedRef.current) return;
+      if (changeVersionRef.current === versionAtStart) {
+        dirtyRef.current = false;
+        setDirty(false);
+      } else {
+        queueAutosave();
+      }
+    } catch {
+      if (!mountedRef.current) return;
+      dirtyRef.current = true;
+      setDirty(true);
+      setSaveError(true);
+    } finally {
+      savingRef.current = false;
+      if (mountedRef.current) setSaving(false);
+    }
+  }, [clearAutosaveTimer, lorebookId, mutateEntryAsync, queueAutosave]);
+
+  useEffect(() => {
+    saveNowRef.current = saveNow;
+  }, [saveNow]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearAutosaveTimer();
+      if (dirtyRef.current) {
+        mutateEntry({
+          lorebookId,
+          entryId: loadedEntryIdRef.current,
+          ...buildEntrySavePayload(formRef.current),
+        });
+      }
+    };
+  }, [clearAutosaveTimer, lorebookId, mutateEntry]);
 
   // If the underlying entry changes (e.g. due to an inline-control patch), refresh
   // the drawer form unless the user is in the middle of editing.
   useEffect(() => {
     const switched = loadedEntryIdRef.current !== entry.id;
-    if (switched || !dirty) {
-      setForm({ ...entry });
+    if (switched && dirtyRef.current) {
+      mutateEntry({
+        lorebookId,
+        entryId: loadedEntryIdRef.current,
+        ...buildEntrySavePayload(formRef.current),
+      });
+      dirtyRef.current = false;
       setDirty(false);
+    }
+
+    if (switched || (!dirtyRef.current && !savingRef.current)) {
+      const next = { ...entry };
+      formRef.current = next;
+      setForm(next);
+      setDirty(false);
+      setSaveError(false);
       loadedEntryIdRef.current = entry.id;
     }
-  }, [entry, dirty]);
+  }, [entry, lorebookId, mutateEntry]);
 
-  const update = useCallback((patch: Partial<LorebookEntry>) => {
-    setDirty(true);
-    setForm((curr) => ({ ...curr, ...patch }));
+  const update = useCallback(
+    (patch: Partial<LorebookEntry>) => {
+      changeVersionRef.current += 1;
+      dirtyRef.current = true;
+      setDirty(true);
+      setSaveError(false);
+      const next = { ...formRef.current, ...patch };
+      formRef.current = next;
+      setForm(next);
+      queueAutosave();
+    },
+    [queueAutosave],
+  );
+
+  const flushAutosave = useCallback(() => {
+    void saveNowRef.current();
   }, []);
 
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    try {
-      await updateEntry.mutateAsync({
-        lorebookId,
-        entryId: entry.id,
-        name: form.name,
-        content: form.content,
-        description: form.description,
-        keys: form.keys,
-        secondaryKeys: form.secondaryKeys,
-        selectiveLogic: form.selectiveLogic,
-        matchWholeWords: form.matchWholeWords,
-        caseSensitive: form.caseSensitive,
-        useRegex: form.useRegex,
-        characterFilterMode: form.characterFilterMode,
-        characterFilterIds: form.characterFilterIds,
-        characterTagFilterMode: form.characterTagFilterMode,
-        characterTagFilters: form.characterTagFilters,
-        generationTriggerFilterMode: form.generationTriggerFilterMode,
-        generationTriggerFilters: form.generationTriggerFilters,
-        additionalMatchingSources: form.additionalMatchingSources,
-        role: form.role,
-        sticky: form.sticky,
-        cooldown: form.cooldown,
-        delay: form.delay,
-        ephemeral: form.ephemeral,
-        group: form.group,
-        tag: form.tag,
-        locked: form.locked,
-        preventRecursion: form.preventRecursion,
-      });
-      setDirty(false);
-    } finally {
-      setSaving(false);
-    }
-  }, [form, entry.id, lorebookId, updateEntry]);
-
   return (
-    <div className="space-y-4 border-t border-[var(--border)] px-3 py-3 sm:px-4">
+    <div
+      className="space-y-4 border-t border-[var(--border)] px-3 py-3 sm:px-4"
+      onBlurCapture={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+        flushAutosave();
+      }}
+    >
       <div className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/55 px-3 py-2 text-xs leading-relaxed text-[var(--muted-foreground)]">
         <span className={cn("mt-1 h-2.5 w-2.5 shrink-0 rounded-full", STATUS_DOT_COLOR[drawerStatus])} />
         <p>{STATUS_DESCRIPTION[drawerStatus]}</p>
@@ -760,6 +1096,7 @@ function ExpandedDrawer({
         <textarea
           value={form.description ?? ""}
           onChange={(e) => update({ description: e.target.value })}
+          onBlur={flushAutosave}
           rows={2}
           className="w-full resize-y rounded-lg bg-[var(--secondary)] px-2.5 py-2 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
           placeholder="Brief summary of what this entry is about (used by Knowledge Router agent)."
@@ -882,6 +1219,8 @@ function ExpandedDrawer({
         <ExpandableTextarea
           value={form.content ?? ""}
           onChange={(v) => update({ content: v })}
+          onBlur={flushAutosave}
+          onCommit={flushAutosave}
           rows={5}
           placeholder="The content that will be injected into the prompt when this entry activates…"
           title="Edit Content"
@@ -976,6 +1315,7 @@ function ExpandedDrawer({
             <input
               value={form.group ?? ""}
               onChange={(e) => update({ group: e.target.value })}
+              onBlur={flushAutosave}
               className="w-full rounded-lg bg-[var(--secondary)] px-2 py-1.5 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
               placeholder="Group name"
             />
@@ -985,6 +1325,7 @@ function ExpandedDrawer({
             <input
               value={form.tag ?? ""}
               onChange={(e) => update({ tag: e.target.value })}
+              onBlur={flushAutosave}
               className="w-full rounded-lg bg-[var(--secondary)] px-2 py-1.5 text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
               placeholder="e.g. location, item, lore"
             />
@@ -992,17 +1333,18 @@ function ExpandedDrawer({
         </div>
       </FieldGroup>
 
-      {/* Save bar — only shows when there are unsaved changes in this drawer. */}
-      <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] pt-3">
-        {dirty && <span className="text-[0.6875rem] text-[var(--muted-foreground)]">Unsaved changes</span>}
-        <button
-          onClick={handleSave}
-          disabled={!dirty || saving}
-          className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-all hover:shadow-md active:scale-[0.98] disabled:opacity-50"
+      <div className="flex items-center justify-end border-t border-[var(--border)] pt-3">
+        <span
+          className={cn("text-[0.6875rem]", saveError ? "text-[var(--destructive)]" : "text-[var(--muted-foreground)]")}
         >
-          <Save size="0.75rem" />
-          {saving ? "Saving…" : "Save Entry"}
-        </button>
+          {saveError
+            ? "Autosave failed. Your edits are still here and will retry when you change the entry again."
+            : saving
+              ? "Saving…"
+              : dirty
+                ? "Autosaving…"
+                : "Saved automatically"}
+        </span>
       </div>
     </div>
   );

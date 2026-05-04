@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────
 // Routes: Backup
 // ──────────────────────────────────────────────
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { basename, join, relative } from "path";
 import { existsSync, readdirSync, statSync } from "fs";
 import { cp, mkdir, copyFile, readFile, writeFile } from "fs/promises";
@@ -18,6 +18,7 @@ import { normalizeTimestampOverrides } from "../services/import/import-timestamp
 import { flushDB } from "../db/connection.js";
 import { requirePrivilegedAccess } from "../middleware/privileged-gate.js";
 import { assertInsideDir } from "../utils/security.js";
+import { logger } from "../lib/logger.js";
 
 /** Directories inside DATA_DIR that should be included in every backup. */
 const BACKUP_DIRS = ["storage", "avatars", "sprites", "backgrounds", "gallery", "fonts", "knowledge-sources"];
@@ -262,48 +263,68 @@ function buildBackupRestoreNotes() {
   ].join("\n");
 }
 
+function getBackupErrorMessage(err: unknown, fallback: string) {
+  if (err instanceof Error && err.message.trim()) return err.message;
+  if (typeof err === "string" && err.trim()) return err;
+  return fallback;
+}
+
+function sendBackupRouteError(reply: FastifyReply, err: unknown, operation: string) {
+  const message = getBackupErrorMessage(err, `${operation} failed. Check the server logs for details.`);
+  const logError = err instanceof Error ? err : new Error(message);
+  logger.error(logError, "[backup] %s failed", operation);
+  return reply.status(500).send({
+    error: `${operation} failed`,
+    message,
+  });
+}
+
 export async function backupRoutes(app: FastifyInstance) {
   // Create a full backup folder
   app.post("/", async (req, reply) => {
     if (!requirePrivilegedAccess(req, reply, { feature: "Backup creation" })) return;
-    await flushDB();
-    const dataDir = getDataDir();
-    const dbPath = getDatabaseFilePath();
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
-    const backupName = `marinara-backup-${timestamp}`;
-    const backupsRoot = join(dataDir, "backups");
-    const backupDir = join(backupsRoot, backupName);
+    try {
+      await flushDB();
+      const dataDir = getDataDir();
+      const dbPath = getDatabaseFilePath();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+      const backupName = `marinara-backup-${timestamp}`;
+      const backupsRoot = join(dataDir, "backups");
+      const backupDir = join(backupsRoot, backupName);
 
-    await mkdir(backupDir, { recursive: true });
-    const profileEnvelope = await buildProfileExportEnvelope(app);
-    await writeFile(join(backupDir, "marinara-profile.json"), JSON.stringify(profileEnvelope, null, 2), "utf8");
-    await writeFile(join(backupDir, "RESTORE.txt"), buildBackupRestoreNotes(), "utf8");
+      await mkdir(backupDir, { recursive: true });
+      const profileEnvelope = await buildProfileExportEnvelope(app);
+      await writeFile(join(backupDir, "marinara-profile.json"), JSON.stringify(profileEnvelope, null, 2), "utf8");
+      await writeFile(join(backupDir, "RESTORE.txt"), buildBackupRestoreNotes(), "utf8");
 
-    // 1. Copy the database file (respects DATABASE_URL)
-    if (dbPath && existsSync(dbPath)) {
-      const dbName = basename(dbPath);
-      await copyFile(dbPath, join(backupDir, dbName));
-      // Also copy WAL/SHM if they exist (for a complete backup)
-      for (const ext of ["-wal", "-shm"]) {
-        const walSrc = dbPath + ext;
-        if (existsSync(walSrc)) {
-          await copyFile(walSrc, join(backupDir, dbName + ext));
+      // 1. Copy the database file (respects DATABASE_URL)
+      if (dbPath && existsSync(dbPath)) {
+        const dbName = basename(dbPath);
+        await copyFile(dbPath, join(backupDir, dbName));
+        // Also copy WAL/SHM if they exist (for a complete backup)
+        for (const ext of ["-wal", "-shm"]) {
+          const walSrc = dbPath + ext;
+          if (existsSync(walSrc)) {
+            await copyFile(walSrc, join(backupDir, dbName + ext));
+          }
         }
       }
-    }
 
-    // 2. Copy data directories
-    for (const dirName of BACKUP_DIRS) {
-      const src = resolveBackupDir(dataDir, dirName);
-      if (existsSync(src)) {
-        await cp(src, join(backupDir, dirName), { recursive: true });
+      // 2. Copy data directories
+      for (const dirName of BACKUP_DIRS) {
+        const src = resolveBackupDir(dataDir, dirName);
+        if (existsSync(src)) {
+          await cp(src, join(backupDir, dirName), { recursive: true });
+        }
       }
-    }
 
-    return reply.send({
-      success: true,
-      backupName,
-    });
+      return reply.send({
+        success: true,
+        backupName,
+      });
+    } catch (err) {
+      return sendBackupRouteError(reply, err, "Backup creation");
+    }
   });
 
   // Download a full backup as a single zip — client-side saves to a
@@ -311,55 +332,59 @@ export async function backupRoutes(app: FastifyInstance) {
   // API. Preferred on Android where the on-disk data folder isn't reachable.
   app.post("/download", async (req, reply) => {
     if (!requirePrivilegedAccess(req, reply, { feature: "Backup download" })) return;
-    await flushDB();
-    const dataDir = getDataDir();
-    const dbPath = getDatabaseFilePath();
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
-    const backupName = `marinara-backup-${timestamp}`;
+    try {
+      await flushDB();
+      const dataDir = getDataDir();
+      const dbPath = getDatabaseFilePath();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+      const backupName = `marinara-backup-${timestamp}`;
 
-    const zip = new AdmZip();
-    const profileEnvelope = await buildProfileExportEnvelope(app);
-    zip.addFile(`${backupName}/marinara-profile.json`, Buffer.from(JSON.stringify(profileEnvelope, null, 2), "utf8"));
-    zip.addFile(`${backupName}/RESTORE.txt`, Buffer.from(buildBackupRestoreNotes(), "utf8"));
+      const zip = new AdmZip();
+      const profileEnvelope = await buildProfileExportEnvelope(app);
+      zip.addFile(`${backupName}/marinara-profile.json`, Buffer.from(JSON.stringify(profileEnvelope, null, 2), "utf8"));
+      zip.addFile(`${backupName}/RESTORE.txt`, Buffer.from(buildBackupRestoreNotes(), "utf8"));
 
-    // 1. Add the database file (and WAL/SHM if present)
-    if (dbPath && existsSync(dbPath)) {
-      const dbName = basename(dbPath);
-      zip.addFile(`${backupName}/${dbName}`, await readFile(dbPath));
-      for (const ext of ["-wal", "-shm"]) {
-        const walSrc = dbPath + ext;
-        if (existsSync(walSrc)) {
-          zip.addFile(`${backupName}/${dbName}${ext}`, await readFile(walSrc));
-        }
-      }
-    }
-
-    // 2. Recursively add each data directory under backupName/<dir>/...
-    for (const dirName of BACKUP_DIRS) {
-      const src = resolveBackupDir(dataDir, dirName);
-      if (!existsSync(src)) continue;
-      const stack: string[] = [src];
-      while (stack.length > 0) {
-        const current = stack.pop()!;
-        for (const entry of readdirSync(current)) {
-          const full = join(current, entry);
-          const st = statSync(full);
-          if (st.isDirectory()) {
-            stack.push(full);
-          } else if (st.isFile()) {
-            const rel = [dirName, relative(src, full)].filter(Boolean).join("/").split(/[\\/]/g).join("/");
-            zip.addFile(`${backupName}/${rel}`, await readFile(full));
+      // 1. Add the database file (and WAL/SHM if present)
+      if (dbPath && existsSync(dbPath)) {
+        const dbName = basename(dbPath);
+        zip.addFile(`${backupName}/${dbName}`, await readFile(dbPath));
+        for (const ext of ["-wal", "-shm"]) {
+          const walSrc = dbPath + ext;
+          if (existsSync(walSrc)) {
+            zip.addFile(`${backupName}/${dbName}${ext}`, await readFile(walSrc));
           }
         }
       }
-    }
 
-    const buf = zip.toBuffer();
-    return reply
-      .header("Content-Type", "application/zip")
-      .header("Content-Disposition", `attachment; filename="${backupName}.zip"`)
-      .header("Content-Length", buf.length.toString())
-      .send(buf);
+      // 2. Recursively add each data directory under backupName/<dir>/...
+      for (const dirName of BACKUP_DIRS) {
+        const src = resolveBackupDir(dataDir, dirName);
+        if (!existsSync(src)) continue;
+        const stack: string[] = [src];
+        while (stack.length > 0) {
+          const current = stack.pop()!;
+          for (const entry of readdirSync(current)) {
+            const full = join(current, entry);
+            const st = statSync(full);
+            if (st.isDirectory()) {
+              stack.push(full);
+            } else if (st.isFile()) {
+              const rel = [dirName, relative(src, full)].filter(Boolean).join("/").split(/[\\/]/g).join("/");
+              zip.addFile(`${backupName}/${rel}`, await readFile(full));
+            }
+          }
+        }
+      }
+
+      const buf = zip.toBuffer();
+      return reply
+        .header("Content-Type", "application/zip")
+        .header("Content-Disposition", `attachment; filename="${backupName}.zip"`)
+        .header("Content-Length", buf.length.toString())
+        .send(buf);
+    } catch (err) {
+      return sendBackupRouteError(reply, err, "Backup download");
+    }
   });
 
   // List existing backups
@@ -408,22 +433,26 @@ export async function backupRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { format?: ExportFormat } }>("/export-profile", async (req, reply) => {
     if (!requirePrivilegedAccess(req, reply, { feature: "Profile export" })) return;
 
-    if (req.query.format === "compatible") {
-      const zip = await buildCompatibleProfileZip(app);
-      const buffer = zip.toBuffer();
+    try {
+      if (req.query.format === "compatible") {
+        const zip = await buildCompatibleProfileZip(app);
+        const buffer = zip.toBuffer();
+        return reply
+          .header("Content-Type", "application/zip")
+          .header("Content-Disposition", `attachment; filename="marinara-compatible-export.zip"`)
+          .header("Content-Length", buffer.length.toString())
+          .send(buffer);
+      }
+
+      const envelope = await buildProfileExportEnvelope(app);
+
       return reply
-        .header("Content-Type", "application/zip")
-        .header("Content-Disposition", `attachment; filename="marinara-compatible-export.zip"`)
-        .header("Content-Length", buffer.length.toString())
-        .send(buffer);
+        .header("Content-Disposition", `attachment; filename="marinara-profile.json"`)
+        .header("Content-Type", "application/json")
+        .send(envelope);
+    } catch (err) {
+      return sendBackupRouteError(reply, err, "Profile export");
     }
-
-    const envelope = await buildProfileExportEnvelope(app);
-
-    return reply
-      .header("Content-Disposition", `attachment; filename="marinara-profile.json"`)
-      .header("Content-Type", "application/json")
-      .send(envelope);
   });
 
   // ── Profile Import ──

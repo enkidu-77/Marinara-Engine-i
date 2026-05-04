@@ -360,11 +360,13 @@ const CHAT_HTML_ALLOWED_TAGS = [
 
 const CHAT_HTML_ALLOWED_ATTR = [
   "alt",
+  "class",
   "color",
   "colspan",
   "data-spk",
   "decoding",
   "href",
+  "id",
   "loading",
   "rel",
   "rowspan",
@@ -373,6 +375,9 @@ const CHAT_HTML_ALLOWED_ATTR = [
   "target",
   "title",
 ] as const;
+
+const CHAT_STYLE_BLOCK_RE = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+const CSS_SELECTOR_RE = /(^|[{}])\s*([^@{}][^{]*)\{/g;
 
 function sanitizeChatHtml(html: string, options: { allowStyle?: boolean } = {}) {
   const allowedAttr = options.allowStyle
@@ -388,6 +393,50 @@ function sanitizeChatHtml(html: string, options: { allowStyle?: boolean } = {}) 
   });
 }
 
+function extractChatStyleBlocks(html: string): { html: string; css: string } {
+  const cssBlocks: string[] = [];
+  const withoutStyles = html.replace(CHAT_STYLE_BLOCK_RE, (_match, css: string) => {
+    cssBlocks.push(css);
+    return "";
+  });
+  return { html: withoutStyles, css: cssBlocks.join("\n") };
+}
+
+function sanitizeChatCss(css: string): string {
+  return css
+    .replace(/<\/?style\b[^>]*>/gi, "")
+    .replace(/@import\s+[^;]+;?/gi, "")
+    .replace(/@namespace\s+[^;]+;?/gi, "")
+    .replace(/expression\s*\([^)]*\)/gi, "")
+    .replace(/javascript\s*:/gi, "")
+    .replace(/vbscript\s*:/gi, "")
+    .replace(/behavior\s*:/gi, "x-behavior:")
+    .replace(/-moz-binding\s*:/gi, "x-moz-binding:")
+    .replace(/url\s*\(\s*(['"]?)(?!data:image\/|https?:\/\/)[^)]+\)/gi, "none")
+    .replace(/<\/style/gi, "<\\/style")
+    .trim();
+}
+
+function scopeChatCss(css: string, scopeSelector: string): string {
+  const sanitized = sanitizeChatCss(css);
+  if (!sanitized) return "";
+  return sanitized.replace(CSS_SELECTOR_RE, (_match, boundary: string, selectors: string) => {
+    const scopedSelectors = selectors
+      .split(",")
+      .map((selector) => {
+        const trimmed = selector.trim();
+        if (!trimmed) return "";
+        if (/^(from|to|\d+(?:\.\d+)?%)$/i.test(trimmed)) return trimmed;
+        if (trimmed.startsWith(scopeSelector)) return trimmed;
+        if (trimmed === ":root" || trimmed === "html" || trimmed === "body") return scopeSelector;
+        return `${scopeSelector} ${trimmed}`;
+      })
+      .filter(Boolean)
+      .join(", ");
+    return `${boundary} ${scopedSelectors}{`;
+  });
+}
+
 /**
  * Render message content, handling both plain text with dialogue highlighting
  * and HTML blocks that should be rendered as actual HTML.
@@ -397,6 +446,7 @@ function renderContent(
   dialogueColor?: string,
   speakerColorMap?: Map<string, string>,
   boldDialogue = true,
+  htmlScopeClass = "mari-html-message-content",
 ): ReactNode {
   // Normalise curly quotes to straight so they display consistently
   const normalized = text.replace(/[“”„‟]/g, '"').replace(/[‘’]/g, "'");
@@ -420,29 +470,22 @@ function renderContent(
       })
     : normalized.replace(SPEAKER_TAG_RE, "$2");
 
+  const { html: strippedWithoutStyleBlocks, css: rawStyleBlocks } = extractChatStyleBlocks(stripped);
+
   // Convert newlines to <br> with compact spacing for HTML content,
-  // but preserve newlines inside <svg> and <style> blocks — injecting
-  // <br> into SVG foreign content breaks the HTML parser's namespace
-  // handling, and corrupts stylesheets.
+  // but preserve newlines inside <svg> blocks — injecting <br> into SVG
+  // foreign content breaks the HTML parser's namespace handling.
   // Also skip newlines that sit between HTML tags (source formatting only).
   // First, protect newlines inside attribute values (e.g. multi-line style="")
   // by temporarily replacing them with a placeholder.
   const ATTR_NL_PLACEHOLDER = "\x00ATTRNL\x00";
-  const attrProtected = stripped.replace(
+  const attrProtected = strippedWithoutStyleBlocks.replace(
     /(<[^>]*?)("[^"]*"|'[^']*')([^>]*>)/g,
     (_m, before: string, attr: string, after: string) => before + attr.replace(/\n/g, ATTR_NL_PLACEHOLDER) + after,
   );
   const withBreaks = attrProtected
-    .replace(
-      /(<svg[\s\S]*?<\/svg>)|(<style[\s\S]*?<\/style>)|(>\s*)\n(\s*<)|\n/gi,
-      (_m, svgBlock, styleBlock, pre, post) =>
-        svgBlock
-          ? svgBlock
-          : styleBlock
-            ? styleBlock
-            : pre
-              ? `${pre}${post}`
-              : '<br style="display:block;margin:0.2em 0">',
+    .replace(/(<svg[\s\S]*?<\/svg>)|(>\s*)\n(\s*<)|\n/gi, (_m, svgBlock, pre, post) =>
+      svgBlock ? svgBlock : pre ? `${pre}${post}` : '<br style="display:block;margin:0.2em 0">',
     )
     .replace(new RegExp(ATTR_NL_PLACEHOLDER, "g"), "\n");
 
@@ -454,7 +497,7 @@ function renderContent(
     (_m, alt: string, url: string) => `<img src="${url}" alt="${alt || "image"}" loading="lazy" decoding="async">`,
   );
 
-  const clean = sanitizeChatHtml(withImages);
+  const clean = sanitizeChatHtml(withImages, { allowStyle: true });
 
   // Apply dialogue bolding inside sanitised HTML with per-speaker color support.
   const withDialogue = (() => {
@@ -505,8 +548,10 @@ function renderContent(
   // Apply markdown-style bold/italic in HTML path
   const withMarkdown = applyInlineMarkdownHTML(withHr);
   const finalHtml = sanitizeChatHtml(withMarkdown, { allowStyle: true });
+  const scopedCss = scopeChatCss(rawStyleBlocks, `.${htmlScopeClass}`);
+  const html = scopedCss ? `<style>${scopedCss}</style>${finalHtml}` : finalHtml;
 
-  return <div className="overflow-hidden" dangerouslySetInnerHTML={{ __html: finalHtml }} />;
+  return <div className={cn("overflow-hidden", htmlScopeClass)} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 /** Build style object for name color (supports gradients). */
@@ -1009,10 +1054,14 @@ export const ChatMessage = memo(function ChatMessage({
   // Render content with dialogue highlighting (or HTML rendering)
   const text = typeof displayContent === "string" ? displayContent : message.content;
   const isHtmlContent = HTML_TAG_RE.test(text);
+  const htmlScopeClass = useMemo(() => {
+    const suffix = message.id.replace(/[^a-zA-Z0-9_-]/g, "");
+    return `mari-html-message-${suffix || "content"}`;
+  }, [message.id]);
 
   const renderedContent = useMemo(() => {
-    return renderContent(text, dialogueColor, speakerColorMap, boldDialogue);
-  }, [text, dialogueColor, speakerColorMap, boldDialogue]);
+    return renderContent(text, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass);
+  }, [text, dialogueColor, speakerColorMap, boldDialogue, htmlScopeClass]);
 
   const handleCopy = () => {
     copyToClipboard(message.content);
@@ -1204,8 +1253,11 @@ export const ChatMessage = memo(function ChatMessage({
                 Narrator
                 <span className="h-px flex-1 bg-amber-400/20" />
               </div>
-              <div className="mari-message-content whitespace-pre-wrap break-words italic" style={messageTextStyle}>
-                {displayContent}
+              <div
+                className={cn("mari-message-content break-words italic", !isHtmlContent && "whitespace-pre-wrap")}
+                style={messageTextStyle}
+              >
+                {renderedContent}
               </div>
             </div>
           </div>

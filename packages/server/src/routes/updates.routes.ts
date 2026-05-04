@@ -194,10 +194,40 @@ async function resolvePinnedPnpmRunner(root: string): Promise<PnpmRunner> {
       return { command: "corepack", prefixArgs: [`pnpm@${pnpmVersion}`] };
     }
   } catch {
+    // Fall through to an already-installed pnpm. Some older Corepack builds
+    // cannot resolve newer pnpm package signatures, but a user's global pnpm
+    // may still be perfectly capable of installing this workspace.
+  }
+
+  try {
+    const { stdout } = await execFileAsync("pnpm", ["--version"], {
+      cwd: root,
+      timeout: 10_000,
+      shell,
+    });
+    if (stdout.trim()) {
+      return { command: "pnpm", prefixArgs: [] };
+    }
+  } catch {
     // Fall through to npx.
   }
 
-  throw new Error(`Could not start pnpm ${pnpmVersion} via Corepack. Enable Corepack or run the update manually.`);
+  try {
+    const { stdout } = await execFileAsync("npx", ["--yes", `pnpm@${pnpmVersion}`, "--version"], {
+      cwd: root,
+      timeout: 60_000,
+      shell,
+    });
+    if (stdout.trim() === pnpmVersion) {
+      return { command: "npx", prefixArgs: ["--yes", `pnpm@${pnpmVersion}`] };
+    }
+  } catch {
+    // Fall through to the user-facing error below.
+  }
+
+  throw new Error(
+    `Could not start pnpm ${pnpmVersion}. Enable Corepack, install pnpm manually, or run the update manually.`,
+  );
 }
 
 async function runPinnedPnpm(root: string, args: string[], timeout: number) {
@@ -504,7 +534,7 @@ export async function updatesRoutes(app: FastifyInstance) {
       const pnpmVersion = getPinnedPnpmVersion(root);
       return reply.status(500).send({
         error: `Update failed: ${message}`,
-        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} ${UPDATE_BRANCH} && git merge --ff-only ${UPDATE_REF} && corepack pnpm@${pnpmVersion} install --frozen-lockfile && corepack pnpm@${pnpmVersion} --filter @marinara-engine/shared build && corepack pnpm@${pnpmVersion} --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build`,
+        hint: `You can try running the update manually: git fetch ${UPDATE_REMOTE} ${UPDATE_BRANCH} && git merge --ff-only ${UPDATE_REF} && pnpm install --frozen-lockfile && pnpm --filter @marinara-engine/shared build && pnpm --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build. If pnpm is unavailable, run npm install -g pnpm@${pnpmVersion} first.`,
       });
     }
   });

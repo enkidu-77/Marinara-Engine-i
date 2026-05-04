@@ -105,8 +105,8 @@ fi
 
 if [ "$PNPM_RUNNER" = "pnpm" ]; then
     CURRENT_PNPM_VERSION=$(pnpm --version 2>/dev/null || true)
-    if [ "$CURRENT_PNPM_VERSION" != "$PNPM_VERSION" ]; then
-        CURRENT_PNPM_VERSION=""
+    if [ -n "$CURRENT_PNPM_VERSION" ]; then
+        echo "  [..] Using installed pnpm ${CURRENT_PNPM_VERSION}"
     fi
 fi
 
@@ -118,7 +118,7 @@ if [ -z "$CURRENT_PNPM_VERSION" ]; then
     fi
 fi
 
-if [ -z "$CURRENT_PNPM_VERSION" ] || [ "$CURRENT_PNPM_VERSION" != "$PNPM_VERSION" ]; then
+if [ -z "$CURRENT_PNPM_VERSION" ]; then
     echo "  [ERROR] Failed to make pnpm ${PNPM_VERSION} available."
     exit 1
 fi

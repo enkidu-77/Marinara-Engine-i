@@ -12,6 +12,7 @@ import { createConnectionsStorage } from "../services/storage/connections.storag
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createGalleryStorage } from "../services/storage/gallery.storage.js";
 import { createGameStateStorage } from "../services/storage/game-state.storage.js";
+import { createLorebooksStorage } from "../services/storage/lorebooks.storage.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { extractLeadingThinkingBlocks } from "../services/llm/inline-thinking.js";
 import { fitMessagesToContext, type ChatMessage, type ChatOptions } from "../services/llm/base-provider.js";
@@ -396,9 +397,16 @@ const updateCampaignProgressionSchema = concludeSessionSchema.extend({
   sessionNumber: z.number().int().min(1),
 });
 
+const regenerateSessionLorebookSchema = z.object({
+  chatId: z.string().min(1),
+  connectionId: z.string().optional(),
+  sessionNumber: z.number().int().min(1).optional(),
+});
+
 const jsonRepairApplySchema = z.object({
   chatId: z.string().min(1),
   rawJson: z.string().min(1),
+  connectionId: z.string().optional(),
   sessionNumber: z.number().int().min(1).optional(),
   nextSessionRequest: z.string().max(5000).optional().default(""),
 });
@@ -1236,6 +1244,9 @@ const SESSION_SUMMARY_CHARS_PER_TOKEN = 4;
 const SESSION_SUMMARY_MIN_TRANSCRIPT_CHARS = 256;
 const SESSION_CONCLUSION_MIN_OUTPUT_TOKENS = 8192;
 const CAMPAIGN_PROGRESSION_MIN_OUTPUT_TOKENS = SESSION_CONCLUSION_MIN_OUTPUT_TOKENS;
+const GAME_LOREBOOK_KEEPER_MIN_OUTPUT_TOKENS = 16_384;
+const GAME_LOREBOOK_KEEPER_SOURCE_ID = "game-lorebook-keeper";
+const GAME_LOREBOOK_KEEPER_MAX_ENTRIES = 32;
 const SESSION_SUMMARY_TRUNCATION_MARKER = "\n\n[Middle of session transcript truncated to fit context window]\n\n";
 
 function truncateSessionTranscriptMiddle(content: string, targetTokens: number): string {
@@ -1485,6 +1496,503 @@ function parseJSON(raw: string): unknown {
     // Fall through — last resort
   }
   return JSON.parse(cleaned);
+}
+
+type GameLorebookKeeperEntry = {
+  entryName: string;
+  content: string;
+  keys: string[];
+  tag: string;
+  description: string;
+};
+
+type GameLorebookKeeperBook = {
+  id: string;
+  name?: string | null;
+  chatId?: string | null;
+  sourceAgentId?: string | null;
+};
+
+type GameLorebookKeeperRunResult =
+  | { status: "success"; lorebookId: string; entryCount: number }
+  | { status: "failed"; lorebookId: string | null; error: string }
+  | { status: "skipped"; reason: string };
+
+function parseChatCharacterIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeKeeperStringList(value: unknown, limit = 8): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(value.map((item) => (typeof item === "string" ? item.trim() : "")).filter((item) => item.length > 0)),
+  ).slice(0, limit);
+}
+
+function truncateKeeperName(name: string): string {
+  const trimmed = name.replace(/\s+/g, " ").trim();
+  return trimmed.length <= 190 ? trimmed : `${trimmed.slice(0, 187).trim()}...`;
+}
+
+function inferKeeperKeys(entryName: string, tag: string): string[] {
+  const cleaned = entryName
+    .replace(/session\s+\d+/gi, " ")
+    .replace(/[^a-zA-Z0-9\s'-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const words = cleaned
+    .split(" ")
+    .map((word) => word.trim())
+    .filter(
+      (word) => word.length >= 3 && !["lore", "world", "party", "player", "locations"].includes(word.toLowerCase()),
+    );
+  return Array.from(new Set([...words.slice(0, 5), tag].filter(Boolean))).slice(0, 6);
+}
+
+function normalizeGameLorebookKeeperEntries(raw: unknown): GameLorebookKeeperEntry[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const container = raw as { entries?: unknown; updates?: unknown };
+  const rawEntries = Array.isArray(container.entries)
+    ? container.entries
+    : Array.isArray(container.updates)
+      ? container.updates
+      : [];
+
+  return rawEntries
+    .flatMap((entry): GameLorebookKeeperEntry[] => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const source = entry as Record<string, unknown>;
+      const rawName =
+        typeof source.entryName === "string" ? source.entryName : typeof source.name === "string" ? source.name : "";
+      const content = typeof source.content === "string" ? source.content.trim() : "";
+      if (!rawName.trim() || !content) return [];
+
+      const tag =
+        typeof source.tag === "string" && source.tag.trim()
+          ? source.tag.trim().replace(/\s+/g, "_").toLowerCase()
+          : "game_lore";
+      const entryName = truncateKeeperName(rawName);
+      const keys = normalizeKeeperStringList(source.keys, 10);
+      const description =
+        typeof source.description === "string" && source.description.trim()
+          ? source.description.trim()
+          : `Game Lorebook Keeper entry tagged ${tag}.`;
+
+      return [
+        {
+          entryName,
+          content,
+          keys: keys.length > 0 ? keys : inferKeeperKeys(entryName, tag),
+          tag,
+          description,
+        },
+      ];
+    })
+    .slice(0, GAME_LOREBOOK_KEEPER_MAX_ENTRIES);
+}
+
+function uniqueKeeperEntryName(name: string, usedNames: Set<string>): string {
+  const base = truncateKeeperName(name);
+  const normalizedBase = base.toLowerCase();
+  if (!usedNames.has(normalizedBase)) {
+    usedNames.add(normalizedBase);
+    return base;
+  }
+
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = truncateKeeperName(`${base} (${suffix})`);
+    const normalized = candidate.toLowerCase();
+    if (!usedNames.has(normalized)) {
+      usedNames.add(normalized);
+      return candidate;
+    }
+  }
+
+  const fallback = truncateKeeperName(`${base} (${randomUUID().slice(0, 8)})`);
+  usedNames.add(fallback.toLowerCase());
+  return fallback;
+}
+
+function formatGameLorebookKeeperTranscript(messages: Array<{ role: string; content: string }>): string {
+  return messages
+    .filter((message) => message.role !== "system")
+    .filter((message) => !message.content.trim().startsWith("**Session "))
+    .map((message) => `[${message.role}] ${message.content}`)
+    .join("\n\n");
+}
+
+function formatGameLorebookKeeperError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || "Lorebook Keeper failed.");
+}
+
+async function resolveGameLorebookKeeperPartyNames(
+  app: FastifyInstance,
+  chat: NonNullable<StoredChatRecord>,
+  meta: Record<string, unknown>,
+  setupConfig: GameSetupConfig | null,
+): Promise<string[]> {
+  const chatCharacterIds = parseChatCharacterIds(chat.characterIds);
+  const rawPartyIds = Array.isArray(meta.gamePartyCharacterIds)
+    ? (meta.gamePartyCharacterIds as unknown[])
+    : ((setupConfig?.partyCharacterIds ?? chatCharacterIds) as unknown[]);
+  const partyIds = Array.from(
+    new Set(rawPartyIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0)),
+  );
+  if (partyIds.length === 0) return [];
+
+  const characterRows = await createCharactersStorage(app.db).list();
+  const characterNameById = new Map<string, string>();
+  for (const row of characterRows as Array<{ id: string; data?: unknown }>) {
+    const data = parseStoredJson<Record<string, unknown>>(row.data);
+    const name = typeof data?.name === "string" ? data.name.trim() : "";
+    if (name) characterNameById.set(row.id, name);
+  }
+
+  const npcs = Array.isArray(meta.gameNpcs) ? (meta.gameNpcs as GameNpc[]) : [];
+  const cardNames = Array.isArray(meta.gameCharacterCards)
+    ? (meta.gameCharacterCards as Array<Record<string, unknown>>)
+        .map((card) => (typeof card.name === "string" ? card.name.trim() : ""))
+        .filter(Boolean)
+    : [];
+
+  return partyIds.flatMap((id, index) => {
+    if (!isPartyNpcId(id)) {
+      const name = characterNameById.get(id) ?? cardNames[index] ?? "";
+      return name ? [name] : [];
+    }
+
+    const npc = npcs.find((candidate) => buildPartyNpcId(candidate.name) === id);
+    if (npc?.name) return [npc.name];
+
+    const cardName = cardNames.find((name) => buildPartyNpcId(name) === id);
+    return cardName ? [cardName] : [];
+  });
+}
+
+async function resolveGameLorebookKeeperBook(args: {
+  lorebooksStore: ReturnType<typeof createLorebooksStorage>;
+  chat: NonNullable<StoredChatRecord>;
+  meta: Record<string, unknown>;
+}): Promise<GameLorebookKeeperBook | null> {
+  const preferredId =
+    typeof args.meta.gameLorebookKeeperLorebookId === "string" && args.meta.gameLorebookKeeperLorebookId.trim()
+      ? args.meta.gameLorebookKeeperLorebookId.trim()
+      : null;
+
+  if (preferredId) {
+    const preferred = (await args.lorebooksStore.getById(preferredId)) as GameLorebookKeeperBook | null;
+    if (
+      preferred?.id &&
+      (preferred.chatId === args.chat.id || preferred.sourceAgentId === GAME_LOREBOOK_KEEPER_SOURCE_ID)
+    ) {
+      return preferred;
+    }
+  }
+
+  const chatBooks = (await args.lorebooksStore.listByChat(args.chat.id)) as unknown as GameLorebookKeeperBook[];
+  const existing = chatBooks.find((book) => book.sourceAgentId === GAME_LOREBOOK_KEEPER_SOURCE_ID);
+  if (existing) return existing;
+
+  const rawName = `${args.chat.name?.trim() || "Game"} - Lorebook Keeper`;
+  const created = (await args.lorebooksStore.create({
+    name: truncateKeeperName(rawName),
+    description: "Game-scoped lorebook maintained after session conclusion by Game Lorebook Keeper.",
+    category: "world",
+    chatId: args.chat.id,
+    enabled: true,
+    generatedBy: "agent",
+    sourceAgentId: GAME_LOREBOOK_KEEPER_SOURCE_ID,
+    tags: ["game", "lorebook-keeper"],
+    scanDepth: 6,
+    tokenBudget: 4096,
+  })) as GameLorebookKeeperBook | null;
+
+  return created?.id ? created : null;
+}
+
+function buildGameLorebookKeeperMessages(args: {
+  chatName: string;
+  setupConfig: GameSetupConfig | null;
+  sessionNumber: number;
+  sessionSummary: SessionSummary;
+  partyNames: string[];
+  existingEntries: Array<{ name?: string | null; tag?: string | null; keys?: string[] | null }>;
+  transcriptText: string;
+}): ChatMessage[] {
+  const existingEntrySummary = args.existingEntries
+    .slice(0, 80)
+    .map((entry) => {
+      const keys = Array.isArray(entry.keys) && entry.keys.length ? ` keys=${entry.keys.join(", ")}` : "";
+      const tag = entry.tag ? ` tag=${entry.tag}` : "";
+      return `- ${entry.name ?? "Untitled"}${tag}${keys}`;
+    })
+    .join("\n");
+
+  const systemPrompt = [
+    "You are Marinara's Game Lorebook Keeper.",
+    "You run only after a Game Mode session has concluded. Preserve durable continuity for this specific game.",
+    "Do not write a session recap. Do not invent future plot. Do not create entries for mundane rooms, transient actions, or things the player did not learn.",
+    "Create entries only when they will help the GM keep the developing world coherent in future sessions.",
+    "When an exact dialogue exchange is important, copy the exact lines into the entry instead of paraphrasing them.",
+    "Return strict JSON only. No markdown, no commentary.",
+  ].join("\n");
+
+  const userPrompt = [
+    `Game: ${args.chatName}`,
+    `Session: ${args.sessionNumber}`,
+    args.setupConfig
+      ? `Setup: ${JSON.stringify({
+          genre: args.setupConfig.genre,
+          setting: args.setupConfig.setting,
+          tone: args.setupConfig.tone,
+          difficulty: args.setupConfig.difficulty,
+          playerGoals: args.setupConfig.playerGoals,
+          language: args.setupConfig.language,
+        })}`
+      : "Setup: unknown",
+    `Party members at session end: ${args.partyNames.length ? args.partyNames.join(", ") : "none"}`,
+    "",
+    "Existing entries in the game lorebook:",
+    existingEntrySummary || "- none yet",
+    "",
+    "Session conclusion JSON:",
+    JSON.stringify(args.sessionSummary, null, 2),
+    "",
+    "Session transcript:",
+    args.transcriptText || "[No transcript available]",
+    "",
+    "Write JSON in exactly this shape:",
+    `{"entries":[{"entryName":"World Lore - Session ${args.sessionNumber}","tag":"world_lore","keys":["specific keyword"],"description":"short editor-facing note","content":"entry text"}]}`,
+    "",
+    "Entry selection rules:",
+    "- World lore: one entry, 0-4 paragraphs, only if important world lore was established or revealed.",
+    "- Locations: one entry, 0-4 paragraphs, only for general discovered locations or meaningful location context; do not list every room.",
+    "- Party members: one entry per party member present at session end, only if the player learned something important about them or had important exchanges with them. Include up to 3 learned details or exchanges per member.",
+    "- Player revelations: one entry total, only if the player's revealed history, nature, goals, powers, secrets, or relationships matter later. Include up to 3 items.",
+    "- Omit categories that have nothing important. Return an empty entries array if nothing durable should be saved.",
+    "- Entry names must include the session number so this run adds new entries instead of overwriting older session notes.",
+    "- Provide 3-8 useful trigger keys per entry.",
+  ].join("\n");
+
+  return [
+    { role: "system", content: systemPrompt, contextKind: "prompt" },
+    { role: "user", content: userPrompt, contextKind: "history" },
+  ];
+}
+
+async function createGameLorebookKeeperEntries(args: {
+  lorebooksStore: ReturnType<typeof createLorebooksStorage>;
+  lorebookId: string;
+  sessionNumber: number;
+  entries: GameLorebookKeeperEntry[];
+  replaceExistingSessionEntries?: boolean;
+}): Promise<number> {
+  const existingEntries = (await args.lorebooksStore.listEntries(args.lorebookId)) as unknown as Array<{
+    id: string;
+    name?: string | null;
+    locked?: unknown;
+    dynamicState?: Record<string, unknown> | null;
+  }>;
+
+  if (args.replaceExistingSessionEntries) {
+    for (const entry of existingEntries) {
+      const state = entry.dynamicState && typeof entry.dynamicState === "object" ? entry.dynamicState : {};
+      const isKeeperEntry = state.source === GAME_LOREBOOK_KEEPER_SOURCE_ID;
+      const isSameSession = state.sessionNumber === args.sessionNumber;
+      const isLocked = entry.locked === true || entry.locked === "true";
+      if (isKeeperEntry && isSameSession && !isLocked) {
+        await args.lorebooksStore.removeEntry(entry.id);
+      }
+    }
+  }
+
+  if (args.entries.length === 0) return 0;
+
+  const refreshedEntries = args.replaceExistingSessionEntries
+    ? ((await args.lorebooksStore.listEntries(args.lorebookId)) as Array<{ name?: string | null }>)
+    : existingEntries;
+  const usedNames = new Set(
+    refreshedEntries.map((entry) => entry.name?.trim().toLowerCase()).filter((name): name is string => !!name),
+  );
+
+  let createdCount = 0;
+  for (const entry of args.entries) {
+    const name = uniqueKeeperEntryName(entry.entryName, usedNames);
+    await args.lorebooksStore.createEntry({
+      lorebookId: args.lorebookId,
+      name,
+      content: entry.content,
+      description: entry.description,
+      keys: entry.keys,
+      enabled: true,
+      constant: true,
+      tag: entry.tag,
+      role: "system",
+      position: 0,
+      depth: 4,
+      order: 100 + refreshedEntries.length + createdCount,
+      generationTriggerFilterMode: "include",
+      generationTriggerFilters: ["game"],
+      preventRecursion: true,
+      dynamicState: {
+        source: GAME_LOREBOOK_KEEPER_SOURCE_ID,
+        sessionNumber: args.sessionNumber,
+      },
+    });
+    createdCount += 1;
+  }
+
+  return createdCount;
+}
+
+async function runGameLorebookKeeperAfterConclusion(args: {
+  app: FastifyInstance;
+  chatId: string;
+  connectionId?: string | null;
+  sessionNumber: number;
+  sessionSummary: SessionSummary;
+  replaceExistingSessionEntries?: boolean;
+}): Promise<GameLorebookKeeperRunResult> {
+  const chats = createChatsStorage(args.app.db);
+  const chat = await chats.getById(args.chatId);
+  if (!chat) return { status: "skipped", reason: "Chat not found" };
+  const meta = parseMeta(chat.metadata);
+  if (meta.gameLorebookKeeperEnabled !== true) return { status: "skipped", reason: "Lorebook Keeper is disabled" };
+
+  let lorebookId: string | null = null;
+
+  try {
+    const lorebooksStore = createLorebooksStorage(args.app.db);
+    const setupConfig = (meta.gameSetupConfig as GameSetupConfig | null) ?? null;
+    const lorebook = await resolveGameLorebookKeeperBook({ lorebooksStore, chat, meta });
+    if (!lorebook?.id) {
+      throw new Error("Could not resolve target lorebook.");
+    }
+    lorebookId = lorebook.id;
+
+    await chats.patchMetadata(args.chatId, (current) => {
+      const activeLorebookIds = Array.isArray(current.activeLorebookIds)
+        ? current.activeLorebookIds.filter((id): id is string => typeof id === "string")
+        : [];
+      return {
+        gameLorebookKeeperLorebookId: lorebook.id,
+        activeLorebookIds: Array.from(new Set([...activeLorebookIds, lorebook.id])),
+        gameLorebookKeeperLastRun: {
+          sessionNumber: args.sessionNumber,
+          status: "running",
+          updatedAt: new Date().toISOString(),
+          lorebookId: lorebook.id,
+        },
+      };
+    });
+
+    const connections = createConnectionsStorage(args.app.db);
+    const { conn, baseUrl, defaultGenerationParameters } = await resolveConnection(
+      connections,
+      args.connectionId,
+      chat.connectionId,
+    );
+    const generationParameters = resolveStoredGameGenerationParameters(meta, defaultGenerationParameters);
+    const provider = createLLMProvider(
+      conn.provider,
+      baseUrl,
+      conn.apiKey!,
+      conn.maxContext,
+      conn.openrouterProvider,
+      conn.maxTokensOverride,
+    );
+    const options = gameGenOptions(
+      conn.model,
+      {
+        maxTokens: Math.max(GAME_LOREBOOK_KEEPER_MIN_OUTPUT_TOKENS, generationParameters?.maxTokens ?? 0),
+        temperature: 0.35,
+        stream: false,
+      },
+      generationParameters,
+    );
+
+    const messages = await chats.listMessages(args.chatId);
+    const partyNames = await resolveGameLorebookKeeperPartyNames(args.app, chat, meta, setupConfig);
+    const existingEntries = (await lorebooksStore.listEntries(lorebook.id)) as Array<{
+      name?: string | null;
+      tag?: string | null;
+      keys?: string[] | null;
+    }>;
+    const keeperMessages = buildGameLorebookKeeperMessages({
+      chatName: chat.name || args.chatId,
+      setupConfig,
+      sessionNumber: args.sessionNumber,
+      sessionSummary: args.sessionSummary,
+      partyNames,
+      existingEntries,
+      transcriptText: formatGameLorebookKeeperTranscript(messages),
+    });
+    const fitted = fitMessagesToContext(keeperMessages, {
+      maxContext: conn.maxContext,
+      maxTokens: options.maxTokens,
+    });
+
+    const result = await provider.chatComplete(fitted.trimmed ? fitted.messages : keeperMessages, options);
+    const extraction = extractLeadingThinkingBlocks(result.content ?? "");
+    const parsed = parseJSON(extraction.content) as Record<string, unknown>;
+    const entries = normalizeGameLorebookKeeperEntries(parsed);
+    const createdCount = await createGameLorebookKeeperEntries({
+      lorebooksStore,
+      lorebookId: lorebook.id,
+      sessionNumber: args.sessionNumber,
+      entries,
+      replaceExistingSessionEntries: args.replaceExistingSessionEntries,
+    });
+
+    await chats.patchMetadata(args.chatId, {
+      gameLorebookKeeperLastRun: {
+        sessionNumber: args.sessionNumber,
+        status: "success",
+        updatedAt: new Date().toISOString(),
+        lorebookId: lorebook.id,
+        entryCount: createdCount,
+      },
+    });
+
+    logger.info(
+      "[game/lorebook-keeper] Added %d entries to lorebook %s for chat %s session %d",
+      createdCount,
+      lorebook.id,
+      args.chatId,
+      args.sessionNumber,
+    );
+    return { status: "success", lorebookId: lorebook.id, entryCount: createdCount };
+  } catch (err) {
+    const error = formatGameLorebookKeeperError(err);
+    await chats.patchMetadata(args.chatId, {
+      gameLorebookKeeperLastRun: {
+        sessionNumber: args.sessionNumber,
+        status: "failed",
+        updatedAt: new Date().toISOString(),
+        lorebookId,
+        error,
+      },
+    });
+    logger.warn(err, "[game/lorebook-keeper] Failed to update game lorebook for chat %s", args.chatId);
+    return { status: "failed", lorebookId, error };
+  }
+}
+
+function queueGameLorebookKeeperAfterConclusion(
+  args: Parameters<typeof runGameLorebookKeeperAfterConclusion>[0],
+): void {
+  void runGameLorebookKeeperAfterConclusion(args).catch((err) => {
+    logger.warn(err, "[game/lorebook-keeper] Queued run crashed for chat %s", args.chatId);
+  });
 }
 
 type JsonRepairKind = "game_setup" | "session_conclusion" | "campaign_progression";
@@ -3008,7 +3516,7 @@ export async function gameRoutes(app: FastifyInstance) {
           title: `Repair Session ${sessionNumber} Summary JSON`,
           rawJson: conclusionExtraction.content,
           applyEndpoint: "/game/session/conclude/apply-json",
-          applyBody: { chatId, nextSessionRequest: trimmedNextSessionRequest },
+          applyBody: { chatId, connectionId: conn.id, nextSessionRequest: trimmedNextSessionRequest },
         }),
       );
       return;
@@ -3074,13 +3582,21 @@ export async function gameRoutes(app: FastifyInstance) {
       /* non-fatal */
     }
 
+    queueGameLorebookKeeperAfterConclusion({
+      app,
+      chatId,
+      connectionId: conn.id,
+      sessionNumber,
+      sessionSummary: appliedConclusion.summary,
+    });
+
     logger.info("[game/session/conclude] Session %d concluded for chat %s", sessionNumber, chatId);
     return { summary: appliedConclusion.summary };
   });
 
   // ── POST /game/session/conclude/apply-json ──
   app.post("/session/conclude/apply-json", async (req, reply) => {
-    const { chatId, rawJson, nextSessionRequest } = jsonRepairApplySchema.parse(req.body);
+    const { chatId, rawJson, connectionId, nextSessionRequest } = jsonRepairApplySchema.parse(req.body);
     const trimmedNextSessionRequest = nextSessionRequest.trim();
     const chats = createChatsStorage(app.db);
     const chat = await chats.getById(chatId);
@@ -3176,7 +3692,60 @@ export async function gameRoutes(app: FastifyInstance) {
       /* non-fatal */
     }
 
+    queueGameLorebookKeeperAfterConclusion({
+      app,
+      chatId,
+      connectionId,
+      sessionNumber,
+      sessionSummary: appliedConclusion.summary,
+    });
+
     return { summary: appliedConclusion.summary };
+  });
+
+  // ── POST /game/session/regenerate-lorebook ──
+  app.post("/session/regenerate-lorebook", async (req) => {
+    const {
+      chatId,
+      connectionId,
+      sessionNumber: requestedSessionNumber,
+    } = regenerateSessionLorebookSchema.parse(req.body);
+    const chats = createChatsStorage(app.db);
+    const chat = await chats.getById(chatId);
+    if (!chat) throw new Error("Chat not found");
+    if ((chat.mode as string) !== "game") throw new Error("Lorebook Keeper retry is only available in game mode");
+
+    const meta = parseMeta(chat.metadata);
+    if (meta.gameLorebookKeeperEnabled !== true) {
+      throw new Error("Game Lorebook Keeper is not enabled for this game");
+    }
+
+    const summaries = normalizeStoredSessionSummaries(meta.gamePreviousSessionSummaries);
+    const sessionNumber = requestedSessionNumber ?? summaries.length;
+    const summary = summaries[sessionNumber - 1];
+    if (!summary) throw new Error("Session summary not found");
+
+    const result = await runGameLorebookKeeperAfterConclusion({
+      app,
+      chatId,
+      connectionId,
+      sessionNumber,
+      sessionSummary: summary,
+      replaceExistingSessionEntries: true,
+    });
+
+    if (result.status === "failed") {
+      throw new Error(result.error || "Game Lorebook Keeper failed");
+    }
+    if (result.status === "skipped") {
+      throw new Error(result.reason || "Game Lorebook Keeper did not run");
+    }
+
+    return {
+      sessionNumber,
+      lorebookId: result.lorebookId,
+      entryCount: result.entryCount,
+    };
   });
 
   // ── POST /game/session/regenerate-conclusion ──

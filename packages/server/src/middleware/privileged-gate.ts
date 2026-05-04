@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { getAdminSecret } from "../config/runtime-config.js";
+import { getAdminSecret, isAdminSecretRequiredOnLoopback } from "../config/runtime-config.js";
 import { isBasicAuthSatisfied } from "./basic-auth.js";
 import { isLoopbackIp } from "./ip-allowlist.js";
 import { safeCompareString } from "../utils/security.js";
@@ -31,6 +31,10 @@ export function requirePrivilegedAccess(
       message: `${options.feature ?? "This feature"} is available only from loopback unless explicitly enabled.`,
     });
     return false;
+  }
+
+  if (isLoopbackIp(request.ip) && !isAdminSecretRequiredOnLoopback()) {
+    return true;
   }
 
   if (!getAdminSecret()) {

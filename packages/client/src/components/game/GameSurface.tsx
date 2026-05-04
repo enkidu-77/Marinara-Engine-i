@@ -19,6 +19,7 @@ import {
   useMoveOnMap,
   useConcludeSession,
   useRegenerateSessionConclusion,
+  useRegenerateSessionLorebook,
   useUpdateCampaignProgression,
   useStartSession,
   useGenerateMap,
@@ -3623,6 +3624,7 @@ export function GameSurface({
   const moveOnMap = useMoveOnMap();
   const concludeSession = useConcludeSession();
   const regenerateSessionConclusion = useRegenerateSessionConclusion();
+  const regenerateSessionLorebook = useRegenerateSessionLorebook();
   const updateCampaignProgression = useUpdateCampaignProgression();
   const startSession = useStartSession();
   const generateMap = useGenerateMap();
@@ -5250,6 +5252,14 @@ export function GameSurface({
       }
     },
     [activeChatId, handleJsonRepairError, regenerateSessionConclusion],
+  );
+
+  const handleRegenerateSessionLorebook = useCallback(
+    async (sessionNumber: number) => {
+      if (!activeChatId) return;
+      await regenerateSessionLorebook.mutateAsync({ chatId: activeChatId, sessionNumber });
+    },
+    [activeChatId, regenerateSessionLorebook],
   );
 
   const handleUpdateCampaignProgression = useCallback(
@@ -6913,6 +6923,25 @@ export function GameSurface({
                         ? (regenerateSessionConclusion.variables?.sessionNumber ?? null)
                         : null
                     }
+                    lorebookKeeperEnabled={chatMeta.gameLorebookKeeperEnabled === true}
+                    lorebookKeeperLastRun={
+                      chatMeta.gameLorebookKeeperLastRun &&
+                      typeof chatMeta.gameLorebookKeeperLastRun === "object" &&
+                      !Array.isArray(chatMeta.gameLorebookKeeperLastRun)
+                        ? (chatMeta.gameLorebookKeeperLastRun as {
+                            sessionNumber: number;
+                            status: "running" | "success" | "failed";
+                            updatedAt: string;
+                            entryCount?: number;
+                            error?: string;
+                          })
+                        : null
+                    }
+                    regeneratingLorebookSessionNumber={
+                      regenerateSessionLorebook.isPending
+                        ? (regenerateSessionLorebook.variables?.sessionNumber ?? null)
+                        : null
+                    }
                     updatingPlotArcsSessionNumber={
                       updateCampaignProgression.isPending
                         ? (updateCampaignProgression.variables?.sessionNumber ?? null)
@@ -6921,6 +6950,7 @@ export function GameSurface({
                     onSaveCurrentSecrets={handleSaveCurrentSessionSecrets}
                     onSaveSession={handleSaveSessionDetails}
                     onRegenerateSession={handleRegenerateSessionConclusion}
+                    onRegenerateLorebook={handleRegenerateSessionLorebook}
                     onUpdatePlotArcs={handleUpdateCampaignProgression}
                     onClose={() => setHistoryOpen(false)}
                   />

@@ -1190,7 +1190,7 @@ export function LorebookEditor() {
                               />
                               {!isCollapsed && (
                                 <div
-                                  className="ml-4 space-y-1.5 border-l border-[var(--border)] pl-3"
+                                  className="ml-2 space-y-1.5 border-l border-[var(--border)] pl-2 sm:ml-3 sm:pl-2.5"
                                   onDragOver={(e) => handleFolderBodyDragOver(folder.id, e)}
                                   onDrop={(e) => {
                                     e.stopPropagation();

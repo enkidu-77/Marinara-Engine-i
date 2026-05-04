@@ -6,13 +6,26 @@ import { createConnectionSchema, inferImageSource } from "@marinara-engine/share
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { resolveConnectionImageDefaults } from "../services/image/image-generation-defaults.js";
-import { isProviderLocalUrlsEnabled } from "../config/runtime-config.js";
+import { isImageLocalUrlsEnabled, isProviderLocalUrlsEnabled } from "../config/runtime-config.js";
 import { safeFetch } from "../utils/security.js";
 
 function resolveImageGenerationSource(conn: Record<string, unknown>, baseUrl: string): string {
   const explicitSource = typeof conn.imageGenerationSource === "string" ? conn.imageGenerationSource : "";
   const model = typeof conn.model === "string" ? conn.model : "";
   return inferImageSource(explicitSource || model, baseUrl);
+}
+
+function localUrlPolicyForProvider(provider: string, imageSource: string) {
+  const isLocalImageBackend =
+    provider === "image_generation" && (imageSource === "comfyui" || imageSource === "automatic1111");
+  return {
+    allowLocal:
+      isLocalImageBackend || (provider === "image_generation" && isImageLocalUrlsEnabled())
+        ? true
+        : isProviderLocalUrlsEnabled(),
+    allowLoopback: true,
+    allowedProtocols: ["https:", "http:"],
+  };
 }
 
 export async function connectionsRoutes(app: FastifyInstance) {
@@ -132,11 +145,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
 
       const res = await safeFetch(testUrl, {
         headers,
-        policy: {
-          allowLocal: isProviderLocalUrlsEnabled(),
-          allowLoopback: true,
-          allowedProtocols: ["https:", "http:"],
-        },
+        policy: localUrlPolicyForProvider(conn.provider, imageSource),
         maxResponseBytes: 2 * 1024 * 1024,
       });
       const latencyMs = Date.now() - start;
@@ -211,11 +220,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
       // ComfyUI: fetch checkpoints from object_info
       if (conn.provider === "image_generation" && imageSource === "comfyui") {
         const res = await safeFetch(`${baseUrl}/object_info/CheckpointLoaderSimple`, {
-          policy: {
-            allowLocal: isProviderLocalUrlsEnabled(),
-            allowLoopback: true,
-            allowedProtocols: ["https:", "http:"],
-          },
+          policy: localUrlPolicyForProvider(conn.provider, imageSource),
           maxResponseBytes: 5 * 1024 * 1024,
         });
         if (!res.ok) {
@@ -231,11 +236,7 @@ export async function connectionsRoutes(app: FastifyInstance) {
       // AUTOMATIC1111 / SD Web UI: fetch models from /sdapi/v1/sd-models
       if (conn.provider === "image_generation" && imageSource === "automatic1111") {
         const res = await safeFetch(`${baseUrl}/sdapi/v1/sd-models`, {
-          policy: {
-            allowLocal: isProviderLocalUrlsEnabled(),
-            allowLoopback: true,
-            allowedProtocols: ["https:", "http:"],
-          },
+          policy: localUrlPolicyForProvider(conn.provider, imageSource),
           maxResponseBytes: 5 * 1024 * 1024,
         });
         if (!res.ok) {

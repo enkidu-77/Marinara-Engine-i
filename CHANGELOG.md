@@ -48,6 +48,7 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Home Assistant HACS integration that syncs Marinara custom tools and a Home Assistant agent for smart-home control.
 - Updated the supported toolchain to Node.js 24 LTS and pnpm 10.33.2 across launchers, installers, Docker images, docs, and CI, plus refreshed dependencies within their compatible ranges.
 - Lorebook entries can now be scoped by active characters, character tags, and generation triggers, and can scan selected character/persona fields as extra keyword-matching sources.
+- Game mode now has an optional Lorebook Keeper that updates a game-scoped lorebook after session conclusion and automatically attaches it to that game.
 
 ### Security
 
@@ -99,6 +100,18 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Restored the animated Marinara logo on the home screen while keeping the static logo as the inactive-page fallback.
 - Tightened the home screen spacing so the logo, FAQ, credits, and special thanks fit more comfortably on desktop and mobile.
 - Windows installer updates now force-refresh the release tag and verify the resolved tag commit instead of aborting on legitimate v1.5.7 hotfix retags.
+- The v1.5.7 Android wrapper APK now uses a bumped `versionCode` for hotfix updates and the release workflow uploads an installable sideload APK.
+- Game Lorebook Keeper now continues in the background after a session is concluded instead of holding the End Session response open.
+- Launchers, installers, and in-app updates now fall back to installed or temporary pnpm when Corepack cannot resolve the exact pinned pnpm patch version.
+- Explicit ComfyUI and AUTOMATIC1111 image-generation connections can use LAN/private-network hosts without the broad image URL opt-in.
+- Restored scoped HTML/CSS rendering inside Roleplay messages and narrator bubbles.
+- Backup and profile export failures now surface the specific server/admin-secret error instead of a generic failure toast.
+- Haptic agent position commands now normalize PositionWithDuration-style outputs and continue executing later commands if one device command fails.
+- Lorebook entry drawers now autosave edits, so the manual Save Entry button is no longer needed.
+- Docker/LAN browser origins now pass CSRF checks when Marinara is reached through a mapped host port, and `CSRF_TRUSTED_ORIGINS=*` is honored as an explicit unsafe wildcard.
+- Loopback backup/profile export requests no longer require `ADMIN_SECRET` by default; remote privileged requests still do.
+- Turning off Conversation schedules now clears saved schedule metadata and resets affected character availability state.
+- Removed the Workbox `index.html` navigation fallback that caused non-precached-url console noise.
 - Various minor UI bugs.
 
 ## [1.5.6]

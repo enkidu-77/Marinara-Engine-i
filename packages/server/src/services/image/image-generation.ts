@@ -149,12 +149,20 @@ export function saveImageToDisk(chatId: string, base64: string, ext: string): st
 const IMAGE_GEN_TIMEOUT = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? 300_000);
 const MAX_IMAGE_RESPONSE_BYTES = 30 * 1024 * 1024;
 
-function imageFetch(url: string | URL, init?: RequestInit) {
+function imageFetch(url: string | URL, init?: RequestInit, options: { allowLocal?: boolean } = {}) {
   return safeFetch(url, {
     ...(init ?? {}),
-    policy: { allowLocal: isImageLocalUrlsEnabled(), allowedProtocols: ["https:", "http:"] },
+    policy: {
+      allowLocal: options.allowLocal ?? isImageLocalUrlsEnabled(),
+      allowLoopback: true,
+      allowedProtocols: ["https:", "http:"],
+    },
     maxResponseBytes: MAX_IMAGE_RESPONSE_BYTES,
   });
+}
+
+function localImageBackendFetch(url: string | URL, init?: RequestInit) {
+  return imageFetch(url, init, { allowLocal: true });
 }
 
 function isOpenAIGptImageModel(model?: string): boolean {
@@ -814,7 +822,7 @@ async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promi
   const resolvedWorkflow = JSON.parse(wfStr);
 
   // Queue the workflow
-  const queueResp = await imageFetch(`${base}/prompt`, {
+  const queueResp = await localImageBackendFetch(`${base}/prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt: resolvedWorkflow }),
@@ -832,7 +840,7 @@ async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promi
   for (let i = 0; i < COMFYUI_GEN_TIMEOUT; i++) {
     await new Promise((r) => setTimeout(r, 1000));
 
-    const historyResp = await imageFetch(`${base}/history/${prompt_id}`, {
+    const historyResp = await localImageBackendFetch(`${base}/history/${prompt_id}`, {
       signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
     });
     if (!historyResp.ok) continue;
@@ -858,7 +866,7 @@ async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promi
           type: img.type || "output",
         });
 
-        const imgResp = await imageFetch(`${base}/view?${params}`, {
+        const imgResp = await localImageBackendFetch(`${base}/view?${params}`, {
           signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
         });
         if (!imgResp.ok) {
@@ -917,7 +925,7 @@ async function generateAutomatic1111(baseUrl: string, request: ImageGenRequest):
 
   const endpoint = useImg2Img ? `${base}/sdapi/v1/img2img` : `${base}/sdapi/v1/txt2img`;
 
-  const resp = await imageFetch(endpoint, {
+  const resp = await localImageBackendFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

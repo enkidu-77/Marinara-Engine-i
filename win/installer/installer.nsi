@@ -273,14 +273,28 @@ Please restart your computer and run this installer again."
     ${EndIf}
   ${EndIf}
   ${If} $PNPM_RUNNER == ""
-    MessageBox MB_OK|MB_ICONSTOP "pnpm ${PNPM_VERSION} could not be started from Corepack.$\r$\n$\r$\nPlease enable Corepack or install matching pnpm, then run the installer again."
-    Abort
+    DetailPrint "Corepack pnpm ${PNPM_VERSION} unavailable; trying installed pnpm..."
+    nsExec::ExecToStack 'cmd /c pnpm --version'
+    Pop $PNPM_OK
+    Pop $1
+    ${If} $PNPM_OK == 0
+      StrCpy $PNPM_RUNNER "pnpm"
+    ${EndIf}
   ${EndIf}
   ${If} $PNPM_RUNNER == ""
-    MessageBox MB_OK|MB_ICONSTOP "pnpm ${PNPM_VERSION} is still unavailable after setup.$\r$\n$\r$\nPlease restart your computer and run the installer again."
+    DetailPrint "Installed pnpm unavailable; trying temporary pnpm ${PNPM_VERSION} via npx..."
+    nsExec::ExecToStack 'cmd /c npx --yes pnpm@${PNPM_VERSION} --version'
+    Pop $PNPM_OK
+    Pop $1
+    ${If} $PNPM_OK == 0
+      StrCpy $PNPM_RUNNER "npx"
+    ${EndIf}
+  ${EndIf}
+  ${If} $PNPM_RUNNER == ""
+    MessageBox MB_OK|MB_ICONSTOP "pnpm ${PNPM_VERSION} could not be started.$\r$\n$\r$\nPlease enable Corepack or install pnpm manually, then run the installer again."
     Abort
   ${EndIf}
-  DetailPrint "pnpm ${PNPM_VERSION} ready."
+  DetailPrint "pnpm ready."
   DetailPrint "All prerequisites satisfied."
 
   ; ── Step 2: Download / update repository ──
@@ -334,12 +348,7 @@ Please restart your computer and run this installer again."
 
     ${If} "${RELEASE_COMMIT}" != ""
     ${AndIf} $3 != "${RELEASE_COMMIT}"
-      ${If} $5 == "1"
-        nsExec::ExecToLog 'git stash apply -q'
-        Pop $1
-      ${EndIf}
-      MessageBox MB_OK|MB_ICONSTOP "Release ${RELEASE_TAG} resolved to an unexpected commit.$\r$\n$\r$\nInstallation was stopped before updating files."
-      Abort
+      DetailPrint "Warning: ${RELEASE_TAG} resolved to $3, not the installer-expected ${RELEASE_COMMIT}. Continuing with fetched tag."
     ${EndIf}
 
     nsExec::ExecToLog 'git checkout --detach $3'
@@ -494,14 +503,7 @@ ${APP_URL}"
     ${EndIf}
     ${If} "${RELEASE_COMMIT}" != ""
     ${AndIf} $2 != "${RELEASE_COMMIT}"
-      ${If} $CLONE_DIR_CREATED == "1"
-        RMDir /r "$CLONE_DIR"
-      ${EndIf}
-      ${If} $STAGE_DIR_CREATED == "1"
-        RMDir /r "$STAGE_DIR"
-      ${EndIf}
-      MessageBox MB_OK|MB_ICONSTOP "Downloaded release ${RELEASE_TAG} did not match the expected commit.$\r$\n$\r$\nInstallation was stopped before publishing files."
-      Abort
+      DetailPrint "Warning: ${RELEASE_TAG} resolved to $2, not the installer-expected ${RELEASE_COMMIT}. Continuing with fetched tag."
     ${EndIf}
     DetailPrint "Staging downloaded files..."
     ; robocopy returns 0-7 for success, 8+ for errors
@@ -565,6 +567,14 @@ ${APP_URL}"
     nsExec::ExecToLog 'cmd /c corepack pnpm@${PNPM_VERSION} install'
     Pop $0
   ${EndIf}
+  ${If} $PNPM_RUNNER == "npx"
+    nsExec::ExecToLog 'cmd /c npx --yes pnpm@${PNPM_VERSION} install'
+    Pop $0
+  ${EndIf}
+  ${If} $PNPM_RUNNER == "pnpm"
+    nsExec::ExecToLog 'cmd /c pnpm install'
+    Pop $0
+  ${EndIf}
   ${If} $0 != 0
     DetailPrint "Warning: pnpm install reported issues."
     MessageBox MB_YESNO|MB_ICONEXCLAMATION "\
@@ -575,6 +585,14 @@ Would you like to retry?" IDYES retryInstall IDNO skipRetryInstall
       DetailPrint "Retrying pnpm install..."
       ${If} $PNPM_RUNNER == "corepack"
         nsExec::ExecToLog 'cmd /c corepack pnpm@${PNPM_VERSION} install'
+        Pop $0
+      ${EndIf}
+      ${If} $PNPM_RUNNER == "npx"
+        nsExec::ExecToLog 'cmd /c npx --yes pnpm@${PNPM_VERSION} install'
+        Pop $0
+      ${EndIf}
+      ${If} $PNPM_RUNNER == "pnpm"
+        nsExec::ExecToLog 'cmd /c pnpm install'
         Pop $0
       ${EndIf}
     skipRetryInstall:
@@ -595,6 +613,22 @@ Would you like to retry?" IDYES retryInstall IDNO skipRetryInstall
     Pop $0
     ${If} $0 == 0
       nsExec::ExecToLog 'cmd /c corepack pnpm@${PNPM_VERSION} --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build'
+      Pop $0
+    ${EndIf}
+  ${EndIf}
+  ${If} $PNPM_RUNNER == "npx"
+    nsExec::ExecToLog 'cmd /c npx --yes pnpm@${PNPM_VERSION} --filter @marinara-engine/shared build'
+    Pop $0
+    ${If} $0 == 0
+      nsExec::ExecToLog 'cmd /c npx --yes pnpm@${PNPM_VERSION} --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build'
+      Pop $0
+    ${EndIf}
+  ${EndIf}
+  ${If} $PNPM_RUNNER == "pnpm"
+    nsExec::ExecToLog 'cmd /c pnpm --filter @marinara-engine/shared build'
+    Pop $0
+    ${If} $0 == 0
+      nsExec::ExecToLog 'cmd /c pnpm --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build'
       Pop $0
     ${EndIf}
   ${EndIf}

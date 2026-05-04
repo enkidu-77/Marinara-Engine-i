@@ -211,6 +211,10 @@ export function getAdminSecret() {
   return normalizeEnvValue(process.env.ADMIN_SECRET);
 }
 
+export function isAdminSecretRequiredOnLoopback() {
+  return isEnabledFlag(process.env.MARINARA_REQUIRE_ADMIN_SECRET_ON_LOOPBACK);
+}
+
 export function getCsrfTrustedOrigins() {
   return parseCsv(process.env.CSRF_TRUSTED_ORIGINS);
 }

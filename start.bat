@@ -56,8 +56,8 @@ if not defined CURRENT_PNPM_VERSION (
     where pnpm >nul 2>&1
     if not errorlevel 1 (
         for /f "usebackq delims=" %%i in (`pnpm --version 2^>nul`) do set "CURRENT_PNPM_VERSION=%%i"
-        if /I not "!CURRENT_PNPM_VERSION!"=="%PNPM_VERSION%" (
-            set "CURRENT_PNPM_VERSION="
+        if defined CURRENT_PNPM_VERSION (
+            echo  [..] Using installed pnpm !CURRENT_PNPM_VERSION!
         )
     )
 )

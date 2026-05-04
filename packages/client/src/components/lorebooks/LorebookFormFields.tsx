@@ -165,12 +165,16 @@ export function handleTextareaTabKeyDown(
 export function ExpandableTextarea({
   value,
   onChange,
+  onBlur,
+  onCommit,
   rows,
   placeholder,
   title,
 }: {
   value: string;
   onChange: (v: string) => void;
+  onBlur?: () => void;
+  onCommit?: () => void;
   rows?: number;
   placeholder?: string;
   title?: string;
@@ -183,6 +187,7 @@ export function ExpandableTextarea({
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
           onKeyDown={(e) => handleTextareaTabKeyDown(e, value, onChange)}
           rows={rows ?? 6}
           className="w-full resize-y rounded-lg bg-[var(--secondary)] p-2.5 pr-9 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
@@ -202,6 +207,7 @@ export function ExpandableTextarea({
           title={title ?? "Edit"}
           value={value}
           onChange={onChange}
+          onCommit={onCommit}
           onClose={() => setExpanded(false)}
           placeholder={placeholder}
         />
@@ -215,12 +221,14 @@ export function ExpandedContentModal({
   title,
   value,
   onChange,
+  onCommit,
   onClose,
   placeholder,
 }: {
   title: string;
   value: string;
   onChange: (v: string) => void;
+  onCommit?: () => void;
   onClose: () => void;
   placeholder?: string;
 }) {
@@ -235,15 +243,17 @@ export function ExpandedContentModal({
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onChange(local);
+        onCommit?.();
         onClose();
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onClose, onChange, local]);
+  }, [onClose, onChange, onCommit, local]);
 
   const handleClose = () => {
     onChange(local);
+    onCommit?.();
     onClose();
   };
 

@@ -197,6 +197,19 @@ export interface ChatMetadata {
   gameLastIllustrationSessionNumber?: number | null;
   /** Background tag for the last rare generated scene illustration. */
   gameLastIllustrationTag?: string;
+  /** Run Game Lorebook Keeper after a session is concluded. */
+  gameLorebookKeeperEnabled?: boolean;
+  /** Chat-scoped lorebook maintained by Game Lorebook Keeper. */
+  gameLorebookKeeperLorebookId?: string | null;
+  /** Status of the most recent Game Lorebook Keeper session-end run. */
+  gameLorebookKeeperLastRun?: {
+    sessionNumber: number;
+    status: "running" | "success" | "failed";
+    updatedAt: string;
+    lorebookId?: string | null;
+    entryCount?: number;
+    error?: string;
+  } | null;
 
   // ── Conversation-Mode Auto-Summarization ──
   /** Per-day auto-generated conversation summaries (key: "DD.MM.YYYY"). */
