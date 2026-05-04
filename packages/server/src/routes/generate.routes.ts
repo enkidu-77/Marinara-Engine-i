@@ -38,6 +38,7 @@ import { injectAtDepth } from "../services/lorebook/prompt-injector.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { resolveConnectionImageDefaults } from "../services/image/image-generation-defaults.js";
 import { loadImageGenerationUserSettings } from "../services/image/image-generation-settings.js";
+import { decryptApiKey, encryptApiKey } from "../utils/crypto.js";
 import { extractLeadingThinkingBlocks } from "../services/llm/inline-thinking.js";
 import {
   assemblePrompt,
@@ -149,6 +150,22 @@ import {
 import { getMoraleTier, formatMoraleContext } from "../services/game/morale.service.js";
 import type { GameMap, GameNpc, LorebookEntry } from "@marinara-engine/shared";
 import { sidecarModelService } from "../services/sidecar/sidecar-model.service.js";
+
+function isEncryptedToken(value: string): boolean {
+  const parts = value.split(":");
+  return (
+    parts.length === 3 &&
+    parts.every((part) => /^[0-9a-f]+$/i.test(part)) &&
+    parts[0]?.length === 24 &&
+    parts[2]?.length === 32
+  );
+}
+
+function decryptStoredToken(value: unknown): string | null {
+  if (typeof value !== "string" || !value) return null;
+  const decrypted = decryptApiKey(value);
+  return decrypted || (isEncryptedToken(value) ? null : value);
+}
 
 function bumpCharacterVersion(value: unknown): string {
   const raw = typeof value === "string" ? value.trim() : "";
@@ -442,11 +459,11 @@ export async function generateRoutes(app: FastifyInstance) {
     const input = generateRequestSchema.parse(req.body);
     const requestDebug = input.debugMode === true;
     const debugLog = (message: string, ...args: any[]) => {
-      if (requestDebug) {
-        console.log(message, ...args);
-      } else {
-        app.log.debug(message, ...args);
+      if (requestDebug && !isDebug) {
+        logger.info(message, ...args);
+        return;
       }
+      logger.debug(message, ...args);
     };
 
     // Resolve the chat
@@ -4101,8 +4118,8 @@ export async function generateRoutes(app: FastifyInstance) {
       if (spotifyAgent) {
         const sSettings =
           typeof spotifyAgent.settings === "string" ? JSON.parse(spotifyAgent.settings) : spotifyAgent.settings || {};
-        spotifyAccessToken = (sSettings.spotifyAccessToken as string) || null;
-        const spotifyRefreshToken = (sSettings.spotifyRefreshToken as string) || null;
+        spotifyAccessToken = decryptStoredToken(sSettings.spotifyAccessToken);
+        const spotifyRefreshToken = decryptStoredToken(sSettings.spotifyRefreshToken);
         const spotifyClientId = (sSettings.spotifyClientId as string) || null;
         spotifyExpiresAt = (sSettings.spotifyExpiresAt as number) ?? 0;
 
@@ -4131,13 +4148,14 @@ export async function generateRoutes(app: FastifyInstance) {
               const refreshedExpiresAt = Date.now() + tokens.expires_in * 1000;
               spotifyAccessToken = tokens.access_token;
               spotifyExpiresAt = refreshedExpiresAt;
+              const nextRefreshToken = tokens.refresh_token ?? spotifyRefreshToken;
               // Persist refreshed tokens in background (don't await)
               agentsStore
                 .update(spotifyAgent.id, {
                   settings: {
                     ...sSettings,
-                    spotifyAccessToken: tokens.access_token,
-                    spotifyRefreshToken: tokens.refresh_token ?? spotifyRefreshToken,
+                    spotifyAccessToken: encryptApiKey(tokens.access_token),
+                    spotifyRefreshToken: nextRefreshToken ? encryptApiKey(nextRefreshToken) : null,
                     spotifyExpiresAt: refreshedExpiresAt,
                   },
                 })
@@ -5513,14 +5531,14 @@ export async function generateRoutes(app: FastifyInstance) {
           const durationMs = Date.now() - genStartTime;
 
           if (input.debugMode && chatMode === "game") {
-            console.log(
+            logger.debug(
               "[generate/game/raw] chatId=%s characterId=%s chars=%d BEGIN",
               input.chatId,
               targetCharId ?? "gm",
               fullResponse.length,
             );
-            console.log(fullResponse);
-            console.log("[generate/game/raw] chatId=%s characterId=%s END", input.chatId, targetCharId ?? "gm");
+            logger.debug("[generate/game/raw] %s", fullResponse);
+            logger.debug("[generate/game/raw] chatId=%s characterId=%s END", input.chatId, targetCharId ?? "gm");
           }
 
           // Some models inline reasoning blocks instead of using provider-native
@@ -5766,7 +5784,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       sendSseEvent(reply, { type: "game_state_patch", data: { location: latestLocation } });
                     }
 
-                    console.log(
+                    logger.info(
                       "[generate/game/map_update] chatId=%s applied=%d location=%s",
                       input.chatId,
                       mapUpdates.length,
@@ -5774,7 +5792,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     );
                   }
                 } catch (err) {
-                  console.warn("[generate/game/map_update] Failed to apply map_update:", err);
+                  logger.warn(err, "[generate/game/map_update] Failed to apply map_update");
                 }
               }
             }

@@ -36,6 +36,18 @@ This file is the release-notes source of truth for Marinara Engine. Reuse these 
 - Lorebook folders.
 - Game mode setup remembers custom genre, tone, setting, and goal options from previous games.
 
+### Security
+
+- Hardened default network access so loopback remains convenient while non-loopback private-network traffic fails closed unless Basic Auth, an allowlist, or an explicit unsafe opt-in is configured.
+- Added global unsafe-method CSRF/origin protections, security headers, route throttling, and shared privileged-route gates for admin, update, backup/import, sidecar, haptics, and custom-tool operations.
+- Added SSRF, path containment, upload validation, bulk-import capability tokens, and response-size guards around high-risk URL, file, and archive flows.
+- Disabled or gated risky execution paths by default, including API-driven update apply, custom script tools, sidecar runtime installs, and remote haptic control.
+- Removed the seeded default provider key, encrypted Spotify token storage, and redacted obvious secrets from profile export.
+- Hardened chat HTML sanitization and SVG/image handling, then upgraded vulnerable production and build dependencies.
+- Hardened Docker, Android WebView/backup, GitHub Actions action references, and Windows installer dependency verification.
+- Breaking/default changes: privileged routes now require `ADMIN_SECRET`, Docker binds to localhost by default, and update apply, custom script tools, and sidecar runtime installs are disabled until operators opt in with the documented environment switches.
+- Operators who intentionally need the old exposure model must set `ADMIN_SECRET`, choose a remote bind address for Docker/launchers, and explicitly enable only the required flows such as `UPDATES_APPLY_ENABLED`, `CUSTOM_TOOL_SCRIPT_ENABLED`, or `SIDECAR_RUNTIME_INSTALL_ENABLED`.
+
 ### Fixed
 
 - Game mode dark screen error addressed.

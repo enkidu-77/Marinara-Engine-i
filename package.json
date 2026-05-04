@@ -8,7 +8,7 @@
   "type": "module",
   "packageManager": "pnpm@10.30.3",
   "engines": {
-    "node": ">=20",
+    "node": ">=20.19 <21 || >=22.12 <23",
     "pnpm": ">=9"
   },
   "scripts": {
@@ -45,7 +45,10 @@
     "overrides": {
       "onnxruntime-common": "1.24.3",
       "onnxruntime-node": "1.24.3",
-      "onnxruntime-web": "1.24.3"
+      "onnxruntime-web": "1.24.3",
+      "protobufjs": "7.5.5",
+      "brace-expansion": "5.0.5",
+      "@anthropic-ai/sdk": "0.91.1"
     }
   }
 }
