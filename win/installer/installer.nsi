@@ -28,7 +28,7 @@
 !define GIT_SHA256 "2b96e7854f0520f0f6b709c21041d9801b1be44d5e1a0d9fa621b2fbc40f1983"
 !define NODE_SHA256 "feffb8e5cb5ac47f793666636d496ef3e975be82c84c4da5d20e6aa8fa4eb806"
 !define RELEASE_TAG "v1.5.7"
-!define RELEASE_COMMIT "05b25eb50c509c303dafa2c34e6b2ff0ffd308bd"
+!define RELEASE_COMMIT "8325c7592b35743884f6852b68937446363697fb"
 
 Name "${APP_NAME}"
 OutFile "Marinara-Engine-Installer-${APP_VERSION}.exe"
@@ -287,7 +287,7 @@ Please restart your computer and run this installer again."
   DetailPrint ""
   ${If} ${FileExists} "$INSTDIR\.git\*.*"
     DetailPrint "Existing installation found — fetching ${RELEASE_TAG}..."
-    nsExec::ExecToLog 'git fetch --tags origin ${RELEASE_TAG} --quiet'
+    nsExec::ExecToLog 'git fetch --quiet --force origin refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}'
     Pop $0
     ${If} $0 != 0
       MessageBox MB_OK|MB_ICONSTOP "Failed to fetch release ${RELEASE_TAG}.$\r$\n$\r$\nPlease check your internet connection and run the installer again."

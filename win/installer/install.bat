@@ -12,7 +12,7 @@ set "NODE_SHA256=feffb8e5cb5ac47f793666636d496ef3e975be82c84c4da5d20e6aa8fa4eb80
 set "GIT_DOWNLOAD_URL=https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
 set "GIT_SHA256=2b96e7854f0520f0f6b709c21041d9801b1be44d5e1a0d9fa621b2fbc40f1983"
 set "RELEASE_TAG=v1.5.7"
-set "RELEASE_COMMIT=05b25eb50c509c303dafa2c34e6b2ff0ffd308bd"
+set "RELEASE_COMMIT=8325c7592b35743884f6852b68937446363697fb"
 
 echo.
 echo  +==========================================+
@@ -187,7 +187,7 @@ set "OLD_HEAD="
 set "TARGET_HEAD="
 set "NEW_HEAD="
 for /f "tokens=*" %%i in ('git rev-parse HEAD 2^>nul') do set "OLD_HEAD=%%i"
-git fetch --quiet --tags origin "%RELEASE_TAG%"
+git fetch --quiet --force origin "refs/tags/%RELEASE_TAG%:refs/tags/%RELEASE_TAG%"
 if errorlevel 1 (
     set "INSTALL_ERROR=Failed to fetch release %RELEASE_TAG%."
     goto :fatal
