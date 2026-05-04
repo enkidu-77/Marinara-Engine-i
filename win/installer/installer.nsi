@@ -28,7 +28,7 @@
 !define GIT_SHA256 "25527923debc06515b3016f2d6bca0820656e8281a23be2f43bfb658bd5dda70"
 !define NODE_SHA256 "2c0cc97ec64c1e4111362e1e32e0547fd870e4d9c79ec844c117da583f21b386"
 !define RELEASE_TAG "v1.5.7"
-!define RELEASE_COMMIT "84bacceb98c58110f7eee80f6b75b79239880a0b"
+!define RELEASE_COMMIT "05b25eb50c509c303dafa2c34e6b2ff0ffd308bd"
 
 Name "${APP_NAME}"
 OutFile "Marinara-Engine-Installer-${APP_VERSION}.exe"

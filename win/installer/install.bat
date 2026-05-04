@@ -12,7 +12,7 @@ set "NODE_SHA256=2c0cc97ec64c1e4111362e1e32e0547fd870e4d9c79ec844c117da583f21b38
 set "GIT_DOWNLOAD_URL=https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
 set "GIT_SHA256=25527923debc06515b3016f2d6bca0820656e8281a23be2f43bfb658bd5dda70"
 set "RELEASE_TAG=v1.5.7"
-set "RELEASE_COMMIT=84bacceb98c58110f7eee80f6b75b79239880a0b"
+set "RELEASE_COMMIT=05b25eb50c509c303dafa2c34e6b2ff0ffd308bd"
 
 echo.
 echo  +==========================================+
