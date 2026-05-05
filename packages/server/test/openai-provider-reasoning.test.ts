@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MODEL_LISTS } from "../../shared/src/constants/model-lists.ts";
+import { createLLMProvider } from "../src/services/llm/provider-registry.js";
 import { OpenAIProvider } from "../src/services/llm/providers/openai.provider.js";
 import type { ChatOptions } from "../src/services/llm/base-provider.js";
 
@@ -8,6 +9,7 @@ async function captureChatRequestBody(
   model: string,
   overrides: Partial<ChatOptions> = {},
   baseUrl = "https://example.com/v1",
+  provider = new OpenAIProvider(baseUrl, "test-key"),
 ) {
   const requests: Array<Record<string, unknown>> = [];
   const originalFetch = globalThis.fetch;
@@ -29,7 +31,6 @@ async function captureChatRequestBody(
 
   try {
     process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
-    const provider = new OpenAIProvider(baseUrl, "test-key");
     const options: ChatOptions = {
       model,
       stream: false,
@@ -58,6 +59,7 @@ async function captureChatCompleteRequestBody(
   model: string,
   overrides: Partial<ChatOptions> = {},
   baseUrl = "https://example.com/v1",
+  provider = new OpenAIProvider(baseUrl, "test-key"),
 ) {
   const requests: Array<Record<string, unknown>> = [];
   const originalFetch = globalThis.fetch;
@@ -81,7 +83,6 @@ async function captureChatCompleteRequestBody(
 
   try {
     process.env.PROVIDER_LOCAL_URLS_ENABLED = "true";
-    const provider = new OpenAIProvider(baseUrl, "test-key");
     const options: ChatOptions = {
       model,
       stream: false,
@@ -111,11 +112,86 @@ test("non-reasoning models do not receive reasoning payloads", async () => {
   assert.equal("enable_thinking" in body, false);
 });
 
-test("GLM models still use enable_thinking", async () => {
-  const body = await captureChatRequestBody("glm-4.5");
+test("GLM models on native Z.AI endpoints still use enable_thinking for provider routes", async () => {
+  const body = await captureChatRequestBody("glm-4.5", {}, "https://api.z.ai/api/paas/v4");
 
   assert.equal(body.enable_thinking, true);
   assert.equal("reasoning_effort" in body, false);
+});
+
+test("custom compatible endpoints omit enable_thinking even on native Z.AI URLs", async () => {
+  const provider = createLLMProvider("custom", "https://api.z.ai/api/paas/v4", "test-key");
+  const body = await captureChatRequestBody("glm-4.5", {}, "https://api.z.ai/api/paas/v4", provider);
+
+  assert.equal("enable_thinking" in body, false);
+  assert.equal("reasoning_effort" in body, false);
+});
+
+test("GLM native endpoint detection ignores host-like URL path and query strings", async () => {
+  const adversarialUrl = "https://example.com/api.z.ai/v1?next=https://open.bigmodel.cn/api/paas/v4";
+
+  const chatBody = await captureChatRequestBody("glm-4.5", {}, adversarialUrl);
+  const completeBody = await captureChatCompleteRequestBody("glm-4.5", {}, adversarialUrl);
+
+  assert.equal("enable_thinking" in chatBody, false);
+  assert.equal("reasoning_effort" in chatBody, false);
+  assert.equal("enable_thinking" in completeBody, false);
+  assert.equal("reasoning_effort" in completeBody, false);
+});
+
+test("GLM-named models on custom compatible endpoints omit enable_thinking", async () => {
+  const provider = createLLMProvider("custom", "https://api.venice.ai/api/v1", "test-key");
+  const body = await captureChatRequestBody("zai-org-glm-5-1", {}, "https://api.venice.ai/api/v1", provider);
+
+  assert.equal("enable_thinking" in body, false);
+  assert.equal("reasoning_effort" in body, false);
+});
+
+test("GLM-named chatComplete requests on custom compatible endpoints omit enable_thinking", async () => {
+  const provider = createLLMProvider("custom", "https://api.venice.ai/api/v1", "test-key");
+  const body = await captureChatCompleteRequestBody("zai-org-glm-5-1", {}, "https://api.venice.ai/api/v1", provider);
+
+  assert.equal("enable_thinking" in body, false);
+  assert.equal("reasoning_effort" in body, false);
+});
+
+test("custom compatible endpoints keep OpenAI reasoning model names on a standard body", async () => {
+  const provider = createLLMProvider("custom", "https://example.com/v1", "test-key");
+  const body = await captureChatRequestBody("o3-mini", {}, "https://example.com/v1", provider);
+
+  assert.equal(body.max_tokens, 512);
+  assert.equal("max_completion_tokens" in body, false);
+  assert.equal("reasoning_effort" in body, false);
+  assert.equal("enable_thinking" in body, false);
+});
+
+test("custom compatible endpoints do not force GPT-5.5 streaming extras", async () => {
+  const provider = createLLMProvider("custom", "https://example.com/v1", "test-key");
+  const body = await captureChatRequestBody(
+    "gpt-5.5",
+    { reasoningEffort: "xhigh", verbosity: "high" },
+    "https://example.com/v1",
+    provider,
+  );
+
+  assert.equal(body.stream, false);
+  assert.equal(body.max_tokens, 512);
+  assert.equal("stream_options" in body, false);
+  assert.equal("max_completion_tokens" in body, false);
+  assert.equal("reasoning_effort" in body, false);
+  assert.equal("verbosity" in body, false);
+});
+
+test("custom parameters can opt custom endpoints into provider-specific fields", async () => {
+  const provider = createLLMProvider("custom", "https://api.venice.ai/api/v1", "test-key");
+  const body = await captureChatRequestBody(
+    "zai-org-glm-5-1",
+    { customParameters: { enable_thinking: true } },
+    "https://api.venice.ai/api/v1",
+    provider,
+  );
+
+  assert.equal(body.enable_thinking, true);
 });
 
 test("OpenAI reasoning models still receive reasoning_effort", async () => {

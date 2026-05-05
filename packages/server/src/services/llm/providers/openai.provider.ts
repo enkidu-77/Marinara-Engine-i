@@ -54,10 +54,31 @@ type ResponsesUsagePayload = {
   };
 };
 
+type OpenAIProviderKind =
+  | "openai"
+  | "openrouter"
+  | "nanogpt"
+  | "xai"
+  | "mistral"
+  | "cohere"
+  | "custom"
+  | "local-sidecar";
+
 /**
  * Handles OpenAI, OpenRouter, Mistral, Cohere, and any OpenAI-compatible endpoint.
  */
 export class OpenAIProvider extends BaseLLMProvider {
+  constructor(
+    baseUrl: string,
+    apiKey: string,
+    defaultMaxContext?: number,
+    defaultOpenrouterProvider?: string | null,
+    maxTokensOverride?: number | null,
+    private readonly providerKind: OpenAIProviderKind = "openai",
+  ) {
+    super(baseUrl, apiKey, defaultMaxContext, defaultOpenrouterProvider, maxTokensOverride);
+  }
+
   private static async parseJsonBody<T>(response: Response, context: string): Promise<T> {
     const raw = await response.text();
     try {
@@ -218,29 +239,40 @@ export class OpenAIProvider extends BaseLLMProvider {
       "Content-Type": "application/json",
       Authorization: `Bearer ${this.apiKey}`,
     };
-    if (this.baseUrl.includes("openrouter.ai")) {
+    if (!this.isGenericCustomProvider() && this.baseUrl.includes("openrouter.ai")) {
       h["HTTP-Referer"] = "https://github.com/Pasta-Devs/Marinara-Engine";
       h["X-Title"] = "Marinara Engine";
     }
     return h;
   }
 
+  private isGenericCustomProvider(): boolean {
+    return this.providerKind === "custom";
+  }
+
   /** Check if a model ID represents an OpenAI reasoning model */
   private isReasoningModel(model: string): boolean {
+    if (this.isGenericCustomProvider()) return false;
     const m = model.toLowerCase();
     return /^(o1|o3|o4)/.test(m) || m.startsWith("gpt-5");
   }
 
   private isXAIEndpoint(): boolean {
+    if (this.isGenericCustomProvider()) return false;
     const baseUrl = this.baseUrl.toLowerCase();
     return baseUrl.includes("api.x.ai") || baseUrl.includes("x.ai/");
   }
 
   private isOpenRouterXAIModel(model: string): boolean {
-    return this.baseUrl.includes("openrouter.ai") && model.toLowerCase().startsWith("x-ai/grok-");
+    return (
+      !this.isGenericCustomProvider() &&
+      this.baseUrl.includes("openrouter.ai") &&
+      model.toLowerCase().startsWith("x-ai/grok-")
+    );
   }
 
   private isXAIMultiAgentModel(model: string): boolean {
+    if (this.isGenericCustomProvider()) return false;
     return model.toLowerCase() === "grok-4.20-multi-agent";
   }
 
@@ -269,6 +301,7 @@ export class OpenAIProvider extends BaseLLMProvider {
    * GPT-5.x models only support temperature when reasoning effort is "none" (the default).
    */
   private isNoTemperatureModel(model: string, reasoningEffort?: string): boolean {
+    if (this.isGenericCustomProvider()) return false;
     const m = model.toLowerCase();
     if (/^(o1|o3|o4)/.test(m)) return true;
     if (m.startsWith("gpt-5") && reasoningEffort && reasoningEffort !== "none") return true;
@@ -277,9 +310,27 @@ export class OpenAIProvider extends BaseLLMProvider {
     return false;
   }
 
-  /** GLM variants use a boolean thinking toggle instead of effort-based reasoning config. */
+  /** GLM variants on Z.AI/BigModel use a boolean thinking toggle instead of effort-based reasoning config. */
   private isGLMModel(model: string): boolean {
     return model.toLowerCase().includes("glm");
+  }
+
+  private isNativeGLMEndpoint(): boolean {
+    try {
+      const hostname = new URL(this.baseUrl).hostname.toLowerCase();
+      return (
+        hostname === "api.z.ai" ||
+        hostname.endsWith(".api.z.ai") ||
+        hostname === "open.bigmodel.cn" ||
+        hostname.endsWith(".open.bigmodel.cn")
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private shouldSendGLMEnableThinking(model: string): boolean {
+    return !this.isGenericCustomProvider() && this.isGLMModel(model) && this.isNativeGLMEndpoint();
   }
 
   private hasActiveReasoningEffort(reasoningEffort?: string | null): boolean {
@@ -287,7 +338,7 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   private isOpenRouterEndpoint(): boolean {
-    return this.baseUrl.includes("openrouter.ai");
+    return !this.isGenericCustomProvider() && this.baseUrl.includes("openrouter.ai");
   }
 
   private supportsOpenRouterUnifiedReasoning(model: string): boolean {
@@ -305,7 +356,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       return;
     }
 
-    if (this.isGLMModel(options.model)) {
+    if (this.shouldSendGLMEnableThinking(options.model)) {
       body.enable_thinking = this.hasActiveReasoningEffort(options.reasoningEffort);
       return;
     }
@@ -335,7 +386,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       return;
     }
 
-    if (this.isGLMModel(options.model)) {
+    if (this.shouldSendGLMEnableThinking(options.model)) {
       body.enable_thinking = this.hasActiveReasoningEffort(options.reasoningEffort);
       return;
     }
@@ -358,6 +409,7 @@ export class OpenAIProvider extends BaseLLMProvider {
 
   /** Check if a model requires or benefits from the Responses API instead of Chat Completions */
   private useResponsesAPI(model: string, options?: Pick<ChatOptions, "captureReasoning">): boolean {
+    if (this.isGenericCustomProvider()) return false;
     const m = model.toLowerCase();
     return (
       this.isXAIMultiAgentModel(model) ||
@@ -368,11 +420,13 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   private requiresStreamingChatCompletions(model: string): boolean {
+    if (this.isGenericCustomProvider()) return false;
     return model.toLowerCase().startsWith("gpt-5.5");
   }
 
   private shouldUseOpenRouterPromptCaching(options: ChatOptions): boolean {
     return (
+      !this.isGenericCustomProvider() &&
       this.baseUrl.includes("openrouter.ai") &&
       !!options.enableCaching &&
       options.model.toLowerCase().includes("claude")
@@ -383,6 +437,14 @@ export class OpenAIProvider extends BaseLLMProvider {
     if (!this.shouldUseOpenRouterPromptCaching(options)) return;
     body.cache_control = { type: "ephemeral" };
     logger.debug("[OpenAI] Enabling OpenRouter prompt caching for model=%s", options.model);
+  }
+
+  private supportsGpt5Verbosity(model: string): boolean {
+    return !this.isGenericCustomProvider() && model.toLowerCase().startsWith("gpt-5");
+  }
+
+  private shouldApplyOpenRouterProviderOverride(openrouterProvider?: string | null): boolean {
+    return !!openrouterProvider && !this.isGenericCustomProvider() && this.baseUrl.includes("openrouter.ai");
   }
 
   private static extractChatCompletionsUsage(usage: ChatCompletionsUsagePayload | undefined): LLMUsage | undefined {
@@ -405,6 +467,7 @@ export class OpenAIProvider extends BaseLLMProvider {
    * OpenAI GPT-5.x and o-series models use "developer" for system-level instructions.
    */
   private usesDeveloperRole(model: string): boolean {
+    if (this.isGenericCustomProvider()) return false;
     const m = model.toLowerCase();
     return m.startsWith("gpt-5") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4");
   }
@@ -512,7 +575,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       }
     }
 
-    if (options.verbosity && options.model.toLowerCase().startsWith("gpt-5")) {
+    if (options.verbosity && this.supportsGpt5Verbosity(options.model)) {
       body.verbosity = options.verbosity;
     }
 
@@ -520,7 +583,7 @@ export class OpenAIProvider extends BaseLLMProvider {
 
     // OpenRouter provider routing preference
     const openrouterProvider = this.resolveOpenrouterProvider(options.openrouterProvider);
-    if (openrouterProvider && this.baseUrl.includes("openrouter.ai")) {
+    if (this.shouldApplyOpenRouterProviderOverride(openrouterProvider)) {
       body.provider = { order: [openrouterProvider] };
     }
 
@@ -720,7 +783,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       }
     }
 
-    if (options.verbosity && options.model.toLowerCase().startsWith("gpt-5")) {
+    if (options.verbosity && this.supportsGpt5Verbosity(options.model)) {
       body.verbosity = options.verbosity;
     }
 
@@ -728,7 +791,7 @@ export class OpenAIProvider extends BaseLLMProvider {
 
     // OpenRouter provider routing preference
     const openrouterProvider = this.resolveOpenrouterProvider(options.openrouterProvider);
-    if (openrouterProvider && this.baseUrl.includes("openrouter.ai")) {
+    if (this.shouldApplyOpenRouterProviderOverride(openrouterProvider)) {
       body.provider = { order: [openrouterProvider] };
     }
 
@@ -1091,12 +1154,12 @@ export class OpenAIProvider extends BaseLLMProvider {
     this.applyResponsesReasoning(body, options);
 
     // GPT-5+ text verbosity control
-    if (options.verbosity && options.model.toLowerCase().startsWith("gpt-5")) {
+    if (options.verbosity && this.supportsGpt5Verbosity(options.model)) {
       body.text = { verbosity: options.verbosity };
     }
 
     const openrouterProvider = this.resolveOpenrouterProvider(options.openrouterProvider);
-    if (openrouterProvider && this.baseUrl.includes("openrouter.ai")) {
+    if (this.shouldApplyOpenRouterProviderOverride(openrouterProvider)) {
       body.provider = { order: [openrouterProvider] };
     }
 
