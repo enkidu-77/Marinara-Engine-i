@@ -273,6 +273,7 @@ export function ChatSettingsDrawer({
     () => (typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {})),
     [chat.metadata],
   );
+  const isSceneChat = metadata.sceneStatus === "active" || typeof metadata.sceneOriginChatId === "string";
   const hasGeneratedConversationSchedules =
     !!metadata.characterSchedules &&
     typeof metadata.characterSchedules === "object" &&
@@ -1068,8 +1069,8 @@ export function ChatSettingsDrawer({
           </button>
         </div>
 
-        {/* Chat Settings Preset bar — hidden in Game Mode (not designed for it) */}
-        {!isGame && (
+        {/* Chat Settings Preset bar — hidden in Game Mode and scene chats. */}
+        {!isGame && !isSceneChat && (
           <div className="flex flex-col gap-2 border-b border-[var(--border)] px-4 py-3">
             <input
               ref={presetFileInputRef}
