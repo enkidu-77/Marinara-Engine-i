@@ -31,7 +31,10 @@ function buildExtensionModuleSource(apiKey: string, extensionName: string, js: s
     `const executeExtension = function(marinara) {`,
     js,
     `};`,
-    `executeExtension(marinara);`,
+    // Bind `this` to globalThis so classic-script-style extensions that rely on
+    // `this === window` (e.g. for top-level `this.foo = bar` global assignment)
+    // still work under module strict mode.
+    `executeExtension.call(globalThis, marinara);`,
     `export {};`,
     `//# sourceURL=marinara-extension-${sourceName}.js`,
   ].join("\n");
