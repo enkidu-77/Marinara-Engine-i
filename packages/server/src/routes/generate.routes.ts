@@ -60,7 +60,7 @@ import {
 import { executeToolCalls, type MetadataPatchInput } from "../services/tools/tool-executor.js";
 import { createAgentPipeline, type ResolvedAgent, type AgentInjection } from "../services/agents/agent-pipeline.js";
 import { DATA_DIR } from "../utils/data-dir.js";
-import { executeAgent, resolveAgentResultType } from "../services/agents/agent-executor.js";
+import { executeAgent, normalizeAgentContextSize, resolveAgentResultType } from "../services/agents/agent-executor.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../services/llm/local-sidecar.js";
 import {
   parseCharacterCommands,
@@ -3599,7 +3599,9 @@ export async function generateRoutes(app: FastifyInstance) {
       // Build base agent context (without mainResponse — that comes after generation)
       // Fetch enough history for the hungriest agent — individual agents trim to their own contextSize.
       const agentContextSize =
-        resolvedAgents.length > 0 ? Math.max(...resolvedAgents.map((a) => (a.settings.contextSize as number) || 5)) : 5;
+        resolvedAgents.length > 0
+          ? Math.max(...resolvedAgents.map((a) => normalizeAgentContextSize(a.settings.contextSize)))
+          : 5;
       const agentSlice = chatMessages.slice(-agentContextSize);
 
       // Batch-fetch committed game state snapshots for assistant messages in the agent context

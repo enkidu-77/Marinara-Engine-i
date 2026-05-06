@@ -10,7 +10,7 @@ import { eq } from "drizzle-orm";
 import { listCharacterSprites } from "../../services/game/sprite.service.js";
 import { DATA_DIR } from "../../utils/data-dir.js";
 import type { ResolvedAgent } from "../../services/agents/agent-pipeline.js";
-import { executeAgent, executeAgentBatch } from "../../services/agents/agent-executor.js";
+import { executeAgent, executeAgentBatch, normalizeAgentContextSize } from "../../services/agents/agent-executor.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../../services/llm/local-sidecar.js";
 import { createLLMProvider } from "../../services/llm/provider-registry.js";
 import { sidecarModelService } from "../../services/sidecar/sidecar-model.service.js";
@@ -191,7 +191,7 @@ async function buildRetryAgentContext(args: {
       ? Math.max(
           ...enabledConfigs.map((c: any) => {
             const settings = typeof c.settings === "string" ? JSON.parse(c.settings) : (c.settings ?? {});
-            return (settings.contextSize as number) || 5;
+            return normalizeAgentContextSize(settings.contextSize);
           }),
         )
       : 5;
