@@ -63,6 +63,20 @@ Spotify's OAuth rules only allow `https://` or `http://127.0.0.1` redirect URIs,
 ---
 
 <details>
+<summary><strong>What can Professor Mari do?</strong></summary>
+<br>
+
+Professor Mari is Marinara Engine's built-in assistant character. She can explain the app, help with setup, create characters and personas, create lorebooks, start new Conversation or Roleplay chats, navigate panels, and fetch existing items so she can review or update them.
+
+She cannot currently submit GitHub issues from inside the app, complete the whole Game Setup Wizard through hidden commands, or automatically ingest the latest GitHub docs into her own prompt. Character edits keep a recoverable version snapshot, but persona edits overwrite without a snapshot, so back up personas before asking her to change one.
+
+See [Professor Mari](PROFESSOR_MARI.md) for the full capabilities and safety notes.
+
+</details>
+
+---
+
+<details>
 <summary><strong>Which AI providers are supported?</strong></summary>
 <br>
 

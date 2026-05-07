@@ -169,6 +169,7 @@ Export chats as JSONL or plain text. Fully local file-native storage — all dat
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md)       | Environment variables and `.env` reference                      |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)   | Common issues and fixes                                         |
 | [docs/FAQ.md](docs/FAQ.md)                           | Frequently asked questions (LAN access, etc.)                   |
+| [docs/PROFESSOR_MARI.md](docs/PROFESSOR_MARI.md)     | Built-in assistant capabilities, limits, and safety notes        |
 | [docs/FRONTEND.md](docs/FRONTEND.md)                 | Frontend architecture, components, hooks, and API reference     |
 | [docs/ARCHITECTURE_MAP.md](docs/ARCHITECTURE_MAP.md) | Code ownership map and module-boundary refactor groundwork      |
 | [android/README.md](android/README.md)               | Android WebView wrapper (APK) guide                             |
