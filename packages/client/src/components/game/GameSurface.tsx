@@ -380,6 +380,33 @@ function combatSkillsFromGeneratedAttacks(
   return skills.length > 0 ? skills : undefined;
 }
 
+/**
+ * Runtime guard for a deserialized `Combatant`. Used when restoring combat state
+ * from chat metadata, which is JSON-roundtripped and crosses version boundaries —
+ * the TypeScript `as Combatant[]` cast is erased at runtime, so a stale snapshot
+ * written by an older client version (missing a field added later, or with a
+ * renamed field) would otherwise pass silently and crash downstream when render
+ * code touches the missing property.
+ *
+ * Validates the required scalar fields only. Optional fields (mp, sprite, skills,
+ * statusEffects, element, elementAura) are allowed to be absent.
+ */
+function isValidCombatant(value: unknown): value is Combatant {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.name === "string" &&
+    typeof v.hp === "number" &&
+    typeof v.maxHp === "number" &&
+    typeof v.attack === "number" &&
+    typeof v.defense === "number" &&
+    typeof v.speed === "number" &&
+    typeof v.level === "number" &&
+    (v.side === "player" || v.side === "enemy")
+  );
+}
+
 function generatedPartyMemberToCombatant(
   member: CombatPartyMember,
   index: number,
@@ -2370,8 +2397,13 @@ export function GameSurface({
 
   // Derived per-render: completion is only "done" for the *current* assistant message.
   // A stale completion ID from the previous turn falls through to false because
-  // `latestAssistantMsg.id` has already advanced.
-  const narrationDone = narrationDoneMsgId !== null && narrationDoneMsgId === latestAssistantMsg?.id;
+  // `latestAssistantMsg.id` has already advanced. The `typeof === "string"` guards
+  // also defeat the undefined-vs-undefined edge case where both sides could otherwise
+  // compare equal (Message.id is typed as optional) and silently unlock UI gates.
+  const narrationDone =
+    typeof narrationDoneMsgId === "string" &&
+    typeof latestAssistantMsg?.id === "string" &&
+    narrationDoneMsgId === latestAssistantMsg.id;
 
   const latestNarrationText = useMemo(
     () => (latestAssistantMsg?.content ? parseGmTags(latestAssistantMsg.content).cleanContent.trim() : ""),
@@ -2684,8 +2716,23 @@ export function GameSurface({
       api.patch(`/chats/${activeChatId}/metadata`, { gameCombatState: null }).catch(() => {});
       return;
     }
-    setCombatParty(snapshot.party as Combatant[]);
-    setCombatEnemies(snapshot.enemies as Combatant[]);
+    // Runtime validation: the snapshot is JSON-deserialized from chat metadata that
+    // may have been written by an older client whose `Combatant` schema differed.
+    // The TypeScript `as Combatant[]` cast is erased at runtime, so without this
+    // guard a stale snapshot with missing required fields would be accepted and
+    // crash later in the render path. On invalid data, drop the snapshot entirely.
+    const rawParty = Array.isArray(snapshot.party) ? snapshot.party : [];
+    const rawEnemies = Array.isArray(snapshot.enemies) ? snapshot.enemies : [];
+    if (!rawParty.every(isValidCombatant) || !rawEnemies.every(isValidCombatant)) {
+      console.warn(
+        "[game-surface] Discarding combat snapshot — failed Combatant schema validation. " +
+          "Likely written by an older client version.",
+      );
+      api.patch(`/chats/${activeChatId}/metadata`, { gameCombatState: null }).catch(() => {});
+      return;
+    }
+    setCombatParty(rawParty);
+    setCombatEnemies(rawEnemies);
     setCombatItemEffects(Array.isArray(snapshot.itemEffects) ? snapshot.itemEffects : []);
     setCombatMechanics(Array.isArray(snapshot.mechanics) ? snapshot.mechanics : []);
     setCombatDialogueCues(Array.isArray(snapshot.dialogueCues) ? snapshot.dialogueCues : []);
@@ -2731,7 +2778,13 @@ export function GameSurface({
     };
     combatPendingSnapshotRef.current = { chatId: activeChatId, snapshot };
     combatPersistTimer.current = setTimeout(() => {
-      api.patch(`/chats/${activeChatId}/metadata`, { gameCombatState: snapshot }).catch(() => {});
+      // Log on failure: this is the active-gameplay persist path, NOT the unmount
+      // keepalive flush below or the lifecycle wipes in `clearCombatSnapshot`. A
+      // silent failure here means the user keeps fighting believing state is saved,
+      // then loses progress on refresh — the operator needs to see this in console.
+      api
+        .patch(`/chats/${activeChatId}/metadata`, { gameCombatState: snapshot })
+        .catch((err) => console.error("[game-surface] combat snapshot persist failed", err));
       combatPendingSnapshotRef.current = null;
       combatPersistTimer.current = null;
     }, 800);
