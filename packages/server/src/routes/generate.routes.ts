@@ -142,6 +142,7 @@ import {
   buildDefaultAgentConnectionWarning,
   buildLocalSidecarUnavailableWarning,
   isLocalSidecarConnectionId,
+  resolveAgentConnectionId,
   type AgentConnectionWarning,
 } from "./generate/agent-connection-guards.js";
 import {
@@ -2572,7 +2573,13 @@ export async function generateRoutes(app: FastifyInstance) {
         let agentModel = conn.model;
 
         // Resolve connection: per-agent override > default-for-agents > chat connection
-        if (isLocalSidecarConnectionId(cfg.connectionId) && !localSidecarAvailableForTrackers) {
+        const effectiveConnectionId = resolveAgentConnectionId({
+          requestedConnectionId: cfg.connectionId as string | null,
+          defaultAgentConnectionId: defaultAgentConn?.id ?? null,
+          localSidecarAvailable: localSidecarAvailableForTrackers,
+        });
+
+        if (effectiveConnectionId === "skip-local-sidecar") {
           skippedLocalSidecarAgents.push(cfg.name ?? cfg.type);
           logger.warn(
             "[generate] Skipping agent %s for chat %s because Local Model was requested but the sidecar is unavailable",
@@ -2581,8 +2588,6 @@ export async function generateRoutes(app: FastifyInstance) {
           );
           continue;
         }
-
-        const effectiveConnectionId = cfg.connectionId ?? defaultAgentConn?.id ?? null;
         if (defaultAgentConn && effectiveConnectionId === defaultAgentConn.id) {
           defaultAgentConnectionAgents.push(cfg.name ?? cfg.type);
         }
@@ -2617,7 +2622,7 @@ export async function generateRoutes(app: FastifyInstance) {
           name: cfg.name,
           phase: cfg.phase as string,
           promptTemplate: cfg.promptTemplate as string,
-          connectionId: cfg.connectionId as string | null,
+          connectionId: effectiveConnectionId,
           settings,
           provider: agentProvider,
           model: agentModel,

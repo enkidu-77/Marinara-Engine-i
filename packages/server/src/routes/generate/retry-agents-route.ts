@@ -35,8 +35,10 @@ import {
 } from "./lorebook-keeper-utils.js";
 import { sendSseEvent, startSseReply } from "./sse.js";
 import {
+  buildDefaultAgentConnectionWarning,
   buildLocalSidecarUnavailableWarning,
   isLocalSidecarConnectionId,
+  resolveAgentConnectionId,
   type AgentConnectionWarning,
 } from "./agent-connection-guards.js";
 import { validateSpriteExpressionEntries } from "./expression-agent-utils.js";
@@ -387,18 +389,47 @@ async function resolveRetryAgents(args: {
   );
   const resolvedAgents: ResolvedRetryAgent[] = [];
   const skippedLocalSidecarAgents: string[] = [];
+  const defaultAgentConnectionAgents: string[] = [];
+  const defaultAgentConn = await conns.getDefaultForAgents();
+  const defaultAgentConnection = defaultAgentConn
+    ? (() => {
+        const baseUrl = resolveBaseUrl(defaultAgentConn);
+        if (!baseUrl) return null;
+        return {
+          connectionId: defaultAgentConn.id as string,
+          provider: createLLMProvider(
+            defaultAgentConn.provider,
+            baseUrl,
+            defaultAgentConn.apiKey,
+            defaultAgentConn.maxContext,
+            defaultAgentConn.openrouterProvider,
+            defaultAgentConn.maxTokensOverride,
+          ),
+          model: defaultAgentConn.model,
+        };
+      })()
+    : null;
   const localSidecarAvailableForTrackers =
     sidecarModelService.getConfig().useForTrackers && sidecarModelService.getConfiguredModelRef() !== null;
 
   for (const cfg of enabledConfigs) {
     let agentProvider = provider;
     let agentModel = conn.model;
+    const effectiveConnectionId = resolveAgentConnectionId({
+      requestedConnectionId: cfg.connectionId as string | null,
+      defaultAgentConnectionId: defaultAgentConn?.id ?? null,
+      localSidecarAvailable: localSidecarAvailableForTrackers,
+    });
 
-    if (cfg.connectionId) {
-      if (isLocalSidecarConnectionId(cfg.connectionId) && localSidecarAvailableForTrackers) {
+    if (effectiveConnectionId) {
+      if (isLocalSidecarConnectionId(effectiveConnectionId) && localSidecarAvailableForTrackers) {
         agentProvider = getLocalSidecarProvider();
         agentModel = LOCAL_SIDECAR_MODEL;
-      } else if (isLocalSidecarConnectionId(cfg.connectionId)) {
+      } else if (defaultAgentConnection && effectiveConnectionId === defaultAgentConnection.connectionId) {
+        agentProvider = defaultAgentConnection.provider;
+        agentModel = defaultAgentConnection.model;
+        defaultAgentConnectionAgents.push(cfg.name ?? cfg.type);
+      } else if (effectiveConnectionId === "skip-local-sidecar") {
         skippedLocalSidecarAgents.push(cfg.name ?? cfg.type);
         logger.warn(
           "[retry-agents] Skipping agent %s because Local Model was requested but the sidecar is unavailable",
@@ -406,7 +437,7 @@ async function resolveRetryAgents(args: {
         );
         continue;
       } else {
-        const agentConn = await conns.getWithKey(cfg.connectionId as string);
+        const agentConn = await conns.getWithKey(effectiveConnectionId);
         if (agentConn) {
           const agentBaseUrl = resolveBaseUrl(agentConn);
           if (agentBaseUrl) {
@@ -432,7 +463,7 @@ async function resolveRetryAgents(args: {
         name: cfg.name,
         phase: cfg.phase as string,
         promptTemplate: cfg.promptTemplate as string,
-        connectionId: cfg.connectionId as string | null,
+        connectionId: effectiveConnectionId,
         settings: typeof cfg.settings === "string" ? JSON.parse(cfg.settings) : (cfg.settings ?? {}),
         provider: agentProvider,
         model: agentModel,
@@ -446,6 +477,11 @@ async function resolveRetryAgents(args: {
     skippedLocalSidecarAgents.length > 0 ? [buildLocalSidecarUnavailableWarning(skippedLocalSidecarAgents)] : [];
 
   for (const builtIn of builtInFallbackConfigs) {
+    const builtInProvider = defaultAgentConnection ?? { provider, model: conn.model, connectionId: null };
+    if (defaultAgentConnection) {
+      defaultAgentConnectionAgents.push(builtIn.name);
+    }
+
     resolvedAgents.push({
       cfg: { id: `builtin:${builtIn.id}`, type: builtIn.id, name: builtIn.name } as any,
       resolved: {
@@ -454,14 +490,24 @@ async function resolveRetryAgents(args: {
         name: builtIn.name,
         phase: builtIn.phase,
         promptTemplate: "",
-        connectionId: null,
+        connectionId: builtInProvider.connectionId,
         settings: getDefaultBuiltInAgentSettings(builtIn.id),
-        provider,
-        model: conn.model,
+        provider: builtInProvider.provider,
+        model: builtInProvider.model,
       },
-      agentProvider: provider,
-      agentModel: conn.model,
+      agentProvider: builtInProvider.provider,
+      agentModel: builtInProvider.model,
     });
+  }
+
+  if (defaultAgentConn && defaultAgentConnectionAgents.length > 0) {
+    warnings.push(
+      buildDefaultAgentConnectionWarning({
+        agentNames: defaultAgentConnectionAgents,
+        connectionName: defaultAgentConn.name,
+        model: defaultAgentConn.model,
+      }),
+    );
   }
 
   return { conn, enabledConfigs, resolvedAgents, warnings };
