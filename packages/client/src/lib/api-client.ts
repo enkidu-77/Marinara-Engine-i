@@ -123,8 +123,9 @@ export const api = {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     }),
 
-  patch: <T>(path: string, body?: unknown) =>
+  patch: <T>(path: string, body?: unknown, init?: RequestInit) =>
     request<T>(path, {
+      ...init,
       method: "PATCH",
       body: body !== undefined ? JSON.stringify(body) : undefined,
     }),

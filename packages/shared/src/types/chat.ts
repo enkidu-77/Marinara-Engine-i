@@ -193,6 +193,8 @@ export interface ChatMetadata {
   gameDialogueChatId?: string | null;
   /** Active combat sub-scene chat ID */
   gameCombatChatId?: string | null;
+  /** Live combat encounter snapshot — restored on page refresh while a fight is in progress. */
+  gameCombatState?: import("./game.js").GameCombatStateSnapshot | null;
   /** User's initial game setup preferences */
   gameSetupConfig?: import("./game.js").GameSetupConfig | null;
   /** Tracked NPCs with reputation */
