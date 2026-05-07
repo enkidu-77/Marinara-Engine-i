@@ -48,10 +48,19 @@ function ensureEnvFileExists(envPath: string) {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException | null)?.code;
     if (code === "EEXIST") return;
-    sharedLogger.warn(
-      { err, envPath },
-      "[runtime-config] Could not auto-create .env file; continuing without it",
-    );
+    // Defer the warn one tick. ensureEnvFileExists runs from top-level
+    // loadRuntimeEnv(), which fires while the runtime-config ↔ logger import
+    // cycle is still resolving — when index.ts imports logger.ts first, the
+    // logger module hasn't finished evaluating yet and sharedLogger is in
+    // TDZ. Synchronous access throws ReferenceError and crashes startup,
+    // masking the real "couldn't write .env" error. setImmediate runs after
+    // both modules finish evaluating so the diagnostic survives intact.
+    setImmediate(() => {
+      sharedLogger.warn(
+        { err, envPath },
+        "[runtime-config] Could not auto-create .env file; continuing without it",
+      );
+    });
   }
 }
 
