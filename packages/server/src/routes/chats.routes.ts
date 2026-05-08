@@ -176,6 +176,11 @@ function formatPeekTrackerContextBlock(args: {
   return `# Context\n*(Established state as of the last message. Do not re-describe — advance from here.)*\n${trackerParts.join("\n")}`;
 }
 
+function resolveLorebookGenerationTriggers(mode: unknown): string[] {
+  const modeTrigger = mode === "game" ? "game" : typeof mode === "string" && mode.trim() ? mode.trim() : "roleplay";
+  return Array.from(new Set([modeTrigger, "chat"]));
+}
+
 export async function chatsRoutes(app: FastifyInstance) {
   const storage = createChatsStorage(app.db);
 
@@ -1049,6 +1054,10 @@ export async function chatsRoutes(app: FastifyInstance) {
             activeLorebookIds: Array.isArray(chatMeta.activeLorebookIds)
               ? (chatMeta.activeLorebookIds as string[])
               : [],
+            entryStateOverrides:
+              (chatMeta.entryStateOverrides as Record<string, { ephemeral?: number | null; enabled?: boolean }>) ??
+              undefined,
+            generationTriggers: resolveLorebookGenerationTriggers(chat.mode),
             groupScenarioOverrideText:
               typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
                 ? (chatMeta.groupScenarioText as string).trim()
