@@ -106,7 +106,7 @@ import { gameStateSnapshots as gameStateSnapshotsTable } from "../db/schema/inde
 import { chats as chatsTable } from "../db/schema/index.js";
 import { eq, and, desc } from "drizzle-orm";
 import { PROFESSOR_MARI_ID } from "@marinara-engine/shared";
-import { chunkAndEmbedMessages, recallMemories } from "../services/memory-recall.js";
+import { chunkAndEmbedMessages, recallMemories, resolveMemoryRecallEmbeddingContext } from "../services/memory-recall.js";
 import { postToDiscordWebhook } from "../services/discord-webhook.js";
 import {
   findLastIndex,
@@ -754,6 +754,12 @@ export async function generateRoutes(app: FastifyInstance) {
       const chatMode = requestChatMode;
       const lorebookGenerationTriggers = resolveLorebookGenerationTriggers(input, chatMode);
       const supportsHiddenFromAI = chatMode === "roleplay" || chatMode === "visual_novel";
+      const memoryRecallEmbeddingContext = await resolveMemoryRecallEmbeddingContext({
+        connections,
+        conn,
+        baseUrl,
+        chatMeta,
+      });
 
       // ── Conversation-start filter: find the latest "isConversationStart" marker ──
       let startIdx = 0;
@@ -3460,7 +3466,13 @@ export async function generateRoutes(app: FastifyInstance) {
           if (lastUserMsg?.content?.trim()) {
             // Scope recall to this chat only. Users expect memories to stay with
             // the exact conversation/roleplay/game where they were created.
-            const recalled = await recallMemories(app.db, lastUserMsg.content, [input.chatId]);
+            const recalled = await recallMemories(
+              app.db,
+              lastUserMsg.content,
+              [input.chatId],
+              undefined,
+              memoryRecallEmbeddingContext,
+            );
             if (recalled.length > 0) {
               const packedRecall = packRecalledMemories(recalled, effectiveMaxContext ?? connectionMaxContext);
               if (packedRecall.lines.length === 0) {
@@ -8573,9 +8585,12 @@ export async function generateRoutes(app: FastifyInstance) {
         for (const ci of charInfo) {
           charNameMap[ci.id] = ci.name;
         }
-        chunkAndEmbedMessages(app.db, input.chatId, { userName: personaName, characterNames: charNameMap }).catch(
-          (err) => logger.error(err, "[memory-recall] Background chunking failed"),
-        );
+        chunkAndEmbedMessages(
+          app.db,
+          input.chatId,
+          { userName: personaName, characterNames: charNameMap },
+          memoryRecallEmbeddingContext,
+        ).catch((err) => logger.error(err, "[memory-recall] Background chunking failed"));
       }
     } catch (err) {
       const message =

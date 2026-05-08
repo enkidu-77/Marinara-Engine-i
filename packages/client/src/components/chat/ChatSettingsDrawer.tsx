@@ -3858,7 +3858,7 @@ export function ChatSettingsDrawer({
             <Section
               label="Memory Recall"
               icon={<Brain size="0.875rem" />}
-              help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses a local embedding model — no API cost."
+              help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses local embeddings when available, otherwise falls back to the configured embedding connection."
             >
               {renderMemoryRecallControls(true)}
             </Section>
@@ -4162,7 +4162,7 @@ export function ChatSettingsDrawer({
             <Section
               label="Memory Recall"
               icon={<Brain size="0.875rem" />}
-              help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses a local embedding model — no API cost."
+              help="When enabled, relevant fragments from this chat are automatically recalled and injected into the prompt as memories. Uses local embeddings when available, otherwise falls back to the configured embedding connection."
             >
               {renderMemoryRecallControls(metadata.sceneStatus === "active")}
             </Section>

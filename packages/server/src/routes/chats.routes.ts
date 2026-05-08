@@ -20,7 +20,7 @@ import { createRegexScriptsStorage } from "../services/storage/regex-scripts.sto
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../services/llm/local-sidecar.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { generateMissingConversationSummaries } from "../services/conversation/auto-summary.service.js";
-import { rebuildMemoryChunks } from "../services/memory-recall.js";
+import { rebuildMemoryChunks, resolveMemoryRecallEmbeddingContext } from "../services/memory-recall.js";
 import { wrapContent } from "../services/prompt/format-engine.js";
 import { newId } from "../utils/id-generator.js";
 import { characters, gameStateSnapshots, memoryChunks } from "../db/schema/index.js";
@@ -176,6 +176,23 @@ function formatPeekTrackerContextBlock(args: {
     return `<context>\n${trackerParts.map((part) => "    " + part.replace(/\n/g, "\n    ")).join("\n")}\n</context>`;
   }
   return `# Context\n*(Established state as of the last message. Do not re-describe — advance from here.)*\n${trackerParts.join("\n")}`;
+}
+
+async function resolveChatMemoryRecallEmbeddingContext(
+  app: FastifyInstance,
+  chat: { connectionId?: string | null; metadata?: unknown },
+): Promise<Awaited<ReturnType<typeof resolveMemoryRecallEmbeddingContext>>> {
+  const storage = createConnectionsStorage(app.db);
+  const chatMeta = parseExtra(chat.metadata) as Record<string, unknown>;
+  const defaultConnection = chat.connectionId ? null : await storage.getDefault();
+  const connId = chat.connectionId ?? defaultConnection?.id;
+  const conn = connId ? await storage.getWithKey(connId) : null;
+  return resolveMemoryRecallEmbeddingContext({
+    connections: storage,
+    conn,
+    baseUrl: conn?.baseUrl?.replace(/\/+$/, "") ?? "",
+    chatMeta,
+  });
 }
 
 function resolveLorebookGenerationTriggers(mode: unknown): string[] {
@@ -619,7 +636,8 @@ export async function chatsRoutes(app: FastifyInstance) {
       personas.find((candidate) => candidate.isActive === "true");
     const userName = persona?.name ?? "User";
 
-    const rebuilt = await rebuildMemoryChunks(app.db, req.params.id, { userName, characterNames });
+    const embeddingContext = await resolveChatMemoryRecallEmbeddingContext(app, chat);
+    const rebuilt = await rebuildMemoryChunks(app.db, req.params.id, { userName, characterNames }, embeddingContext);
     return { rebuilt };
   });
 
