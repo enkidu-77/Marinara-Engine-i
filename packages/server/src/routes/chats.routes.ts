@@ -868,7 +868,7 @@ export async function chatsRoutes(app: FastifyInstance) {
 
     // ── Fallback: live assembly preview (no generation has happened yet) ──
     // This is a best-effort approximation; it won't include runtime-only
-    // injections like lorebooks, game state, scene context, semantic memory, etc.
+    // injections like cached game state, scene context, semantic memory, etc.
     const presetId = chat.mode === "conversation" ? null : (chat.promptPresetId ?? chatMeta.presetId);
     if (presetId) {
       try {
