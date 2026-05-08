@@ -2,7 +2,7 @@
 // React Query: Lorebook hooks
 // ──────────────────────────────────────────────
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api-client";
+import { api, ApiError } from "../lib/api-client";
 import type { Lorebook, LorebookEntry, LorebookFolder } from "@marinara-engine/shared";
 import { characterKeys } from "./use-characters";
 
@@ -33,6 +33,7 @@ export function useLorebook(id: string | null) {
     queryFn: () => api.get<Lorebook>(`/lorebooks/${id}`),
     enabled: !!id,
     staleTime: 5 * 60_000,
+    retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 3,
   });
 }
 
@@ -230,6 +231,7 @@ export function useTransferLorebookEntries() {
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.sourceLorebookId) });
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.targetLorebookId) });
       qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+      qc.invalidateQueries({ queryKey: characterKeys.all });
     },
   });
 }

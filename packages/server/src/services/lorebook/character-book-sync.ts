@@ -79,6 +79,11 @@ function toCharacterBook(lorebook: LorebookRow, entries: LoreEntryRow[]): Charac
   };
 }
 
+function parseCharacterData(data: unknown): Record<string, unknown> {
+  if (typeof data === "string") return JSON.parse(data) as Record<string, unknown>;
+  return data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+}
+
 function getEmbeddedLorebookId(characterData: Record<string, unknown>): string | null {
   const extensions =
     characterData.extensions && typeof characterData.extensions === "object"
@@ -119,7 +124,7 @@ export async function syncCharacterBookFromLorebook(db: DB, lorebookId: string):
     const character = await charactersStorage.getById(characterId);
     if (!character) return;
 
-    const currentData = JSON.parse(character.data) as Record<string, unknown>;
+    const currentData = parseCharacterData(character.data);
     if (getEmbeddedLorebookId(currentData) !== lorebookId) return;
 
     const entries = (await lorebookStorage.listEntries(lorebookId)) as LoreEntryRow[];
@@ -156,7 +161,7 @@ export async function clearCharacterEmbeddedLorebook(db: DB, characterId: string
     const character = await charactersStorage.getById(characterId);
     if (!character) return;
 
-    const currentData = JSON.parse(character.data) as Record<string, unknown>;
+    const currentData = parseCharacterData(character.data);
     if (getEmbeddedLorebookId(currentData) !== lorebookId) return;
 
     const extensions =

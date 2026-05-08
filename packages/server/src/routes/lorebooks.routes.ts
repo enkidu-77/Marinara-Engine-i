@@ -198,6 +198,7 @@ export async function lorebooksRoutes(app: FastifyInstance) {
     const input = updateLorebookSchema.parse(req.body);
     const updated = await storage.update(req.params.id, input);
     if (!updated) return reply.status(404).send({ error: "Lorebook not found" });
+    await syncCharacterBookFromLorebook(app.db, req.params.id);
     return updated;
   });
 
@@ -417,7 +418,9 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       for (const entry of sourceEntries) {
         await storage.removeEntry(entry.id);
       }
+      await syncCharacterBookFromLorebook(app.db, req.params.id);
     }
+    await syncCharacterBookFromLorebook(app.db, targetLorebookId);
 
     return {
       operation,
