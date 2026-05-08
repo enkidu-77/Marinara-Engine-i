@@ -5738,6 +5738,7 @@ export function GameSurface({
       if (options?.commitPendingMove && pendingMapMove) {
         moveOnMap.mutate({ chatId: activeChatId, position: pendingMapMove.position, mapId: activeMapId });
       }
+      setActiveChoices(null);
       sendMessage(message, attachments);
       if (options?.commitPendingMove && pendingMapMove) {
         setPendingMapMove(null);
