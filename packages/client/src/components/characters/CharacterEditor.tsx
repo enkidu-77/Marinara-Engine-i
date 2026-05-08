@@ -30,7 +30,7 @@ import {
   type SpriteInfo,
 } from "../../hooks/use-characters";
 import { useUIStore } from "../../stores/ui.store";
-import { lorebookKeys } from "../../hooks/use-lorebooks";
+import { lorebookKeys, useLorebook } from "../../hooks/use-lorebooks";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { SpriteGenerationModal } from "../ui/SpriteGenerationModal";
 import {
@@ -2453,8 +2453,18 @@ function LorebookTab({ characterId, formData }: { characterId: string | null; fo
     importMetadata.embeddedLorebook && typeof importMetadata.embeddedLorebook === "object"
       ? (importMetadata.embeddedLorebook as Record<string, unknown>)
       : {};
-  const linkedLorebookId =
+  const rawLinkedLorebookId =
     typeof embeddedLorebookMetadata.lorebookId === "string" ? embeddedLorebookMetadata.lorebookId : null;
+  // Verify the pointed-to lorebook actually exists. Cards exported from
+  // another Marinara instance can carry a stale `lorebookId` in their
+  // extensions, and an auto-import that errored silently can leave the
+  // pointer set without a real DB row. If we trust the raw pointer the
+  // "Edit Linked Lorebook" button opens an editor that can never resolve
+  // (its loading state is `isLoading || !lorebook`, and a 404'd query
+  // satisfies the second clause forever), so verify before showing it.
+  const linkedLorebookQuery = useLorebook(rawLinkedLorebookId);
+  const linkedLorebookId =
+    rawLinkedLorebookId && (linkedLorebookQuery.isLoading || linkedLorebookQuery.data) ? rawLinkedLorebookId : null;
   const hasEmbeddedLorebook = entries.length > 0 || embeddedLorebookMetadata.hasEmbeddedLorebook === true;
 
   const handleImportEmbeddedLorebook = async () => {

@@ -126,7 +126,7 @@ const SORT_OPTIONS: Array<{ value: EntrySortKey; label: string }> = [
 export function LorebookEditor() {
   const lorebookId = useUIStore((s) => s.lorebookDetailId);
   const closeDetail = useUIStore((s) => s.closeLorebookDetail);
-  const { data: rawLorebook, isLoading } = useLorebook(lorebookId);
+  const { data: rawLorebook, isLoading, isError } = useLorebook(lorebookId);
   const { data: rawLorebooks } = useLorebooks();
   const { data: rawEntries } = useLorebookEntries(lorebookId);
   const { data: rawFolders } = useLorebookFolders(lorebookId);
@@ -683,6 +683,20 @@ export function LorebookEditor() {
       closeDetail();
     }
   }, [lorebookDirty, closeDetail]);
+
+  // If the editor is opened with a `lorebookId` that no longer resolves on
+  // the server (a stale pointer carried over from another Marinara
+  // instance's character export, or one that survived an auto-import that
+  // errored), the loading branch — `isLoading || !lorebook` — would render
+  // a shimmer forever. Detect the 404 explicitly and bail back to the
+  // previous view with a toast so the user is not stranded.
+  useEffect(() => {
+    if (!lorebookId) return;
+    if (isError) {
+      toast.error("Lorebook not found — it may have been deleted");
+      closeDetail();
+    }
+  }, [lorebookId, isError, closeDetail]);
 
   const handleDelete = useCallback(async () => {
     if (!lorebookId) return;

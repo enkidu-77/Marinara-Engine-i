@@ -4,6 +4,7 @@
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api-client";
 import type { Lorebook, LorebookEntry, LorebookFolder } from "@marinara-engine/shared";
+import { characterKeys } from "./use-characters";
 
 export const lorebookKeys = {
   all: ["lorebooks"] as const,
@@ -62,8 +63,25 @@ export function useDeleteLorebook() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/lorebooks/${id}`),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      // Evict the deleted lorebook's detail + entries instead of just
+      // marking them stale. `useLorebook`/`useLorebookEntries` set
+      // staleTime to 5 minutes, and TanStack returns cached `data` even
+      // after a refetch errors — so without explicit removal the next
+      // "Edit Linked Lorebook" click would render a ghost editor with
+      // the deleted lorebook's name and metadata while the entries
+      // query reports 0 entries from the server.
+      qc.removeQueries({ queryKey: lorebookKeys.detail(id) });
+      qc.removeQueries({ queryKey: lorebookKeys.entries(id) });
       qc.invalidateQueries({ queryKey: lorebookKeys.all });
+      // The server clears `character_book` and the
+      // `extensions.importMetadata.embeddedLorebook` pointer for any
+      // character this lorebook was linked to. We do not know that
+      // characterId client-side (the detail cache may already be gone
+      // by this point), so blanket-invalidate character queries —
+      // missing this lets the character editor keep rendering stale
+      // entries and a broken "Edit Linked Lorebook" button.
+      qc.invalidateQueries({ queryKey: characterKeys.all });
     },
   });
 }
@@ -132,6 +150,12 @@ export function useCreateLorebookEntry() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
       qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+      // Entry mutations on a character-linked lorebook are mirrored
+      // server-side into `character.data.character_book`, so any
+      // currently-mounted CharacterEditor must refetch — otherwise its
+      // Lorebook tab keeps rendering pre-mutation entries (the
+      // character query has a 5-minute staleTime).
+      qc.invalidateQueries({ queryKey: characterKeys.all });
     },
   });
 }
@@ -145,6 +169,7 @@ export function useUpdateLorebookEntry() {
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
       qc.invalidateQueries({ queryKey: lorebookKeys.entry(variables.entryId) });
       qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+      qc.invalidateQueries({ queryKey: characterKeys.all });
     },
   });
 }
@@ -157,6 +182,7 @@ export function useDeleteLorebookEntry() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
       qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+      qc.invalidateQueries({ queryKey: characterKeys.all });
     },
   });
 }
@@ -169,6 +195,7 @@ export function useBulkCreateEntries() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: lorebookKeys.entries(variables.lorebookId) });
       qc.invalidateQueries({ queryKey: [...lorebookKeys.all, "active"] });
+      qc.invalidateQueries({ queryKey: characterKeys.all });
     },
   });
 }

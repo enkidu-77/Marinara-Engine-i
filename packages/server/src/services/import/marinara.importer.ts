@@ -92,8 +92,25 @@ async function importCharacter(data: unknown, db: DB) {
       : {};
   const existingImportMetadata =
     extensions.importMetadata && typeof extensions.importMetadata === "object"
-      ? (extensions.importMetadata as Record<string, unknown>)
+      ? ({ ...(extensions.importMetadata as Record<string, unknown>) } as Record<string, unknown>)
       : {};
+  // Drop any `lorebookId` carried over from the exporter's database. It
+  // refers to a row in their lorebook table, not ours, so keeping it
+  // leaves an orphan that makes the character editor's "Edit Linked
+  // Lorebook" button open a 404 editor stuck on a permanent shimmer
+  // (`isLoading || !lorebook`). The user can click "Import Embedded
+  // Lorebook" post-import to create a real linked lorebook in this DB.
+  const carriedEmbeddedLorebook =
+    typeof existingImportMetadata.embeddedLorebook === "object" && existingImportMetadata.embeddedLorebook
+      ? (existingImportMetadata.embeddedLorebook as Record<string, unknown>)
+      : null;
+  if (carriedEmbeddedLorebook && "lorebookId" in carriedEmbeddedLorebook) {
+    const { lorebookId: _staleLorebookId, ...sanitized } = carriedEmbeddedLorebook;
+    void _staleLorebookId;
+    existingImportMetadata.embeddedLorebook = sanitized;
+    extensions.importMetadata = existingImportMetadata;
+    charData.extensions = extensions;
+  }
   const cardSpecMetadata =
     typeof d?.spec === "string" || typeof d?.spec_version === "string"
       ? {

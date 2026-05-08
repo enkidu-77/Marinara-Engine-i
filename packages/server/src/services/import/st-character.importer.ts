@@ -75,13 +75,24 @@ export async function importSTCharacter(raw: Record<string, unknown>, db: DB, op
   const cardSpecMetadata = buildCardSpecMetadata(raw);
   const embeddedLorebookEntries = countEmbeddedLorebookEntries(data.character_book);
   const hasEmbeddedLorebook = embeddedLorebookEntries > 0;
+  // Strip any `lorebookId` carried by the source card. That ID references
+  // the exporter's database (e.g. a different Marinara instance), not
+  // ours, so preserving it leaves an orphan pointer that makes "Edit
+  // Linked Lorebook" open a 404 editor before the auto-import below has
+  // a chance to set the real ID. The fresh value is written below at the
+  // end of the auto-import branch when (and only when) we actually
+  // created a lorebook in this DB.
+  const carriedEmbeddedLorebook =
+    typeof existingImportMetadata.embeddedLorebook === "object" && existingImportMetadata.embeddedLorebook
+      ? (existingImportMetadata.embeddedLorebook as Record<string, unknown>)
+      : {};
+  const { lorebookId: _staleLorebookId, ...sanitizedEmbeddedLorebook } = carriedEmbeddedLorebook;
+  void _staleLorebookId;
   data.extensions[IMPORT_METADATA_KEY] = {
     ...existingImportMetadata,
     ...(cardSpecMetadata ? { card: cardSpecMetadata } : {}),
     embeddedLorebook: {
-      ...(typeof existingImportMetadata.embeddedLorebook === "object" && existingImportMetadata.embeddedLorebook
-        ? (existingImportMetadata.embeddedLorebook as Record<string, unknown>)
-        : {}),
+      ...sanitizedEmbeddedLorebook,
       hasEmbeddedLorebook,
     },
   };
