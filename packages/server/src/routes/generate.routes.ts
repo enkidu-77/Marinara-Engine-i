@@ -5155,15 +5155,16 @@ export async function generateRoutes(app: FastifyInstance) {
 
       let fullResponse = "";
       let fullThinking = "";
+      let providerThinking = "";
       let allResponses: string[] = [];
 
-      // Callback for collecting thinking/reasoning from the model
-      const onThinking = showThoughts
-        ? (chunk: string) => {
-            fullThinking += chunk;
-            trySendSseEvent(reply, { type: "thinking", data: chunk });
-          }
-        : undefined;
+      const onThinking = (chunk: string) => {
+        providerThinking += chunk;
+        if (showThoughts) {
+          fullThinking += chunk;
+          trySendSseEvent(reply, { type: "thinking", data: chunk });
+        }
+      };
       const captureReasoning = chatMode === "roleplay" && showThoughts;
 
       // Helper: write text content progressively as small SSE token chunks
@@ -5448,6 +5449,7 @@ export async function generateRoutes(app: FastifyInstance) {
         // Reset per-character accumulators
         fullResponse = "";
         fullThinking = "";
+        providerThinking = "";
         let geminiResponseParts: unknown[] | null = null;
         let chatCompletionsReasoning: Record<string, unknown> | null = null;
         const rememberChatCompletionsReasoning = (metadata: Record<string, unknown>) => {
@@ -5843,6 +5845,27 @@ export async function generateRoutes(app: FastifyInstance) {
           // ── Parse and strip hidden character commands ──
           let parsedCommands: CharacterCommand[] = [];
           let contentReplaced = false;
+          const promotableThinking = providerThinking.trim() || fullThinking.trim();
+          // Some OpenAI-compatible providers misplace the actual assistant text
+          // in reasoning/thinking fields even when reasoning was not requested.
+          if (
+            chatMode === "conversation" &&
+            !fullResponse.trim() &&
+            promotableThinking &&
+            !enableThinking &&
+            !resolvedEffort
+          ) {
+            logger.warn(
+              "[generate] Promoting thinking-only response to visible text for chat %s (char: %s, model: %s)",
+              input.chatId,
+              targetCharId,
+              conn.model,
+            );
+            fullResponse = promotableThinking;
+            fullThinking = "";
+            providerThinking = "";
+            contentReplaced = true;
+          }
           if (chatMode === "conversation" && !input.impersonate) {
             const parsed = parseCharacterCommands(fullResponse);
             if (parsed.commands.length > 0) {
