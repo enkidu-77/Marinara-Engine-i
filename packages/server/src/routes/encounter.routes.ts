@@ -109,8 +109,9 @@ async function buildCharacterContext(chars: ReturnType<typeof createCharactersSt
     // combat should always start at full HP regardless of the card's stale
     // `value` field — narrative damage applies after combat begins.
     const rpg = data.extensions?.rpgStats;
-    if (rpg?.enabled && rpg.hp?.max) {
-      ctx += `Max HP: ${rpg.hp.max}\n`;
+    const allyMaxHp = Number(rpg?.hp?.max);
+    if (rpg?.enabled && Number.isFinite(allyMaxHp) && allyMaxHp > 0) {
+      ctx += `Max HP: ${allyMaxHp}\n`;
       if (Array.isArray(rpg.attributes) && rpg.attributes.length > 0) {
         ctx += `Attributes: ${rpg.attributes.map((a: { name: string; value: number }) => `${a.name} ${a.value}`).join(", ")}\n`;
       }
@@ -161,9 +162,15 @@ async function buildPersonaContext(
   // The bar/stat `value` field is the running gameplay value and is not
   // authoritative for combat entry.
   if (personaStats?.enabled && Array.isArray(personaStats.bars) && personaStats.bars.length > 0) {
-    ctx += `Persona Stat Bars (configured max for each):\n`;
+    const renderedBars: string[] = [];
     for (const bar of personaStats.bars as Array<{ name: string; value: number; max: number }>) {
-      ctx += `- ${bar.name} max: ${bar.max}\n`;
+      const max = Number(bar.max);
+      if (Number.isFinite(max) && max > 0) {
+        renderedBars.push(`- ${bar.name} max: ${max}\n`);
+      }
+    }
+    if (renderedBars.length > 0) {
+      ctx += `Persona Stat Bars (configured max for each):\n${renderedBars.join("")}`;
     }
   }
   const personaRpg = personaStats?.rpgStats as
@@ -173,9 +180,10 @@ async function buildPersonaContext(
         hp?: { value: number; max: number };
       }
     | undefined;
-  if (personaRpg?.enabled && personaRpg.hp?.max) {
+  const personaMaxHp = Number(personaRpg?.hp?.max);
+  if (personaRpg?.enabled && Number.isFinite(personaMaxHp) && personaMaxHp > 0) {
     ctx += `Persona RPG Stats:\n`;
-    ctx += `- Max HP: ${personaRpg.hp.max}\n`;
+    ctx += `- Max HP: ${personaMaxHp}\n`;
     if (Array.isArray(personaRpg.attributes) && personaRpg.attributes.length > 0) {
       ctx += `- Attributes: ${personaRpg.attributes.map((a) => `${a.name} ${a.value}`).join(", ")}\n`;
     }
