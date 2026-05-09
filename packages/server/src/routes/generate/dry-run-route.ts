@@ -71,6 +71,11 @@ function resolveDryRunLorebookGenerationTriggers(
   return Array.from(triggers);
 }
 
+function resolveDryRunLorebookTokenBudget(chatMeta: Record<string, unknown>): number | undefined {
+  const raw = chatMeta.lorebookTokenBudget ?? chatMeta.generationLorebookTokenBudget;
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : undefined;
+}
+
 async function loadLatestGameSnapshot(app: FastifyInstance, chatId: string): Promise<any | null> {
   const committedRows = await app.db
     .select()
@@ -659,6 +664,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       },
       chatMode,
     );
+    const lorebookTokenBudget = resolveDryRunLorebookTokenBudget(chatMeta);
     if (!impersonate && userMessage.trim()) {
       chatMessages = [
         ...chatMessages,
@@ -1022,6 +1028,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
               characterIds,
               personaId,
               activeLorebookIds,
+              tokenBudget: lorebookTokenBudget,
               chatEmbedding: null,
               entryStateOverrides:
                 ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
@@ -1239,8 +1246,8 @@ export async function registerDryRunRoute(app: FastifyInstance) {
                   LorebookEntryTimingState
                 >)
               : undefined,
-          lorebookTokenBudget:
-            typeof chatMeta.lorebookTokenBudget === "number" ? chatMeta.lorebookTokenBudget : undefined,
+          lorebookTokenBudget,
+          generationTriggers: lorebookGenerationTriggers,
           previewOnly: true,
           groupScenarioOverrideText:
             typeof chatMeta.groupScenarioText === "string" && (chatMeta.groupScenarioText as string).trim()
@@ -1318,6 +1325,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         characterIds,
         personaId,
         activeLorebookIds,
+        tokenBudget: lorebookTokenBudget,
         chatEmbedding: null,
         entryStateOverrides:
           ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
