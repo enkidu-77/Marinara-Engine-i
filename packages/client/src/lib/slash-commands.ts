@@ -180,8 +180,12 @@ function parseMessageIndices(input: string): number[] | null {
 /** Safely read a boolean from a message's extra field. */
 function isMessageHidden(msg: { extra?: unknown }): boolean {
   if (!msg.extra) return false;
-  const ex = typeof msg.extra === "string" ? JSON.parse(msg.extra) : msg.extra;
-  return (ex as Record<string, unknown>).hiddenFromAI === true;
+  try {
+    const ex = typeof msg.extra === "string" ? JSON.parse(msg.extra) : msg.extra;
+    return (ex as Record<string, unknown>).hiddenFromAI === true;
+  } catch {
+    return false;
+  }
 }
 
 // ── Command definitions ────────────────

@@ -714,7 +714,7 @@ export async function chatsRoutes(app: FastifyInstance) {
     },
   );
 
-  // Bulk-set hiddenFromAI on many messages in a single SQL statement
+  // Bulk-set hiddenFromAI on many messages (iterates per message through the storage layer)
   app.patch<{ Params: { chatId: string }; Body: { messageIds: string[]; hidden: boolean } }>(
     "/:chatId/messages/bulk-hidden",
     async (req, reply) => {
