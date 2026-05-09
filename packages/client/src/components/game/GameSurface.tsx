@@ -4821,13 +4821,71 @@ export function GameSurface({
         settings: GAME_COMBAT_GENERATION_SETTINGS,
         spellbookId: null,
       })
-      .then((response) => {
+      .then(async (response) => {
         const combatants = hydrateGeneratedCombatState(response.combatState);
         if (!combatants) {
           throw new Error("Combat generator returned an empty party or enemy list.");
         }
 
         const visuals = response.combatState.visuals;
+
+        // ── Generate enemy portraits before combat starts ──
+        // The encounter LLM emits `enemy.sprite` as an emoji or short visual
+        // description, never a URL. To get a real portrait, feed each unique
+        // enemy through the same `npcsNeedingAvatars` pipeline NPCs use, then
+        // overwrite the hydrated combatant.sprite with the resulting URL.
+        // Block here so combat starts with portraits already populated; on
+        // any failure the emoji-fallback renderer in GameCombatUI takes over
+        // and we proceed without retrying.
+        if (chatMeta.enableSpriteGeneration && combatants.enemies.length > 0) {
+          const enemyPromptByName = new Map<string, string>();
+          for (const ep of visuals?.enemyImagePrompts ?? []) {
+            if (ep?.name && ep?.prompt) enemyPromptByName.set(ep.name, ep.prompt);
+          }
+          const descriptionByName = new Map<string, string>();
+          for (const rawEnemy of response.combatState.enemies ?? []) {
+            if (rawEnemy?.name && rawEnemy.description) {
+              descriptionByName.set(rawEnemy.name, rawEnemy.description);
+            }
+          }
+
+          // Dedupe by enemy name so e.g. three "Goblin"s share one portrait.
+          const seen = new Set<string>();
+          const npcsNeedingAvatars: Array<{ name: string; description: string }> = [];
+          for (const enemy of combatants.enemies) {
+            if (!enemy.name || seen.has(enemy.name)) continue;
+            seen.add(enemy.name);
+            const description = (
+              enemyPromptByName.get(enemy.name) ||
+              descriptionByName.get(enemy.name) ||
+              enemy.name
+            ).slice(0, 1000);
+            npcsNeedingAvatars.push({ name: enemy.name, description });
+          }
+
+          if (npcsNeedingAvatars.length > 0) {
+            try {
+              const assetResult = await runGameAssetGeneration({
+                chatId: activeChatId,
+                npcsNeedingAvatars: npcsNeedingAvatars.slice(0, 10),
+                debugMode: useUIStore.getState().debugMode,
+              });
+              const avatarByName = new Map<string, string>();
+              for (const generated of assetResult?.generatedNpcAvatars ?? []) {
+                if (generated.name && generated.avatarUrl) {
+                  avatarByName.set(generated.name, generated.avatarUrl);
+                }
+              }
+              for (const enemy of combatants.enemies) {
+                const url = avatarByName.get(enemy.name);
+                if (url) enemy.sprite = url;
+              }
+            } catch (err) {
+              console.warn("[game-combat] enemy avatar generation failed; falling back to emoji", err);
+            }
+          }
+        }
+
         const shouldGenerateBossVisuals = !!visuals?.isBossFight && !!chatMeta.enableSpriteGeneration;
         if (shouldGenerateBossVisuals && (visuals.backgroundPrompt || visuals.illustrationPrompt)) {
           const illustrationPrompt = visuals.illustrationPrompt?.trim() || "";
@@ -4887,6 +4945,7 @@ export function GameSurface({
     pendingEncounter,
     queuedCombatGeneration,
     requestAssetGeneration,
+    runGameAssetGeneration,
     scenePreparing,
     transitionGameState,
   ]);
