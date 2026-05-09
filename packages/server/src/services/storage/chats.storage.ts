@@ -497,6 +497,26 @@ export function createChatsStorage(db: DB) {
       });
     },
 
+    /**
+     * Bulk-set hiddenFromAI on many messages at once.
+     * Reuses updateMessageExtra() for each message (read-parse-merge-write) and
+     * syncs the flag to every swipe row so it survives setActiveSwipe() overwrites.
+     * Returns the number of messages updated.
+     */
+    async bulkSetHiddenFromAI(chatId: string, messageIds: string[], hidden: boolean): Promise<number> {
+      if (messageIds.length === 0) return 0;
+      for (const id of messageIds) {
+        await this.updateMessageExtra(id, { hiddenFromAI: hidden });
+        // Mirror what the single-message /extra route does: propagate the flag
+        // to all swipe rows so setActiveSwipe() cannot clobber it.
+        const swipes = await this.getSwipes(id);
+        for (const swipe of swipes) {
+          await this.updateSwipeExtra(id, swipe.index, { hiddenFromAI: hidden });
+        }
+      }
+      return messageIds.length;
+    },
+
     /** Atomically append an attachment to a message's extra JSON field. */
     async appendMessageAttachment(id: string, attachment: Record<string, unknown>) {
       return withPatchQueue(messageExtraPatchQueues, id, async () => {

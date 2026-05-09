@@ -138,6 +138,56 @@ function parseImpersonatePromptArg(args: string): string {
   return prompt.trim();
 }
 
+// ── Message index parser (for /hide and /unhide) ────────────────
+
+/**
+ * Parse a message index expression into a sorted, deduplicated array of
+ * 1-indexed positions. Supports: `5`, `3-8`, `2,5,9`, `2-5,8,12-14`.
+ * Returns null if the expression is empty or contains invalid tokens.
+ */
+function parseMessageIndices(input: string): number[] | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const indices = new Set<number>();
+  const parts = trimmed.split(",");
+
+  for (const part of parts) {
+    const segment = part.trim();
+    if (!segment) continue;
+
+    // Range: N-M
+    if (segment.includes("-")) {
+      const [left, right] = segment.split("-", 2);
+      const start = Number.parseInt(left!.trim(), 10);
+      const end = Number.parseInt(right!.trim(), 10);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 1 || end < 1)
+        return null;
+      const lo = Math.min(start, end);
+      const hi = Math.max(start, end);
+      for (let i = lo; i <= hi; i++) indices.add(i);
+    } else {
+      // Single number
+      const n = Number.parseInt(segment, 10);
+      if (!Number.isFinite(n) || n < 1) return null;
+      indices.add(n);
+    }
+  }
+
+  return indices.size > 0 ? Array.from(indices).sort((a, b) => a - b) : null;
+}
+
+/** Safely read a boolean from a message's extra field. */
+function isMessageHidden(msg: { extra?: unknown }): boolean {
+  if (!msg.extra) return false;
+  try {
+    const ex = typeof msg.extra === "string" ? JSON.parse(msg.extra) : msg.extra;
+    return (ex as Record<string, unknown>).hiddenFromAI === true;
+  } catch {
+    return false;
+  }
+}
+
 // ── Command definitions ────────────────
 
 const COMMANDS: SlashCommand[] = [
@@ -424,6 +474,88 @@ const COMMANDS: SlashCommand[] = [
     local: true,
     async execute(_args, _ctx) {
       return { handled: true, feedback: buildSlashHelpText() };
+    },
+  },
+  {
+    name: "hide",
+    description: "Hide messages from AI context (won't be sent to the LLM on future turns)",
+    usage: "/hide <indices>  (e.g. /hide 5, /hide 3-8, /hide 2-5,9,12)",
+    local: true,
+    async execute(args, ctx) {
+      const indices = parseMessageIndices(args);
+      if (!indices) {
+        return {
+          handled: true,
+          feedback: "Usage: /hide <indices> — e.g. /hide 5, /hide 3-8, /hide 2-5,9,12",
+        };
+      }
+
+      const messages: Array<{ id: string; extra?: unknown }> = await api.get(`/chats/${ctx.chatId}/messages`);
+      const total = messages.length;
+      const max = indices[indices.length - 1]!;
+      if (max > total) {
+        return {
+          handled: true,
+          feedback: `Message ${max} doesn't exist. This chat has ${total} messages.`,
+        };
+      }
+
+      // Only send IDs for messages that aren't already hidden
+      const targetIds = indices
+        .filter((idx) => !isMessageHidden(messages[idx - 1]!))
+        .map((idx) => messages[idx - 1]!.id);
+
+      if (targetIds.length > 0) {
+        await api.patch(`/chats/${ctx.chatId}/messages/bulk-hidden`, {
+          messageIds: targetIds,
+          hidden: true,
+        });
+      }
+
+      ctx.invalidate();
+      toast.success(`Hidden ${targetIds.length} message${targetIds.length !== 1 ? "s" : ""} from AI context`);
+      return { handled: true };
+    },
+  },
+  {
+    name: "unhide",
+    description: "Restore previously hidden messages back into AI context",
+    usage: "/unhide <indices>  (e.g. /unhide 5, /unhide 3-8, /unhide 2-5,9,12)",
+    local: true,
+    async execute(args, ctx) {
+      const indices = parseMessageIndices(args);
+      if (!indices) {
+        return {
+          handled: true,
+          feedback: "Usage: /unhide <indices> — e.g. /unhide 5, /unhide 3-8, /unhide 2-5,9,12",
+        };
+      }
+
+      const messages: Array<{ id: string; extra?: unknown }> = await api.get(`/chats/${ctx.chatId}/messages`);
+      const total = messages.length;
+      const max = indices[indices.length - 1]!;
+      if (max > total) {
+        return {
+          handled: true,
+          feedback: `Message ${max} doesn't exist. This chat has ${total} messages.`,
+        };
+      }
+
+      // Only send IDs for messages that are currently hidden
+      const targetIds = indices
+        .filter((idx) => isMessageHidden(messages[idx - 1]!))
+        .map((idx) => messages[idx - 1]!.id);
+
+      if (targetIds.length > 0) {
+        await api.patch(`/chats/${ctx.chatId}/messages/bulk-hidden`, {
+          messageIds: targetIds,
+          hidden: false,
+        });
+      }
+
+      ctx.invalidate();
+      toast.success(`Restored ${targetIds.length} message${targetIds.length !== 1 ? "s" : ""} to AI context`);
+      return { handled: true };
     },
   },
   {

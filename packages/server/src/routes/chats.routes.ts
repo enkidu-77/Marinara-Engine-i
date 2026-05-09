@@ -714,6 +714,22 @@ export async function chatsRoutes(app: FastifyInstance) {
     },
   );
 
+  // Bulk-set hiddenFromAI on many messages (iterates per message through the storage layer)
+  app.patch<{ Params: { chatId: string }; Body: { messageIds: string[]; hidden: boolean } }>(
+    "/:chatId/messages/bulk-hidden",
+    async (req, reply) => {
+      const { messageIds, hidden } = req.body;
+      if (!Array.isArray(messageIds) || messageIds.length === 0) {
+        return reply.status(400).send({ error: "messageIds must be a non-empty array" });
+      }
+      if (typeof hidden !== "boolean") {
+        return reply.status(400).send({ error: "hidden must be a boolean" });
+      }
+      const count = await storage.bulkSetHiddenFromAI(req.params.chatId, messageIds, hidden);
+      return { updated: count };
+    },
+  );
+
   // Get latest game state for a chat (respects the active swipe of the last assistant message)
   app.get<{ Params: { id: string } }>("/:id/game-state", async (req, reply) => {
     const { createGameStateStorage } = await import("../services/storage/game-state.storage.js");
