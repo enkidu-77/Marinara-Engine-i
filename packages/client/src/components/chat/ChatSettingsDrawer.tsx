@@ -910,7 +910,6 @@ export function ChatSettingsDrawer({
     });
   }, [currentPromptPresetFull?.sections]);
   const hasScopedOrGlobalLorebooks = useMemo(() => {
-    const characterIds = Array.isArray(chat.characterIds) ? chat.characterIds : [];
     return ((lorebooks ?? []) as Array<{
       id: string;
       enabled?: boolean;
@@ -925,13 +924,13 @@ export function ChatSettingsDrawer({
         lorebook.enabled !== false &&
         (lorebook.isGlobal ||
           activeLorebookIds.includes(lorebook.id) ||
-          lorebook.characterIds?.some((id) => characterIds.includes(id)) ||
-          (lorebook.characterId && characterIds.includes(lorebook.characterId)) ||
+          lorebook.characterIds?.some((id) => chatCharIds.includes(id)) ||
+          (lorebook.characterId && chatCharIds.includes(lorebook.characterId)) ||
           (chat.personaId && lorebook.personaIds?.includes(chat.personaId)) ||
           (lorebook.personaId && lorebook.personaId === chat.personaId) ||
           (lorebook.chatId && lorebook.chatId === chat.id)),
     );
-  }, [activeLorebookIds, chat.characterIds, chat.id, chat.personaId, lorebooks]);
+  }, [activeLorebookIds, chat.id, chat.personaId, chatCharIds, lorebooks]);
   const showLorebookMarkerWarning =
     !!chat.promptPresetId && hasScopedOrGlobalLorebooks && !currentPromptPresetHasLorebookMarker;
 
