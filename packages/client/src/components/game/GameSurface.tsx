@@ -3107,6 +3107,7 @@ export function GameSurface({
             dc: sc.dc,
             advantage: sc.advantage,
             disadvantage: sc.disadvantage,
+            preRolledD20: sc.preRolledD20,
           },
           {
             onSuccess: (res) => setPendingSkillCheck(res.result),
