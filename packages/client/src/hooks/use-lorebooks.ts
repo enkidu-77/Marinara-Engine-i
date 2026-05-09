@@ -55,6 +55,7 @@ export function useUpdateLorebook() {
     mutationFn: ({ id, ...data }: { id: string } & Record<string, unknown>) =>
       api.patch<Lorebook>(`/lorebooks/${id}`, data),
     onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: lorebookKeys.all });
       qc.invalidateQueries({ queryKey: lorebookKeys.list() });
       qc.invalidateQueries({ queryKey: lorebookKeys.detail(variables.id) });
       qc.invalidateQueries({ queryKey: lorebookKeys.active() });
