@@ -7,6 +7,8 @@ import { createPortal } from "react-dom";
 import { useUIStore } from "../../stores/ui.store";
 import { toast } from "sonner";
 import { showConfirmDialog } from "../../lib/app-dialogs";
+import { useChatStore } from "../../stores/chat.store";
+import { useChat } from "../../hooks/use-chats";
 import {
   usePresetFull,
   useUpdatePreset,
@@ -108,6 +110,10 @@ const MARKER_LABELS: Record<MarkerType, string> = {
   agent_data: "Agent Data",
 };
 
+function lorebookWarningDismissalKey(presetId: string) {
+  return `preset:loreWarning:dismissed:${presetId}`;
+}
+
 function reorderIdsByOffset(items: Array<{ id: string }>, index: number, offset: number): string[] | null {
   const targetIndex = index + offset;
   if (targetIndex < 0 || targetIndex >= items.length) return null;
@@ -125,8 +131,10 @@ function reorderIdsByOffset(items: Array<{ id: string }>, index: number, offset:
 export function PresetEditor() {
   const presetDetailId = useUIStore((s) => s.presetDetailId);
   const closePresetDetail = useUIStore((s) => s.closePresetDetail);
+  const activeChatId = useChatStore((s) => s.activeChatId);
 
   const { data, isLoading } = usePresetFull(presetDetailId);
+  const { data: activeChat } = useChat(activeChatId);
   const updatePreset = useUpdatePreset();
   const deletePreset = useDeletePreset();
   const createSection = useCreateSection();
@@ -251,6 +259,17 @@ export function PresetEditor() {
       }
     });
   }, [orderedSections]);
+  const parentChatHasLorebook = useMemo(() => {
+    try {
+      const metadata =
+        typeof activeChat?.metadata === "string"
+          ? JSON.parse(activeChat.metadata)
+          : ((activeChat?.metadata ?? {}) as any);
+      return Array.isArray(metadata.activeLorebookIds) && metadata.activeLorebookIds.length > 0;
+    } catch {
+      return false;
+    }
+  }, [activeChat?.metadata]);
 
   const groupMap = useMemo(() => {
     if (!data?.groups) return new Map<string, any>();
@@ -457,6 +476,7 @@ export function PresetEditor() {
                 onDeleteVariable={deleteVariable}
                 onReorderVariables={reorderVariables}
                 hasLorebookMarker={sectionHasLorebookMarker}
+                parentChatHasLorebook={parentChatHasLorebook}
               />
             )}
 
@@ -596,6 +616,7 @@ function SectionsTab({
   onDeleteVariable,
   onReorderVariables,
   hasLorebookMarker,
+  parentChatHasLorebook,
 }: {
   presetId: string;
   sections: any[];
@@ -614,6 +635,7 @@ function SectionsTab({
   onDeleteVariable: any;
   onReorderVariables: any;
   hasLorebookMarker: boolean;
+  parentChatHasLorebook: boolean;
 }) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -622,6 +644,30 @@ function SectionsTab({
   const [dragReady, setDragReady] = useState<number | null>(null); // index of section ready to drag (grip held)
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState("");
+  const [lorebookWarningDismissed, setLorebookWarningDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(lorebookWarningDismissalKey(presetId)) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      setLorebookWarningDismissed(localStorage.getItem(lorebookWarningDismissalKey(presetId)) === "true");
+    } catch {
+      setLorebookWarningDismissed(false);
+    }
+  }, [presetId]);
+
+  const dismissLorebookWarning = useCallback(() => {
+    try {
+      localStorage.setItem(lorebookWarningDismissalKey(presetId), "true");
+    } catch {
+      /* Ignore storage failures; the in-memory dismissal still helps this session. */
+    }
+    setLorebookWarningDismissed(true);
+  }, [presetId]);
 
   // Fetch agent configs and filter to those with injectAsSection enabled
   const { data: agentConfigs } = useAgentConfigs();
@@ -831,10 +877,18 @@ function SectionsTab({
         >
           <FolderOpen size="0.8125rem" /> Groups ({groupMap.size})
         </button>
-        {!hasLorebookMarker && (
+        {!hasLorebookMarker && parentChatHasLorebook && !lorebookWarningDismissed && (
           <div className="flex items-center gap-1.5 rounded-lg bg-amber-400/10 px-2.5 py-1.5 text-[0.6875rem] text-amber-200 ring-1 ring-amber-400/25">
             <AlertTriangle size="0.75rem" className="shrink-0" />
             <span>Add a lorebook marker when this preset should receive active lorebook entries.</span>
+            <button
+              type="button"
+              onClick={dismissLorebookWarning}
+              className="ml-0.5 rounded-md p-0.5 text-amber-200/75 transition-colors hover:bg-amber-400/15 hover:text-amber-100"
+              title="Dismiss warning"
+            >
+              <X size="0.6875rem" />
+            </button>
           </div>
         )}
       </div>
