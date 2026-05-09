@@ -544,10 +544,16 @@ export async function encounterRoutes(app: FastifyInstance) {
       const characterIds: string[] = JSON.parse(chat.characterIds as string);
       const characterCtx = await buildCharacterContext(chars, characterIds);
       const { personaName, personaCtx } = await buildPersonaContext(chars, chat.personaId ?? null);
-      const chatMeta =
-        typeof chat.metadata === "string"
-          ? (JSON.parse(chat.metadata) as Record<string, unknown>)
-          : ((chat.metadata as Record<string, unknown> | null) ?? null);
+      let chatMeta: Record<string, unknown> | null = null;
+      if (typeof chat.metadata === "string") {
+        try {
+          chatMeta = JSON.parse(chat.metadata) as Record<string, unknown>;
+        } catch {
+          chatMeta = null;
+        }
+      } else {
+        chatMeta = (chat.metadata as Record<string, unknown> | null) ?? null;
+      }
       const gameStateCtx = await buildGameStateContext(gsStorage, chatId, personaName, chatMeta);
       const spellbookCtx = await loadSpellbookContext(spellbookId);
 
