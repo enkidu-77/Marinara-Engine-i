@@ -10,6 +10,7 @@ import {
   createLorebookFolderSchema,
   updateLorebookFolderSchema,
   type CreateLorebookEntryInput,
+  type LorebookEntryTimingState,
   type LorebookEntry,
 } from "@marinara-engine/shared";
 import type { ExportEnvelope } from "@marinara-engine/shared";
@@ -573,6 +574,14 @@ export async function lorebooksRoutes(app: FastifyInstance) {
           ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
               string,
               { ephemeral?: number | null; enabled?: boolean }
+            >)
+          : undefined,
+      entryTimingStates:
+        ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+        typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+          ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
+              string,
+              LorebookEntryTimingState
             >)
           : undefined,
       previewOnly: true,
