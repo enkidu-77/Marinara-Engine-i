@@ -3,9 +3,10 @@
 // Click an agent → opens this editor
 // ──────────────────────────────────────────────
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useUIStore } from "../../stores/ui.store";
 import { showConfirmDialog } from "../../lib/app-dialogs";
-import { useAgentConfigs, useUpdateAgent, useCreateAgent, type AgentConfigRow } from "../../hooks/use-agents";
+import { agentKeys, useAgentConfigs, useUpdateAgent, useCreateAgent, type AgentConfigRow } from "../../hooks/use-agents";
 import { useConnections } from "../../hooks/use-connections";
 import {
   isCustomToolSelectable,
@@ -167,6 +168,7 @@ export function AgentEditor() {
   const { data: customToolCapabilities } = useCustomToolCapabilities();
   const updateAgent = useUpdateAgent();
   const createAgent = useCreateAgent();
+  const qc = useQueryClient();
   const deleteAgent = useDeleteAgent();
 
   // Find built-in meta (null for custom agents)
@@ -431,6 +433,19 @@ export function AgentEditor() {
     const isEditingCustomAgent = isCustomAgent || isNewCustomAgent;
     const savedPhase = isEditingCustomAgent && localResultType === "text_rewrite" ? "post_processing" : localPhase;
 
+    // Preserve OAuth fields the form doesn't expose. The server replaces
+    // `settings` wholesale, so anything we omit here would be wiped — and the
+    // Spotify tokens live in settings rather than their own column.
+    const currentSettings: Record<string, unknown> = dbConfig?.settings
+      ? typeof dbConfig.settings === "string"
+        ? JSON.parse(dbConfig.settings as string)
+        : (dbConfig.settings as Record<string, unknown>)
+      : {};
+    const preservedSpotifyFields: Record<string, unknown> = {};
+    for (const key of ["spotifyAccessToken", "spotifyRefreshToken", "spotifyExpiresAt", "spotifyScope"]) {
+      if (currentSettings[key] !== undefined) preservedSpotifyFields[key] = currentSettings[key];
+    }
+
     const payload = {
       name: localName,
       description: localDescription,
@@ -439,6 +454,7 @@ export function AgentEditor() {
       connectionId: localConnectionId || null,
       promptTemplate: localPrompt,
       settings: {
+        ...preservedSpotifyFields,
         ...(isEditingCustomAgent ? { resultType: localResultType } : {}),
         ...(localContextSize !== "" ? { contextSize: Number(localContextSize) } : {}),
         ...(localMaxTokens !== "" ? { maxTokens: clampAgentMaxTokens(localMaxTokens) } : {}),
@@ -1250,6 +1266,7 @@ export function AgentEditor() {
                           expired: false,
                           redirectUri: spotifyStatus?.redirectUri ?? null,
                         });
+                        qc.invalidateQueries({ queryKey: agentKeys.all });
                       }}
                       className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/50 transition-colors hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20"
                     >
@@ -1316,6 +1333,7 @@ export function AgentEditor() {
                               setSpotifyPasteOpen(false);
                               setSpotifyPasteValue("");
                               setSpotifyPasteError(null);
+                              qc.invalidateQueries({ queryKey: agentKeys.all });
                             }
                           } catch {
                             // keep polling
@@ -1416,6 +1434,7 @@ export function AgentEditor() {
                                 setSpotifyConnecting(false);
                                 setSpotifyPasteOpen(false);
                                 setSpotifyPasteValue("");
+                                qc.invalidateQueries({ queryKey: agentKeys.all });
                               }
                             } catch (err) {
                               setSpotifyPasteError(err instanceof Error ? err.message : "Submission failed");
