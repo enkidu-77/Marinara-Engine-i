@@ -14,7 +14,9 @@ import {
   closeSync,
   fsyncSync,
   readFileSync,
+  readSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -298,20 +300,64 @@ function flushFile(path: string) {
   }
 }
 
+function looksNulFilled(path: string): boolean {
+  // Cheap heuristic: a hard-crash-corrupted file shows up as NUL bytes from
+  // byte 0, or as 0 length if the truncate landed but no writes flushed.
+  // JSON tables/manifests always start with a printable character ([ or {),
+  // so either case means the file is unusable as a backup source.
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, "r");
+    const buf = Buffer.alloc(1);
+    const bytesRead = readSync(fd, buf, 0, 1, 0);
+    if (bytesRead === 0) return true;
+    return buf[0] === 0;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
 function atomicWriteFile(path: string, content: string) {
   mkdirSync(dirname(path), { recursive: true });
   const tmpPath = `${path}.tmp-${process.pid}-${Date.now()}`;
   try {
-    if (existsSync(path)) {
+    // Refresh the .bak via tmp + fsync + rename so a hard crash mid-write
+    // can't leave both main and backup zero-filled (NTFS allocates blocks
+    // and updates metadata before the cache manager flushes data).
+    // Skip the refresh if the existing main is NUL-corrupted — copying garbage
+    // over a valid .bak would destroy the recovery source we just used.
+    if (existsSync(path) && !looksNulFilled(path)) {
+      const bakPath = `${path}.bak`;
+      const bakTmpPath = `${bakPath}.tmp-${process.pid}-${Date.now()}`;
       try {
-        copyFileSync(path, `${path}.bak`);
-      } catch {
-        /* ignore */
+        copyFileSync(path, bakTmpPath);
+        flushFile(bakTmpPath);
+        renameSync(bakTmpPath, bakPath);
+      } catch (err) {
+        try {
+          if (existsSync(bakTmpPath)) unlinkSync(bakTmpPath);
+        } catch {
+          /* ignore */
+        }
+        logger.error(
+          err,
+          "[file-storage] Failed to refresh backup durably; backup may be stale and unusable for crash recovery (path=%s)",
+          bakPath,
+        );
       }
     }
     writeFileSync(tmpPath, content);
     flushFile(tmpPath);
     renameSync(tmpPath, path);
+    flushFile(dirname(path));
   } catch (err) {
     try {
       if (existsSync(tmpPath)) unlinkSync(tmpPath);
@@ -322,15 +368,46 @@ function atomicWriteFile(path: string, content: string) {
   }
 }
 
-function parseJsonFile<T>(path: string, fallback: T): T {
-  if (!existsSync(path)) return fallback;
+type ParseResult<T> = { value: T; recoveredFromBackup: boolean };
+
+function describeStaleness(mainPath: string, backupPath: string): string {
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as T;
+    const mainMs = statSync(mainPath).mtimeMs;
+    const bakMs = statSync(backupPath).mtimeMs;
+    const deltaMs = Math.max(0, mainMs - bakMs);
+    if (deltaMs < 1000) return "less than a second";
+    const seconds = Math.floor(deltaMs / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ${minutes % 60}m`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ${hours % 24}h`;
+  } catch {
+    return "unknown";
+  }
+}
+
+function parseJsonFile<T>(path: string, fallback: T): ParseResult<T> {
+  if (!existsSync(path)) return { value: fallback, recoveredFromBackup: false };
+  try {
+    return { value: JSON.parse(readFileSync(path, "utf8")) as T, recoveredFromBackup: false };
   } catch (err) {
     const backupPath = `${path}.bak`;
     if (existsSync(backupPath)) {
-      logger.warn({ err }, `[file-storage] Failed to parse ${path}; trying ${backupPath}`);
-      return JSON.parse(readFileSync(backupPath, "utf8")) as T;
+      const staleness = describeStaleness(path, backupPath);
+      logger.error(
+        err,
+        "[file-storage] %s is corrupt; recovering from %s (backup is %s older). Edits made since the backup are unrecoverable.",
+        path,
+        backupPath,
+        staleness,
+      );
+      return {
+        value: JSON.parse(readFileSync(backupPath, "utf8")) as T,
+        recoveredFromBackup: true,
+      };
     }
     throw err;
   }
@@ -935,17 +1012,49 @@ class FileTableStore {
   }
 
   private loadFileSnapshots() {
-    this.loadedManifest = parseJsonFile<TableSnapshotManifest | null>(manifestPath(this.rootDir), null);
+    // The manifest is recoverable from on-disk table files, so a corrupted
+    // manifest (e.g. both manifest.json and manifest.json.bak nulled by a
+    // hard crash mid-write) shouldn't block startup. Table files still
+    // throw on parse failure — silent fallback to [] would mean data loss.
+    let loadedManifest: TableSnapshotManifest | null = null;
+    let needsManifestRewrite = false;
+    try {
+      const result = parseJsonFile<TableSnapshotManifest | null>(manifestPath(this.rootDir), null);
+      loadedManifest = result.value;
+      needsManifestRewrite = result.recoveredFromBackup;
+    } catch (err) {
+      logger.error(
+        err,
+        "[file-storage] Manifest unparseable from primary and backup; continuing with empty manifest. A fresh one will be written on next save. (path=%s)",
+        manifestPath(this.rootDir),
+      );
+      needsManifestRewrite = true;
+    }
+    this.loadedManifest = loadedManifest;
     this.migratedFromSqlite = this.loadedManifest?.migratedFromSqlite;
     this.legacyRepair = this.loadedManifest?.legacyRepair;
+    if (needsManifestRewrite) {
+      // Force a manifest rewrite on next save so the corrupt main file gets
+      // replaced rather than persistently triggering the .bak fallback path.
+      this.dirty = true;
+    }
 
     const counts: Record<string, number> = {};
     for (const table of FILE_BACKED_TABLES) {
       const meta = getMeta(table);
-      const rows = parseJsonFile<Row[]>(tableFilePath(this.rootDir, table), []);
+      const { value: rows, recoveredFromBackup } = parseJsonFile<Row[]>(
+        tableFilePath(this.rootDir, table),
+        [],
+      );
       const normalized = (Array.isArray(rows) ? rows : []).map((row) => normalizeRow(meta, row));
       this.tables.set(table, normalized);
       counts[table] = normalized.length;
+      if (recoveredFromBackup) {
+        // Same self-heal: rewrite the corrupt main file from in-memory data
+        // (which now matches the recovered backup) on the next flush.
+        this.dirtyTables.add(table);
+        this.dirty = true;
+      }
     }
     logger.info({ tables: counts }, `[file-storage] Loaded file-native data from ${this.rootDir}`);
   }
