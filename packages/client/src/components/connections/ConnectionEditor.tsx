@@ -85,6 +85,22 @@ const API_KEY_LINKS: Partial<Record<APIProvider, { label: string; url: string }>
   xai: { label: "Get your xAI API key", url: "https://console.x.ai" },
 };
 
+const DEFAULT_CACHING_AT_DEPTH = 5;
+const MAX_CACHING_AT_DEPTH = 100;
+const DEFAULT_MAX_PARALLEL_JOBS = 1;
+const MAX_PARALLEL_JOBS = 16;
+
+function normalizeCachingAtDepth(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return DEFAULT_CACHING_AT_DEPTH;
+  return Math.min(MAX_CACHING_AT_DEPTH, Math.floor(value));
+}
+
+function normalizeMaxParallelJobs(value: unknown): number {
+  const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(numeric) || numeric < 1) return DEFAULT_MAX_PARALLEL_JOBS;
+  return Math.min(MAX_PARALLEL_JOBS, Math.floor(numeric));
+}
+
 // ═══════════════════════════════════════════════
 //  Main Editor
 // ═══════════════════════════════════════════════
@@ -120,7 +136,9 @@ export function ConnectionEditor() {
   const [localApiKey, setLocalApiKey] = useState("");
   const [localModel, setLocalModel] = useState("");
   const [localMaxContext, setLocalMaxContext] = useState(128000);
+  const [localMaxParallelJobs, setLocalMaxParallelJobs] = useState(DEFAULT_MAX_PARALLEL_JOBS);
   const [localEnableCaching, setLocalEnableCaching] = useState(false);
+  const [localCachingAtDepth, setLocalCachingAtDepth] = useState(DEFAULT_CACHING_AT_DEPTH);
   const [localDefaultForAgents, setLocalDefaultForAgents] = useState(false);
   const [localEmbeddingModel, setLocalEmbeddingModel] = useState("");
   const [localEmbeddingBaseUrl, setLocalEmbeddingBaseUrl] = useState("");
@@ -215,7 +233,9 @@ export function ConnectionEditor() {
     setLocalApiKey(""); // never pre-fill (it's masked)
     setLocalModel((c.model as string) ?? "");
     setLocalMaxContext(Number(c.maxContext) || 128000);
+    setLocalMaxParallelJobs(normalizeMaxParallelJobs(c.maxParallelJobs));
     setLocalEnableCaching(c.enableCaching === "true" || c.enableCaching === true);
+    setLocalCachingAtDepth(normalizeCachingAtDepth(c.cachingAtDepth));
     setLocalDefaultForAgents(c.defaultForAgents === "true" || c.defaultForAgents === true);
     setLocalEmbeddingModel((c.embeddingModel as string) ?? "");
     setLocalEmbeddingBaseUrl((c.embeddingBaseUrl as string) ?? "");
@@ -364,7 +384,9 @@ export function ConnectionEditor() {
       baseUrl: localBaseUrl,
       model: localModel,
       maxContext: localMaxContext,
+      maxParallelJobs: localMaxParallelJobs,
       enableCaching: localEnableCaching,
+      cachingAtDepth: localCachingAtDepth,
       defaultForAgents: localDefaultForAgents,
       embeddingModel: localEmbeddingModel,
       embeddingBaseUrl: localEmbeddingBaseUrl,
@@ -416,7 +438,9 @@ export function ConnectionEditor() {
     localApiKey,
     localModel,
     localMaxContext,
+    localMaxParallelJobs,
     localEnableCaching,
+    localCachingAtDepth,
     localDefaultForAgents,
     localEmbeddingModel,
     localEmbeddingBaseUrl,
@@ -600,6 +624,9 @@ export function ConnectionEditor() {
 
   const providerDef = PROVIDERS[localProvider];
   const isImageGenerationProvider = localProvider === "image_generation";
+  const isClaudeSubscriptionProvider = localProvider === "claude_subscription";
+  const isOpenAIChatGPTProvider = localProvider === "openai_chatgpt";
+  const isLocalAuthProvider = isClaudeSubscriptionProvider || isOpenAIChatGPTProvider;
 
   if (!connectionDetailId) return null;
 
@@ -756,10 +783,9 @@ export function ConnectionEditor() {
                     if (key === "xai" && defaultModel?.context) {
                       setLocalMaxContext(defaultModel.context);
                     }
-                    // Claude (Subscription) ignores the API key field and
-                    // disables the input — clear any previously typed value
-                    // so a stale key from another provider doesn't get saved.
-                    if (key === "claude_subscription") {
+                    // Local subscription/session providers ignore the API key
+                    // field, so clear stale keys from other providers.
+                    if (key === "claude_subscription" || key === "openai_chatgpt") {
                       setLocalApiKey("");
                     }
                     markDirty();
@@ -800,6 +826,32 @@ export function ConnectionEditor() {
               <p className="mt-1.5 text-[0.625rem] text-[var(--muted-foreground)]">
                 Subscription auth is the same mechanism Visual Studio Code and other Anthropic-endorsed IDE integrations
                 use. Embeddings are not available on this provider; configure a separate connection for embedding work.
+              </p>
+            </div>
+          )}
+
+          {/* ── OpenAI (ChatGPT) — prerequisites notice ── */}
+          {isOpenAIChatGPTProvider && (
+            <div className="rounded-xl bg-sky-400/5 px-3 py-2.5 ring-1 ring-sky-400/30">
+              <p className="flex items-start gap-1.5 text-[0.6875rem] text-sky-300">
+                <AlertCircle size="0.75rem" className="mt-px shrink-0" />
+                <span>
+                  Routes chat through your local <strong>Codex ChatGPT</strong> login so it uses your ChatGPT account
+                  instead of an OpenAI API key. Prerequisites on the Marinara host:
+                </span>
+              </p>
+              <ol className="mt-1.5 ml-4 list-decimal space-y-0.5 text-[0.625rem] text-[var(--muted-foreground)]">
+                <li>
+                  Install Codex CLI: <code className="rounded bg-[var(--secondary)] px-1">npm i -g @openai/codex</code>
+                </li>
+                <li>
+                  Sign in once: <code className="rounded bg-[var(--secondary)] px-1">codex login</code>
+                </li>
+                <li>API Key and Base URL are not required - leave them blank.</li>
+              </ol>
+              <p className="mt-1.5 text-[0.625rem] text-[var(--muted-foreground)]">
+                Marinara reads the local Codex auth file and refreshes the ChatGPT session when possible. Embeddings are
+                not available on this provider; configure a separate connection for embedding work.
               </p>
             </div>
           )}
@@ -850,18 +902,20 @@ export function ConnectionEditor() {
               type="password"
               className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-70"
               placeholder={
-                localProvider === "claude_subscription"
+                isClaudeSubscriptionProvider
                   ? "Not used — managed by the Claude Agent SDK"
-                  : "••••••••  (leave empty to keep existing key)"
+                  : isOpenAIChatGPTProvider
+                    ? "Not used - read from local Codex ChatGPT login"
+                    : "••••••••  (leave empty to keep existing key)"
               }
-              disabled={localProvider === "claude_subscription"}
+              disabled={isLocalAuthProvider}
             />
-            {localProvider !== "claude_subscription" && (
+            {!isLocalAuthProvider && (
               <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
                 Your key is encrypted at rest. Leave blank when editing to keep the existing key.
               </p>
             )}
-            {localProvider !== "claude_subscription" && API_KEY_LINKS[localProvider] && (
+            {!isLocalAuthProvider && API_KEY_LINKS[localProvider] && (
               <a
                 href={API_KEY_LINKS[localProvider]!.url}
                 target="_blank"
@@ -884,6 +938,12 @@ export function ConnectionEditor() {
                 <code className="rounded bg-[var(--secondary)] px-1">claude</code> CLI session.
               </p>
             )}
+            {isOpenAIChatGPTProvider && (
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                Authentication is read from your local{" "}
+                <code className="rounded bg-[var(--secondary)] px-1">codex login</code> session.
+              </p>
+            )}
           </FieldGroup>
 
           {/* ── Base URL ── */}
@@ -898,15 +958,17 @@ export function ConnectionEditor() {
                 setLocalBaseUrl(e.target.value);
                 markDirty();
               }}
-              className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm font-mono ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+              className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm font-mono ring-1 ring-[var(--border)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-70"
               placeholder={
-                localProvider === "claude_subscription"
+                isClaudeSubscriptionProvider
                   ? "Not used — managed by the Claude Agent SDK"
-                  : providerDef?.defaultBaseUrl || "https://api.example.com/v1"
+                  : isOpenAIChatGPTProvider
+                    ? "Not used - ChatGPT Codex endpoint is selected automatically"
+                    : providerDef?.defaultBaseUrl || "https://api.example.com/v1"
               }
-              disabled={localProvider === "claude_subscription"}
+              disabled={isLocalAuthProvider}
             />
-            {providerDef?.defaultBaseUrl && !localBaseUrl && (
+            {providerDef?.defaultBaseUrl && !localBaseUrl && !isLocalAuthProvider && (
               <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
                 Default: {providerDef.defaultBaseUrl}
               </p>
@@ -917,6 +979,11 @@ export function ConnectionEditor() {
                 <code className="rounded bg-[var(--secondary)] px-1">claude</code> CLI auth.
               </p>
             )}
+            {isOpenAIChatGPTProvider && (
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                Marinara sends requests to the ChatGPT Codex endpoint automatically using your local Codex auth.
+              </p>
+            )}
             {localProvider === "custom" && (
               <p className="mt-1.5 text-[0.625rem] text-[var(--muted-foreground)]">
                 Local model examples: Ollama →{" "}
@@ -925,7 +992,7 @@ export function ConnectionEditor() {
                 <code className="rounded bg-[var(--secondary)] px-1">http://localhost:5001/v1</code>
               </p>
             )}
-            {localProvider !== "claude_subscription" && (
+            {!isLocalAuthProvider && (
               <p className="mt-1.5 flex items-start gap-1 text-[0.625rem] text-amber-400/80">
                 <AlertCircle size="0.625rem" className="mt-px shrink-0" />
                 <span>
@@ -1350,7 +1417,7 @@ export function ConnectionEditor() {
           )}
 
           {/* ── Max Output Tokens Override ── */}
-          {localProvider !== "image_generation" && localProvider !== "claude_subscription" && (
+          {localProvider !== "image_generation" && !isLocalAuthProvider && (
             <FieldGroup
               label="Max Output Tokens Override"
               icon={<Zap size="0.875rem" className="text-amber-400" />}
@@ -1374,6 +1441,36 @@ export function ConnectionEditor() {
               <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
                 Set to 0 or leave empty to disable. When set, no request to this connection will exceed this token limit
                 — including batched agent calls.
+              </p>
+            </FieldGroup>
+          )}
+
+          {/* ── Agent Parallel Jobs ── */}
+          {localProvider !== "image_generation" && (
+            <FieldGroup
+              label="Max Parallel Agent Jobs"
+              icon={<SlidersHorizontal size="0.875rem" className="text-fuchsia-400" />}
+              help="How many agent LLM requests Marinara may run at once for this connection. Higher values can speed up agent-heavy chats on providers that tolerate parallel calls."
+            >
+              <div className="flex items-center gap-3">
+                <DraftNumberInput
+                  value={localMaxParallelJobs}
+                  min={1}
+                  max={MAX_PARALLEL_JOBS}
+                  selectOnFocus
+                  onCommit={(nextValue) => {
+                    setLocalMaxParallelJobs(normalizeMaxParallelJobs(nextValue));
+                    markDirty();
+                  }}
+                  className="w-24 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                />
+                <span className="text-xs text-[var(--muted-foreground)]">
+                  {localMaxParallelJobs === 1 ? "One agent job at a time" : `${localMaxParallelJobs} agent jobs`}
+                </span>
+              </div>
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                Agent batches for the same connection can be split across this many parallel jobs. Set to 1 for the
+                safest provider behavior.
               </p>
             </FieldGroup>
           )}
@@ -1452,6 +1549,27 @@ export function ConnectionEditor() {
                   ? "Caches the system prompt explicitly and uses automatic caching for conversation history. Read tokens cost 90% less than regular input tokens. Cache writes cost 25% more on first use."
                   : "On OpenRouter, this currently targets Claude models by adding top-level cache_control. Cache reads are much cheaper than normal prompt tokens, while the first cache write costs more."}
               </p>
+              {localProvider === "anthropic" && localEnableCaching && (
+                <label className="mt-2 flex items-center justify-between gap-3 rounded-xl bg-[var(--secondary)]/40 px-3 py-2 ring-1 ring-[var(--border)]">
+                  <div className="min-w-0">
+                    <span className="block text-sm font-medium">Cache depth</span>
+                    <span className="block text-[0.625rem] text-[var(--muted-foreground)]">
+                      Messages back from the newest turn.
+                    </span>
+                  </div>
+                  <DraftNumberInput
+                    value={localCachingAtDepth}
+                    min={0}
+                    max={MAX_CACHING_AT_DEPTH}
+                    onCommit={(value) => {
+                      setLocalCachingAtDepth(normalizeCachingAtDepth(value));
+                      markDirty();
+                    }}
+                    className="h-8 w-16 rounded-lg bg-[var(--background)] px-2 text-right text-sm outline-none ring-1 ring-[var(--border)] transition-shadow focus:ring-[var(--primary)]/40"
+                    selectOnFocus
+                  />
+                </label>
+              )}
             </FieldGroup>
           )}
 
@@ -1525,10 +1643,10 @@ export function ConnectionEditor() {
                   <div className="font-medium text-[var(--foreground)]">Use Claude Code fast-mode routing</div>
                   <p className="mt-0.5 text-[var(--muted-foreground)]">
                     <strong className="text-amber-400">99% of users should leave this off.</strong> Fast mode is
-                    effectively a dead feature today — Claude/Anthropic removed support for downgrading current
-                    models, and Opus 4.7 has no faster variant to route to. Turning it on does nothing useful for
-                    roleplay quality and may add overhead. The toggle exists only so we don&apos;t have to ship a
-                    new release if Anthropic re-enables it. Leave off until that happens.
+                    effectively a dead feature today — Claude/Anthropic removed support for downgrading current models,
+                    and Opus 4.7 has no faster variant to route to. Turning it on does nothing useful for roleplay
+                    quality and may add overhead. The toggle exists only so we don&apos;t have to ship a new release if
+                    Anthropic re-enables it. Leave off until that happens.
                   </p>
                   <p className="mt-1.5 flex items-start gap-1 text-[var(--muted-foreground)]">
                     <AlertCircle size="0.625rem" className="mt-px shrink-0 text-amber-400" />
@@ -1813,24 +1931,21 @@ export function ConnectionEditor() {
                   </div>
                   {claudeDiagResult.billedDifferent && (
                     <div className="rounded-lg bg-[var(--destructive)]/10 p-2.5 text-[0.6875rem] text-[var(--destructive)] ring-1 ring-[var(--destructive)]/30">
-                      Silent downgrade detected — you asked for{" "}
-                      <strong>{claudeDiagResult.requestedModel}</strong> but the SDK billed{" "}
-                      <strong>{claudeDiagResult.modelsBilled.join(", ")}</strong>. This is usually caused by Claude
-                      Code being in <code>cooldown</code> after hitting Opus rate limits, or fast mode being toggled
-                      on in your CLI settings. Run <code>claude /model</code> in your terminal to check.
+                      Silent downgrade detected — you asked for <strong>{claudeDiagResult.requestedModel}</strong> but
+                      the SDK billed <strong>{claudeDiagResult.modelsBilled.join(", ")}</strong>. This is usually caused
+                      by Claude Code being in <code>cooldown</code> after hitting Opus rate limits, or fast mode being
+                      toggled on in your CLI settings. Run <code>claude /model</code> in your terminal to check.
                     </div>
                   )}
-                  {claudeDiagResult.modelUsageDetail.some(
-                    (u) => u.model !== claudeDiagResult.requestedModel,
-                  ) && (
+                  {claudeDiagResult.modelUsageDetail.some((u) => u.model !== claudeDiagResult.requestedModel) && (
                     <div className="rounded-lg bg-[var(--secondary)]/50 p-2.5 text-[0.6875rem] text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
                       <strong className="text-[var(--foreground)]">Why is Haiku in the list?</strong> The Claude Agent
-                      SDK runs a <code>UserPromptSubmit</code> hook on every call that uses its small/fast model
-                      (Haiku) to auto-generate a session title and optional context for the main model. This is Claude
-                      Code session bookkeeping — it&apos;s organic to the subscription path, can&apos;t be cleanly
-                      disabled, and doesn&apos;t serve any of your roleplay output. Your actual response always comes
-                      from the model labeled <em>Roleplay generation</em> above. The Haiku tagalong adds only a few
-                      output tokens per turn and a tiny slice of quota.
+                      SDK runs a <code>UserPromptSubmit</code> hook on every call that uses its small/fast model (Haiku)
+                      to auto-generate a session title and optional context for the main model. This is Claude Code
+                      session bookkeeping — it&apos;s organic to the subscription path, can&apos;t be cleanly disabled,
+                      and doesn&apos;t serve any of your roleplay output. Your actual response always comes from the
+                      model labeled <em>Roleplay generation</em> above. The Haiku tagalong adds only a few output tokens
+                      per turn and a tiny slice of quota.
                     </div>
                   )}
                   {claudeDiagResult.response && (

@@ -14,10 +14,7 @@ export function ImagePromptPanel({ prompt, meta, className }: ImagePromptPanelPr
 
   return (
     <div
-      className={cn(
-        "rounded-lg border border-white/10 bg-neutral-950/95 px-3 py-2 text-left shadow-2xl",
-        className,
-      )}
+      className={cn("rounded-lg border border-white/10 bg-neutral-950/95 px-3 py-2 text-left shadow-2xl", className)}
     >
       {promptText && (
         <>

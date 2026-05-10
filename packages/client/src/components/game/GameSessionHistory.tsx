@@ -16,7 +16,7 @@ import {
   X,
   RefreshCw,
 } from "lucide-react";
-import type { GameNpc, PartyArc, SessionSummary } from "@marinara-engine/shared";
+import type { GameMap, GameNpc, PartyArc, SessionSummary } from "@marinara-engine/shared";
 import { toast } from "sonner";
 import { AnimatedText } from "./AnimatedText";
 
@@ -83,6 +83,7 @@ export interface CurrentSessionSecrets {
   storyArc: string;
   plotTwists: string[];
   partyArcs: PartyArc[];
+  maps: GameMap[];
   npcs: GameNpc[];
   characterCards: Array<Record<string, unknown>>;
 }
@@ -92,6 +93,7 @@ interface CurrentSessionSecretDraft {
   storyArc: string;
   plotTwists: string;
   partyArcs: string;
+  maps: string;
   npcs: string;
   characterCards: string;
 }
@@ -116,6 +118,7 @@ function buildCurrentSecretsDraft(secrets: CurrentSessionSecrets): CurrentSessio
     storyArc: secrets.storyArc,
     plotTwists: formatListDraft(secrets.plotTwists),
     partyArcs: formatJsonDraft(secrets.partyArcs),
+    maps: formatJsonDraft(secrets.maps),
     npcs: formatJsonDraft(secrets.npcs),
     characterCards: formatJsonDraft(secrets.characterCards),
   };
@@ -333,6 +336,7 @@ export function GameSessionHistory({
         storyArc: secretDraft.storyArc.trim(),
         plotTwists: parseListDraft(secretDraft.plotTwists),
         partyArcs: parseJsonArrayDraft<PartyArc>("Party arcs", secretDraft.partyArcs),
+        maps: parseJsonArrayDraft<GameMap>("Maps", secretDraft.maps),
         npcs: parseJsonArrayDraft<GameNpc>("NPCs", secretDraft.npcs),
         characterCards: parseJsonArrayDraft<Record<string, unknown>>("Character cards", secretDraft.characterCards),
       });
@@ -459,6 +463,20 @@ export function GameSessionHistory({
                     </label>
                     <label className="flex flex-col gap-1">
                       <span className="text-[0.6875rem] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                        Maps JSON
+                      </span>
+                      <textarea
+                        value={secretDraft?.maps ?? ""}
+                        onChange={(event) =>
+                          setSecretDraft((prev) => (prev ? { ...prev, maps: event.target.value } : prev))
+                        }
+                        rows={10}
+                        disabled={savingCurrentSecrets}
+                        className="rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[0.6875rem] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
                         NPCs JSON
                       </span>
                       <textarea
@@ -521,6 +539,7 @@ export function GameSessionHistory({
                     <SpoilerTextSection label="Story Arc" value={currentSecrets.storyArc} />
                     <SpoilerListSection label="Plot Twists" values={currentSecrets.plotTwists} />
                     <SpoilerJsonSection label="Party Arcs" value={currentSecrets.partyArcs} />
+                    <SpoilerJsonSection label="Maps" value={currentSecrets.maps} />
                     <SpoilerJsonSection label="NPCs" value={currentSecrets.npcs} />
                     <SpoilerJsonSection label="Character Cards" value={currentSecrets.characterCards} />
                   </div>

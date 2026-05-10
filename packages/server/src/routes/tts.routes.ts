@@ -347,12 +347,26 @@ function readProviderErrorDetail(body: string): string {
   try {
     const data = JSON.parse(body) as Record<string, unknown>;
     const directDetail = readString(data.detail);
+    const error = asObject(data.error);
     const detail = asObject(data.detail);
+    const errorMessage = readString(error?.message) ?? readString(error?.status);
     const detailMessage = readString(detail?.message) ?? readString(detail?.status);
-    return readString(data.message) ?? readString(data.error) ?? directDetail ?? detailMessage ?? body.slice(0, 500);
+    return (
+      readString(data.message) ??
+      readString(data.error) ??
+      errorMessage ??
+      directDetail ??
+      detailMessage ??
+      body.slice(0, 500)
+    );
   } catch {
     return body.slice(0, 500);
   }
+}
+
+export function isAllowedTTSAudioContentType(contentType: string | null): boolean {
+  const normalized = contentType?.toLowerCase() ?? "";
+  return normalized.includes("audio/") || normalized.includes("application/octet-stream");
 }
 
 function buildSpeechInstructions(input: { speaker?: string; tone?: string; includeSpeaker?: boolean }) {
@@ -644,12 +658,11 @@ export async function ttsRoutes(app: FastifyInstance) {
                 }),
         signal: AbortSignal.timeout(60_000),
         policy: {
-      allowLocal: allowLocalTtsUrl(cfg),
-      allowedProtocols: ["https:", "http:"],
-      flagName: "TTS_LOCAL_URLS_ENABLED",
-    },
+          allowLocal: allowLocalTtsUrl(cfg),
+          allowedProtocols: ["https:", "http:"],
+          flagName: "TTS_LOCAL_URLS_ENABLED",
+        },
         maxResponseBytes: MAX_TTS_AUDIO_BYTES,
-        allowedContentTypes: ["audio/", "application/octet-stream"],
       });
     } catch (err: unknown) {
       const msg =
@@ -665,9 +678,17 @@ export async function ttsRoutes(app: FastifyInstance) {
         .send({ error: `TTS provider returned ${providerRes.status}`, detail: readProviderErrorDetail(body) });
     }
 
+    const contentType = providerRes.headers.get("content-type");
+    if (!isAllowedTTSAudioContentType(contentType)) {
+      const body = await providerRes.text().catch(() => "");
+      return reply.status(502).send({
+        error: "TTS provider returned a non-audio response",
+        detail: readProviderErrorDetail(body) || `Content-Type: ${contentType || "missing"}`,
+      });
+    }
+
     const audioBuffer = await providerRes.arrayBuffer();
-    const contentType = providerRes.headers.get("content-type") || "audio/mpeg";
-    reply.header("Content-Type", contentType.startsWith("audio/") ? contentType : "audio/mpeg");
+    reply.header("Content-Type", contentType?.startsWith("audio/") ? contentType : "audio/mpeg");
     reply.header("Content-Length", String(audioBuffer.byteLength));
     return reply.send(Buffer.from(audioBuffer));
   });

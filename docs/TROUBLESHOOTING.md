@@ -34,10 +34,10 @@ Look for `storage/manifest.json` first. If it does not exist, look for `marinara
 If you're accessing Marinara Engine from a phone or tablet on the same network and it won't connect:
 
 - Make sure the server is bound to `0.0.0.0`, not `127.0.0.1`. The shell launchers (`start.sh`, `start-termux.sh`) default to `0.0.0.0`. If you started manually with `pnpm start`, set `HOST=0.0.0.0` in `.env` first.
-- Configure `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` for non-loopback access. Loopback remains passwordless, but LAN/Docker/Tailscale/private-network clients now fail closed by default when Basic Auth is unset.
+- Configure `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` for ordinary LAN or public clients. Loopback remains passwordless, and Tailscale plus Docker bridge clients are trusted by default unless you set `BYPASS_AUTH_TAILSCALE=false` or `BYPASS_AUTH_DOCKER=false`.
 - If you need privileged features from that device, set `ADMIN_SECRET` on the server and save it in **Settings -> Advanced -> Admin Access**.
-- On mixed-trust networks, prefer `IP_ALLOWLIST` for specific trusted LAN/Docker/Tailscale/private-network client IPs or CIDRs instead of enabling the global `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK` compatibility switch. Configure it on the server and keep `ADMIN_SECRET` set for privileged actions.
-- The compatibility switch `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true` restores old unauthenticated LAN behavior, but only use it on a trusted private network.
+- On mixed-trust networks, prefer `IP_ALLOWLIST` for specific trusted LAN/private-network client IPs or CIDRs instead of enabling the global `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK` compatibility switch. Configure it on the server and keep `ADMIN_SECRET` set for privileged actions.
+- The compatibility switch `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true` restores old unauthenticated LAN behavior outside the default trusted Tailscale and Docker bridge ranges, but only use it on a trusted private network.
 - If sending a message shows `Request origin is not trusted`, set `CSRF_TRUSTED_ORIGINS` to the exact URL you open in the browser, including Docker's mapped host port, for example `CSRF_TRUSTED_ORIGINS=http://192.168.1.10:3004`. Use `*` only on a fully trusted private setup.
 - Verify both devices are on the same Wi-Fi network.
 - Check that no firewall is blocking port `7860` (or your configured `PORT`).

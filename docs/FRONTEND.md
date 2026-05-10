@@ -478,23 +478,23 @@ The server (`packages/server`) exposes the following REST API at `/api`:
 
 ### Core Resources
 
-| Prefix               | Methods                       | Description                                          |
-| -------------------- | ----------------------------- | ---------------------------------------------------- |
-| `/api/characters`    | GET, POST, PATCH, DELETE      | Character CRUD, groups, export (JSON/PNG)            |
-| `/api/chats`         | GET, POST, PATCH, DELETE      | Chat CRUD, messages, metadata, connect/disconnect    |
-| `/api/prompts`       | GET, POST, PATCH, DELETE      | Preset CRUD, sections, groups, choice blocks, export |
-| `/api/connections`   | GET, POST, PATCH, DELETE      | API connection CRUD, duplicate, test                 |
-| `/api/agents`        | GET, POST, PATCH, DELETE      | Agent CRUD, echo messages, runs; built-in toggles use `PUT /api/agents/toggle/:agentType`; memory uses `/api/agents/memory/:agentType/:chatId` |
-| `/api/lorebooks`     | GET, POST, PATCH, DELETE      | Lorebook CRUD, entries, export                       |
-| `/api/custom-tools`  | GET, POST, PATCH, DELETE      | Custom tool CRUD                                     |
-| `/api/regex-scripts` | GET, POST, PATCH, DELETE      | Regex script CRUD                                    |
+| Prefix               | Methods                  | Description                                                                                                                                    |
+| -------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/characters`    | GET, POST, PATCH, DELETE | Character CRUD, groups, export (JSON/PNG)                                                                                                      |
+| `/api/chats`         | GET, POST, PATCH, DELETE | Chat CRUD, messages, metadata, connect/disconnect                                                                                              |
+| `/api/prompts`       | GET, POST, PATCH, DELETE | Preset CRUD, sections, groups, choice blocks, export                                                                                           |
+| `/api/connections`   | GET, POST, PATCH, DELETE | API connection CRUD, duplicate, test                                                                                                           |
+| `/api/agents`        | GET, POST, PATCH, DELETE | Agent CRUD, echo messages, runs; built-in toggles use `PUT /api/agents/toggle/:agentType`; memory uses `/api/agents/memory/:agentType/:chatId` |
+| `/api/lorebooks`     | GET, POST, PATCH, DELETE | Lorebook CRUD, entries, export                                                                                                                 |
+| `/api/custom-tools`  | GET, POST, PATCH, DELETE | Custom tool CRUD                                                                                                                               |
+| `/api/regex-scripts` | GET, POST, PATCH, DELETE | Regex script CRUD                                                                                                                              |
 
 ### Generation
 
-| Endpoint                     | Method | Description                                                                 |
-| ---------------------------- | ------ | --------------------------------------------------------------------------- |
-| `/api/generate`              | POST   | Main SSE generation with agent pipeline                                     |
-| `/api/generate/retry-agents` | POST   | SSE retry for the agent types supplied by the caller                        |
+| Endpoint                     | Method | Description                                          |
+| ---------------------------- | ------ | ---------------------------------------------------- |
+| `/api/generate`              | POST   | Main SSE generation with agent pipeline              |
+| `/api/generate/retry-agents` | POST   | SSE retry for the agent types supplied by the caller |
 
 ### Chat Features
 
@@ -580,11 +580,11 @@ Retry requests go through `/api/generate/retry-agents` with an explicit `agentTy
 
 Agent memory tools, such as the Secret Plot tab, use `/api/agents/memory/:agentType/:chatId`. The route applies to configured agents that store per-chat memory, currently including `secret-plot-driver` for the Secret Plot tab. `agentType` is the agent type string and `chatId` is the target chat id.
 
-| Method | Body | Success | Errors | Use |
-| ------ | ---- | ------- | ------ | --- |
-| GET | none | `200 { agentConfigId, memory }` | `404` when the agent has no config | Read memory |
-| PATCH | `{ "patch": { "key": value } }` | `200 { agentConfigId, memory }` | `400` for invalid patch bodies or Secret Plot memory shapes; `404` when the agent cannot be configured | Update memory keys |
-| DELETE | none | `204` | none for a missing config | Clear that agent's memory for the chat |
+| Method | Body                            | Success                         | Errors                                                                                                 | Use                                    |
+| ------ | ------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| GET    | none                            | `200 { agentConfigId, memory }` | `404` when the agent has no config                                                                     | Read memory                            |
+| PATCH  | `{ "patch": { "key": value } }` | `200 { agentConfigId, memory }` | `400` for invalid patch bodies or Secret Plot memory shapes; `404` when the agent cannot be configured | Update memory keys                     |
+| DELETE | none                            | `204`                           | none for a missing config                                                                              | Clear that agent's memory for the chat |
 
 ### Built-in Agents (24)
 

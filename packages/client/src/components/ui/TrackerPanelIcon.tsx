@@ -4,12 +4,7 @@ type TrackerPanelIconProps = SVGProps<SVGSVGElement> & {
   size?: number | string;
 };
 
-export function TrackerPanelIcon({
-  size = "1em",
-  strokeWidth = 1.9,
-  className,
-  ...props
-}: TrackerPanelIconProps) {
+export function TrackerPanelIcon({ size = "1em", strokeWidth = 1.9, className, ...props }: TrackerPanelIconProps) {
   return (
     <svg
       width={size}

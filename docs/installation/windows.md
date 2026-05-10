@@ -91,7 +91,7 @@ This applies to both manual clones and installs created by the Windows installer
 
 ### In-App Update Check
 
-Go to **Settings → Advanced → Updates** and click **Check for Updates**. If a new version is available, click **Apply Update** to pull and rebuild from within the app. When it finishes, relaunch Marinara Engine from the shortcut or `start.bat` to start the updated build.
+Go to **Settings → Advanced → Updates** and click **Check for Updates** to see whether a new release exists. The in-app **Apply Update** button is disabled by default; to enable it, set `UPDATES_APPLY_ENABLED=true`, set `ADMIN_SECRET`, and save that same secret in **Settings → Advanced → Admin Access**. Otherwise, relaunch Marinara Engine from the shortcut or `start.bat` to let the launcher update the app.
 
 ### Manual Update
 

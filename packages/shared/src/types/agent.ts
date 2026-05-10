@@ -768,6 +768,31 @@ export const BUILT_IN_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: "read_chat_variable",
+    description:
+      "Read a chat-wide string variable by key. Use this for agent-private state or coordination with other agents in the same chat.",
+    parameters: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "Variable key to read" },
+      },
+      required: ["key"],
+    },
+  },
+  {
+    name: "write_chat_variable",
+    description:
+      "Write or replace a chat-wide string variable by key. Any agent in this chat can read the value if it knows the key.",
+    parameters: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "Variable key to write" },
+        value: { type: "string", description: "String value to store for this key" },
+      },
+      required: ["key", "value"],
+    },
+  },
+  {
     name: "spotify_get_current_playback",
     description:
       "Get the user's current Spotify playback state, track, active device, and volume. Use this before changing music so you do not restart or replace a fitting track.",
@@ -813,12 +838,12 @@ export const BUILT_IN_TOOLS: ToolDefinition[] = [
         },
         limit: {
           type: "number",
-          description:
-            "Candidate count in default mode, or page size when offset is provided (page max: 50).",
+          description: "Candidate count in default mode, or page size when offset is provided (page max: 50).",
         },
         offset: {
           type: "number",
-          description: "Optional raw-page offset. Only use for manual browsing; default mode is cached candidate selection.",
+          description:
+            "Optional raw-page offset. Only use for manual browsing; default mode is cached candidate selection.",
         },
       },
       required: ["playlistId"],

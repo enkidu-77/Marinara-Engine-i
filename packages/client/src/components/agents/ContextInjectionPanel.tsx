@@ -208,14 +208,7 @@ export function ContextInjectionPanel({
       });
       await qc.invalidateQueries({ queryKey: directorCadenceQueryKey });
     },
-    [
-      directorInterval,
-      directorIntervalMeta,
-      directorSettings,
-      directorCadenceQueryKey,
-      qc,
-      updateDirectorAgent,
-    ],
+    [directorInterval, directorIntervalMeta, directorSettings, directorCadenceQueryKey, qc, updateDirectorAgent],
   );
 
   if (!chatId) return null;

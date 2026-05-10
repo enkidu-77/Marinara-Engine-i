@@ -251,9 +251,11 @@ const CREATE_TABLES: string[] = [
     api_key_encrypted TEXT NOT NULL DEFAULT '',
     model TEXT NOT NULL DEFAULT '',
     max_context INTEGER NOT NULL DEFAULT 128000,
+    max_parallel_jobs INTEGER NOT NULL DEFAULT 1,
     is_default TEXT NOT NULL DEFAULT 'false',
     use_for_random TEXT NOT NULL DEFAULT 'false',
     enable_caching TEXT NOT NULL DEFAULT 'false',
+    caching_at_depth INTEGER NOT NULL DEFAULT 5,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -476,6 +478,11 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     definition: "TEXT NOT NULL DEFAULT 'false'",
   },
   {
+    table: "api_connections",
+    column: "caching_at_depth",
+    definition: "INTEGER NOT NULL DEFAULT 5",
+  },
+  {
     table: "game_state_snapshots",
     column: "committed",
     definition: "INTEGER NOT NULL DEFAULT 0",
@@ -626,6 +633,11 @@ const COLUMN_MIGRATIONS: ColumnMigration[] = [
     definition: "INTEGER",
   },
   {
+    table: "api_connections",
+    column: "max_parallel_jobs",
+    definition: "INTEGER NOT NULL DEFAULT 1",
+  },
+  {
     table: "lorebook_entries",
     column: "description",
     definition: "TEXT NOT NULL DEFAULT ''",
@@ -703,9 +715,13 @@ export async function runMigrations(db: DB) {
   await db.run(
     sql.raw(`CREATE INDEX IF NOT EXISTS idx_game_state_message ON game_state_snapshots(message_id, swipe_index)`),
   );
-  await db.run(sql.raw(`CREATE INDEX IF NOT EXISTS idx_lorebook_character_links_book ON lorebook_character_links(lorebook_id)`));
   await db.run(
-    sql.raw(`CREATE INDEX IF NOT EXISTS idx_lorebook_character_links_character ON lorebook_character_links(character_id)`),
+    sql.raw(`CREATE INDEX IF NOT EXISTS idx_lorebook_character_links_book ON lorebook_character_links(lorebook_id)`),
+  );
+  await db.run(
+    sql.raw(
+      `CREATE INDEX IF NOT EXISTS idx_lorebook_character_links_character ON lorebook_character_links(character_id)`,
+    ),
   );
   await db.run(
     sql.raw(`
@@ -722,8 +738,12 @@ export async function runMigrations(db: DB) {
       `CREATE UNIQUE INDEX IF NOT EXISTS uniq_lorebook_character_links_pair ON lorebook_character_links(lorebook_id, character_id)`,
     ),
   );
-  await db.run(sql.raw(`CREATE INDEX IF NOT EXISTS idx_lorebook_persona_links_book ON lorebook_persona_links(lorebook_id)`));
-  await db.run(sql.raw(`CREATE INDEX IF NOT EXISTS idx_lorebook_persona_links_persona ON lorebook_persona_links(persona_id)`));
+  await db.run(
+    sql.raw(`CREATE INDEX IF NOT EXISTS idx_lorebook_persona_links_book ON lorebook_persona_links(lorebook_id)`),
+  );
+  await db.run(
+    sql.raw(`CREATE INDEX IF NOT EXISTS idx_lorebook_persona_links_persona ON lorebook_persona_links(persona_id)`),
+  );
   await db.run(
     sql.raw(`
       DELETE FROM lorebook_persona_links

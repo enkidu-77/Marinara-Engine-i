@@ -1,5 +1,4 @@
-Issue 597 follow-up evidence
-============================
+# Issue 597 follow-up evidence
 
 This folder contains browser screenshots captured from a local Marinara Engine dev server for the follow-up fix to PR #597.
 

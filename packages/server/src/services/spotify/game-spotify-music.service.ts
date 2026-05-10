@@ -303,7 +303,11 @@ function mapSpotifyTrackItems(
       return {
         uri: track.uri,
         name: track.name || "Unknown track",
-        artist: (track.artists ?? []).map((a) => a.name).filter(Boolean).join(", ") || "Unknown artist",
+        artist:
+          (track.artists ?? [])
+            .map((a) => a.name)
+            .filter(Boolean)
+            .join(", ") || "Unknown artist",
         album: track.album?.name || "Unknown album",
         position: offset + index + 1,
       };
@@ -398,7 +402,11 @@ async function searchSpotifyTracks(
       return {
         uri: track.uri,
         name: track.name || "Unknown track",
-        artist: (track.artists ?? []).map((artist) => artist.name).filter(Boolean).join(", ") || "Unknown artist",
+        artist:
+          (track.artists ?? [])
+            .map((artist) => artist.name)
+            .filter(Boolean)
+            .join(", ") || "Unknown artist",
         album: track.album?.name || "Unknown album",
         position: index + 1,
       };

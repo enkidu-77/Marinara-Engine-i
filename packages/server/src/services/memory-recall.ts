@@ -188,10 +188,7 @@ export async function rebuildMemoryChunks(
   await db.delete(memoryChunks).where(eq(memoryChunks.chatId, chatId));
   await chunkAndEmbedMessages(db, chatId, nameMap, options);
 
-  const rebuilt = await db
-    .select({ id: memoryChunks.id })
-    .from(memoryChunks)
-    .where(eq(memoryChunks.chatId, chatId));
+  const rebuilt = await db.select({ id: memoryChunks.id }).from(memoryChunks).where(eq(memoryChunks.chatId, chatId));
   return rebuilt.length;
 }
 

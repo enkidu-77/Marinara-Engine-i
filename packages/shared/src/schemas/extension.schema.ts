@@ -29,8 +29,10 @@ function utf8ByteLength(value: string): number {
   return bytes;
 }
 
-const cssByteLimit = (value: string | null | undefined) => value == null || utf8ByteLength(value) <= MAX_EXTENSION_CSS_BYTES;
-const jsByteLimit = (value: string | null | undefined) => value == null || utf8ByteLength(value) <= MAX_EXTENSION_JS_BYTES;
+const cssByteLimit = (value: string | null | undefined) =>
+  value == null || utf8ByteLength(value) <= MAX_EXTENSION_CSS_BYTES;
+const jsByteLimit = (value: string | null | undefined) =>
+  value == null || utf8ByteLength(value) <= MAX_EXTENSION_JS_BYTES;
 
 const cssByteMessage = `CSS must be at most ${MAX_EXTENSION_CSS_BYTES} bytes`;
 const jsByteMessage = `JS must be at most ${MAX_EXTENSION_JS_BYTES} bytes`;

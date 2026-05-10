@@ -82,6 +82,8 @@ export interface ChatOptions {
   tools?: LLMToolDefinition[];
   /** Enable provider-native prompt caching when supported */
   enableCaching?: boolean;
+  /** Anthropic cache breakpoint depth from the newest message. 0 = newest message. */
+  cachingAtDepth?: number;
   /** Callback for streaming thinking/reasoning content */
   onThinking?: (chunk: string) => void;
   /** Prefer provider APIs that expose reasoning summaries when available */

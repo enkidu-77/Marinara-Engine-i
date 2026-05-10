@@ -1,13 +1,34 @@
 // ──────────────────────────────────────────────
 // Chat: Conversation View — Discord-style composite
 // ──────────────────────────────────────────────
-import { Suspense, lazy, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  Suspense,
+  lazy,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, ChevronUp, Settings2, FolderOpen, Image as ImageIcon, ArrowRightLeft } from "lucide-react";
+import {
+  Loader2,
+  ChevronUp,
+  Settings2,
+  FolderOpen,
+  Globe,
+  Image as ImageIcon,
+  ArrowRightLeft,
+  MoreHorizontal,
+} from "lucide-react";
 import { ConversationMessage } from "./ConversationMessage";
 import { ConversationInput } from "./ConversationInput";
 import { SceneBanner, EndSceneBar } from "./SceneBanner";
 import { ChatBranchSelector } from "./ChatBranchSelector";
+import { ActiveWorldInfoButton, ActiveWorldInfoModal } from "./ActiveWorldInfoButton";
 import { useChatStore } from "../../stores/chat.store";
 import { useUIStore } from "../../stores/ui.store";
 import { playNotificationPing } from "../../lib/notification-sound";
@@ -118,6 +139,65 @@ const globalSeenKeys = new Set<string>();
 
 const HEADER_BTN =
   "flex items-center justify-center rounded-lg bg-[var(--card)]/80 p-1.5 text-foreground/80 backdrop-blur-sm transition-colors hover:bg-[var(--card)] hover:text-foreground dark:bg-black/30 dark:hover:bg-black/50";
+const MOBILE_MENU_BTN =
+  "flex h-8 w-8 items-center justify-center rounded-lg text-foreground/80 transition-colors hover:bg-[var(--accent)] hover:text-foreground";
+
+function ConversationToolbarMenu({
+  desktopChildren,
+  mobileChildren,
+}: {
+  desktopChildren: ReactNode;
+  mobileChildren: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    setPos({
+      top: rect.bottom + 4,
+      right: window.innerWidth - rect.right,
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (target instanceof Element && target.closest("[data-chat-branch-popover]")) return;
+      if (btnRef.current?.contains(target) || popRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
+  return (
+    <>
+      <div className="hidden items-center gap-1.5 md:flex">{desktopChildren}</div>
+      <div className="relative shrink-0 md:hidden" ref={btnRef}>
+        <button onClick={() => setOpen(!open)} className={HEADER_BTN} title="More options" aria-label="More options">
+          <MoreHorizontal size="0.875rem" />
+        </button>
+        {open &&
+          createPortal(
+            <div
+              ref={popRef}
+              className="fixed z-[9999] flex w-9 flex-col items-center gap-0.5 rounded-xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl backdrop-blur-xl animate-message-in"
+              style={{ top: pos.top, right: pos.right }}
+              onClick={() => setOpen(false)}
+            >
+              {mobileChildren}
+            </div>,
+            document.body,
+          )}
+      </div>
+    </>
+  );
+}
 
 export function ConversationView({
   chatId,
@@ -207,6 +287,50 @@ export function ConversationView({
     return { background: `linear-gradient(135deg, ${g.from}, ${g.to})` };
   }, [convoGradient, theme]);
   const hasAutonomousMessaging = !!chatMeta.autonomousMessages || !!chatMeta.characterExchanges;
+  const [mobileWorldInfoOpen, setMobileWorldInfoOpen] = useState(false);
+  const renderToolbarActions = (compact = false) => (
+    <>
+      <ChatBranchSelector
+        activeChatId={chatId}
+        activeChatName={chatName}
+        groupId={chatGroupId}
+        compact={compact}
+        className={
+          compact ? "bg-transparent text-foreground/80 hover:bg-[var(--accent)] hover:text-foreground" : undefined
+        }
+      />
+      {compact ? (
+        <button
+          onClick={() => setMobileWorldInfoOpen(true)}
+          className={MOBILE_MENU_BTN}
+          title="Active World Info"
+          aria-label="Active World Info"
+        >
+          <Globe size="0.875rem" />
+        </button>
+      ) : (
+        <ActiveWorldInfoButton chatId={chatId} buttonClassName={HEADER_BTN} />
+      )}
+      <button onClick={onOpenFiles} className={compact ? MOBILE_MENU_BTN : HEADER_BTN} title="Manage Chat Files">
+        <FolderOpen size="0.875rem" />
+      </button>
+      <button onClick={onOpenGallery} className={compact ? MOBILE_MENU_BTN : HEADER_BTN} title="Gallery">
+        <ImageIcon size="0.875rem" />
+      </button>
+      {onSwitchChat && (
+        <button
+          onClick={onSwitchChat}
+          className={compact ? MOBILE_MENU_BTN : HEADER_BTN}
+          title={connectedChatName ? `Switch to ${connectedChatName}` : "Switch to connected chat"}
+        >
+          <ArrowRightLeft size="0.875rem" />
+        </button>
+      )}
+      <button onClick={onOpenSettings} className={compact ? MOBILE_MENU_BTN : HEADER_BTN} title="Chat Settings">
+        <Settings2 size="0.875rem" />
+      </button>
+    </>
+  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -670,27 +794,15 @@ export function ConversationView({
             );
           })()}
 
-          <div className="flex items-center gap-1.5">
-            <ChatBranchSelector activeChatId={chatId} activeChatName={chatName} groupId={chatGroupId} />
-            <button onClick={onOpenFiles} className={HEADER_BTN} title="Manage Chat Files">
-              <FolderOpen size="0.875rem" />
-            </button>
-            <button onClick={onOpenGallery} className={HEADER_BTN} title="Gallery">
-              <ImageIcon size="0.875rem" />
-            </button>
-            {onSwitchChat && (
-              <button
-                onClick={onSwitchChat}
-                className={HEADER_BTN}
-                title={connectedChatName ? `Switch to ${connectedChatName}` : "Switch to connected chat"}
-              >
-                <ArrowRightLeft size="0.875rem" />
-              </button>
-            )}
-            <button onClick={onOpenSettings} className={HEADER_BTN} title="Chat Settings">
-              <Settings2 size="0.875rem" />
-            </button>
-          </div>
+          <ConversationToolbarMenu
+            desktopChildren={renderToolbarActions()}
+            mobileChildren={renderToolbarActions(true)}
+          />
+          <ActiveWorldInfoModal
+            chatId={chatId}
+            open={mobileWorldInfoOpen}
+            onClose={() => setMobileWorldInfoOpen(false)}
+          />
         </div>
 
         {/* Load More */}

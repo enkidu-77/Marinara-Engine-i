@@ -60,7 +60,8 @@ export function visibleText(value: string | number | null | undefined, fallback 
 }
 
 export const WORLD_GRID_BASE_CLASS = "grid-cols-[2.5rem_2.5rem_minmax(0,1fr)]";
-export const WORLD_GRID_BALANCED_CLASS = "@min-[380px]:grid-cols-[2.5rem_2.5rem_minmax(6.25rem,1fr)_minmax(7.5rem,1.35fr)]";
+export const WORLD_GRID_BALANCED_CLASS =
+  "@min-[380px]:grid-cols-[2.5rem_2.5rem_minmax(6.25rem,1fr)_minmax(7.5rem,1.35fr)]";
 export const WORLD_GRID_FORECAST_HEAVY_CLASS =
   "@min-[380px]:grid-cols-[2.5rem_2.5rem_minmax(7rem,1.05fr)_minmax(7.25rem,1.2fr)]";
 export const WORLD_GRID_LOCATION_HEAVY_CLASS =
@@ -485,9 +486,7 @@ function getTrackerProfilePalette(
     dialogueColor ??
     getSolidCssColor(profileColors?.boxColor) ??
     fallbackAccent;
-  const accent =
-    dialogueColor ??
-    displaySolid;
+  const accent = dialogueColor ?? displaySolid;
 
   return {
     accent,
@@ -662,7 +661,9 @@ export function normalizeSpriteExpressionMap(value: unknown): Record<string, str
   return expressions;
 }
 
-export function getLatestSpriteExpressionsFromMessages(messages: Array<{ role?: string; extra?: unknown }> | undefined) {
+export function getLatestSpriteExpressionsFromMessages(
+  messages: Array<{ role?: string; extra?: unknown }> | undefined,
+) {
   if (!messages?.length) return null;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -723,4 +724,3 @@ export function resolveSpriteUrl(sprites: SpriteInfo[] | undefined, expression: 
   });
   return neutral?.url ?? spriteList[0]?.url ?? null;
 }
-

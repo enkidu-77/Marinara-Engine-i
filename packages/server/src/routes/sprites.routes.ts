@@ -93,6 +93,55 @@ interface SpriteCleanupBackupManifest {
   entries: SpriteCleanupBackupEntry[];
 }
 
+type SpriteType = "expressions" | "full-body";
+
+type SpritePromptOverride = {
+  id: string;
+  prompt: string;
+};
+
+type SpriteGenerateSheetBody = {
+  connectionId?: string;
+  appearance?: string;
+  referenceImage?: string;
+  referenceImages?: string[];
+  expressions?: string[];
+  cols?: number;
+  rows?: number;
+  spriteType?: SpriteType;
+  fullBodyExpressionMode?: boolean;
+  noBackground?: boolean;
+  cleanupStrength?: number;
+  nativeTransparentPng?: boolean;
+  promptOverrides?: SpritePromptOverride[];
+};
+
+type SpritePromptPlan = {
+  expressions: string[];
+  cols: number;
+  rows: number;
+  spriteType?: SpriteType;
+  fullBodyExpressionMode: boolean;
+  generateExpressionsIndividually: boolean;
+  prompt: string;
+  sheetWidth: number;
+  sheetHeight: number;
+  cellWidth: number;
+  cellHeight: number;
+  promptOverrides: Map<string, string>;
+  promptOverridesStorage: ReturnType<typeof createPromptOverridesStorage>;
+};
+
+function spritePromptReviewId(kind: "sheet" | "expression", spriteType: string | undefined, label: string): string {
+  const normalizedLabel = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9,_-]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 120);
+  return `sprite:${spriteType ?? "expressions"}:${kind}:${normalizedLabel || "request"}`;
+}
+
 function ensureDir(dir: string) {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -144,8 +193,7 @@ const NATIVE_TRANSPARENT_PNG_PROMPT = "no background, png format";
 const CLEANUP_FRIENDLY_MATTE_FALLBACK =
   "If transparent output is unsupported, use a perfectly flat pure white #ffffff " +
   "background with no shadows, gradients, scenery, floor line, or texture behind the character";
-const CLEANUP_FRIENDLY_TRANSPARENT_PNG_PROMPT =
-  `${NATIVE_TRANSPARENT_PNG_PROMPT}. ${CLEANUP_FRIENDLY_MATTE_FALLBACK}`;
+const CLEANUP_FRIENDLY_TRANSPARENT_PNG_PROMPT = `${NATIVE_TRANSPARENT_PNG_PROMPT}. ${CLEANUP_FRIENDLY_MATTE_FALLBACK}`;
 
 function shouldUseCleanupFriendlyTransparentPrompt(model?: string): boolean {
   return !!model && /^gpt-image-2(?:$|-)/i.test(model.trim());
@@ -355,9 +403,18 @@ async function removeNearWhiteBackgroundPng(input: Buffer, cleanupStrength = 35)
     }
 
     return {
-      red: medianNumber(samples.map((sample) => sample.red), 255),
-      green: medianNumber(samples.map((sample) => sample.green), 255),
-      blue: medianNumber(samples.map((sample) => sample.blue), 255),
+      red: medianNumber(
+        samples.map((sample) => sample.red),
+        255,
+      ),
+      green: medianNumber(
+        samples.map((sample) => sample.green),
+        255,
+      ),
+      blue: medianNumber(
+        samples.map((sample) => sample.blue),
+        255,
+      ),
     };
   };
 
@@ -500,8 +557,7 @@ async function removeNearWhiteBackgroundPng(input: Buffer, cleanupStrength = 35)
     const spansCell = componentWidth >= width * 0.14 || componentHeight >= height * 0.14;
     const touchesInnerFrame =
       minX <= width * 0.12 || maxX >= width * 0.88 || minY <= height * 0.12 || maxY >= height * 0.88;
-    const panelLike =
-      fillRatio >= 0.3 && boxRatio >= 0.02 && spansCell && (touchesInnerFrame || sizeRatio >= 0.02);
+    const panelLike = fillRatio >= 0.3 && boxRatio >= 0.02 && spansCell && (touchesInnerFrame || sizeRatio >= 0.02);
     const hugeOpenArea = sizeRatio >= 0.035 && fillRatio >= 0.14 && spansCell;
     const largeMattePanel = componentCount >= minComponentPixels && (panelLike || hugeOpenArea);
 
@@ -731,12 +787,10 @@ async function softenBackgroundRemoverMask(
       (outputRgba[outputPixelOffset] ?? 0) * (1 - weight) + (originalRgba[originalPixelOffset] ?? 0) * weight,
     );
     outputRgba[outputPixelOffset + 1] = clampByte(
-      (outputRgba[outputPixelOffset + 1] ?? 0) * (1 - weight) +
-        (originalRgba[originalPixelOffset + 1] ?? 0) * weight,
+      (outputRgba[outputPixelOffset + 1] ?? 0) * (1 - weight) + (originalRgba[originalPixelOffset + 1] ?? 0) * weight,
     );
     outputRgba[outputPixelOffset + 2] = clampByte(
-      (outputRgba[outputPixelOffset + 2] ?? 0) * (1 - weight) +
-        (originalRgba[originalPixelOffset + 2] ?? 0) * weight,
+      (outputRgba[outputPixelOffset + 2] ?? 0) * (1 - weight) + (originalRgba[originalPixelOffset + 2] ?? 0) * weight,
     );
     outputRgba[outputPixelOffset + 3] = clampByte(
       Math.max(currentAlpha, currentAlpha * (1 - weight) + originalAlpha * weight),
@@ -776,7 +830,9 @@ async function removeSpriteBackgroundPng(
   engine: SpriteCleanupEngine = "auto",
 ): Promise<{ buffer: Buffer; engine: UsedSpriteCleanupEngine }> {
   if (engine !== "builtin") {
-    const aiOutput = await tryRemoveBackgroundWithBackgroundRemover(input, { required: engine === "backgroundremover" });
+    const aiOutput = await tryRemoveBackgroundWithBackgroundRemover(input, {
+      required: engine === "backgroundremover",
+    });
     if (aiOutput) {
       return {
         buffer: await softenBackgroundRemoverMask(input, aiOutput, cleanupStrength),
@@ -908,6 +964,97 @@ function resolveReferenceImageBase64(input?: string): string | undefined {
 
   if (looksLikeBase64(value)) return value;
   return undefined;
+}
+
+async function buildSpritePromptPlan(
+  app: FastifyInstance,
+  body: SpriteGenerateSheetBody,
+  imgModel: string,
+): Promise<SpritePromptPlan> {
+  const cols = body.cols ?? 2;
+  const rows = body.rows ?? 3;
+  const fullBodyExpressionMode = body.spriteType === "full-body" && body.fullBodyExpressionMode === true;
+  const expressions = (body.expressions ?? []).slice(0, cols * rows);
+
+  const expressionList = expressions.join(", ");
+  const singlePortrait = body.spriteType !== "full-body" && expressions.length === 1 && cols === 1 && rows === 1;
+  const singleFullBody = body.spriteType === "full-body" && expressions.length === 1 && cols === 1 && rows === 1;
+  const generateExpressionsIndividually =
+    body.spriteType !== "full-body" && !singlePortrait && isOpenAIGptImageModel(imgModel);
+  const promptOverridesStorage = createPromptOverridesStorage(app.db);
+  const trimmedAppearance = body.appearance?.trim() || "";
+  const nativeTransparentPng = body.nativeTransparentPng === true;
+  const cleanupFriendlyTransparentPrompt = nativeTransparentPng && shouldUseCleanupFriendlyTransparentPrompt(imgModel);
+  const { sheetWidth, sheetHeight, cellWidth, cellHeight } = resolveSpriteSheetCanvas({
+    cols,
+    rows,
+    spriteType: body.spriteType,
+    model: imgModel,
+  });
+
+  let prompt = "";
+  if (fullBodyExpressionMode) {
+    prompt = buildFullBodyExpressionSheetPrompt({
+      cols,
+      rows,
+      expressions,
+      appearance: trimmedAppearance,
+      sheetWidth,
+      sheetHeight,
+      cellWidth,
+      cellHeight,
+    });
+  } else if (singleFullBody) {
+    prompt = await loadPrompt(promptOverridesStorage, SPRITES_SINGLE_FULL_BODY, {
+      appearance: trimmedAppearance,
+      pose: expressions[0] ?? "idle",
+    });
+  } else if (body.spriteType === "full-body") {
+    prompt = await loadPrompt(promptOverridesStorage, SPRITES_FULL_BODY_SHEET, {
+      cols,
+      rows,
+      cellCount: cols * rows,
+      poseCount: expressions.length,
+      poseList: expressionList,
+      appearance: trimmedAppearance,
+      sheetWidth,
+      sheetHeight,
+      cellWidth,
+      cellHeight,
+    });
+  } else if (singlePortrait) {
+    prompt = await loadPrompt(promptOverridesStorage, SPRITES_SINGLE_PORTRAIT, {
+      appearance: trimmedAppearance,
+      expression: expressions[0] ?? "neutral",
+    });
+  } else {
+    prompt = await loadPrompt(promptOverridesStorage, SPRITES_EXPRESSION_SHEET, {
+      cols,
+      rows,
+      expressionCount: expressions.length,
+      expressionList,
+      appearance: trimmedAppearance,
+    });
+  }
+  if (nativeTransparentPng) {
+    prompt = applyNativeTransparentPngPrompt(prompt, cleanupFriendlyTransparentPrompt);
+  }
+
+  return {
+    expressions,
+    cols,
+    rows,
+    spriteType: body.spriteType,
+    fullBodyExpressionMode,
+    generateExpressionsIndividually,
+    prompt,
+    sheetWidth,
+    sheetHeight,
+    cellWidth,
+    cellHeight,
+    promptOverrides: new Map((body.promptOverrides ?? []).map((item) => [item.id, item.prompt.trim()])),
+    promptOverridesStorage,
+  };
 }
 
 export async function spritesRoutes(app: FastifyInstance) {
@@ -1246,26 +1393,11 @@ export async function spritesRoutes(app: FastifyInstance) {
   });
 
   /**
-   * POST /api/sprites/generate-sheet
-   * Generate a sprite sheet via image generation, then slice it into individual cells.
-   * Body: { connectionId, appearance, referenceImages?, expressions: string[], cols, rows }
-   * Returns: { sheetBase64, cells: [{ expression, base64 }] }
+   * POST /api/sprites/generate-sheet/preview
+   * Build the exact sprite image prompt(s) before provider requests are sent.
    */
-  app.post("/generate-sheet", async (req, reply) => {
-    const body = req.body as {
-      connectionId?: string;
-      appearance?: string;
-      referenceImage?: string;
-      referenceImages?: string[];
-      expressions?: string[];
-      cols?: number;
-      rows?: number;
-      spriteType?: "expressions" | "full-body";
-      fullBodyExpressionMode?: boolean;
-      noBackground?: boolean;
-      cleanupStrength?: number;
-      nativeTransparentPng?: boolean;
-    };
+  app.post("/generate-sheet/preview", async (req, reply) => {
+    const body = req.body as SpriteGenerateSheetBody;
 
     if (!body.connectionId) {
       return reply.status(400).send({ error: "connectionId is required" });
@@ -1277,10 +1409,77 @@ export async function spritesRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "At least one expression is required" });
     }
 
-    const cols = body.cols ?? 2;
-    const rows = body.rows ?? 3;
-    const fullBodyExpressionMode = body.spriteType === "full-body" && body.fullBodyExpressionMode === true;
-    const expressions = body.expressions.slice(0, cols * rows);
+    const connections = createConnectionsStorage(app.db);
+    const conn = await connections.getWithKey(body.connectionId);
+    if (!conn) {
+      return reply.status(404).send({ error: "Image generation connection not found or could not be decrypted" });
+    }
+
+    const imgModel = conn.model || "";
+    const plan = await buildSpritePromptPlan(app, body, imgModel);
+
+    if (plan.generateExpressionsIndividually) {
+      const nativeTransparentPng = body.nativeTransparentPng === true;
+      const cleanupFriendlyTransparentPrompt =
+        nativeTransparentPng && shouldUseCleanupFriendlyTransparentPrompt(imgModel);
+      const items = await Promise.all(
+        plan.expressions.map(async (expression) => {
+          let expressionPrompt = await loadPrompt(plan.promptOverridesStorage, SPRITES_SINGLE_PORTRAIT, {
+            appearance: body.appearance?.trim() || "",
+            expression,
+          });
+          if (nativeTransparentPng) {
+            expressionPrompt = applyNativeTransparentPngPrompt(expressionPrompt, cleanupFriendlyTransparentPrompt);
+          }
+          return {
+            id: spritePromptReviewId("expression", plan.spriteType, expression),
+            kind: "sprite",
+            title: `Expression: ${expression.replace(/_/g, " ")}`,
+            prompt: expressionPrompt,
+            width: 1024,
+            height: 1024,
+          };
+        }),
+      );
+      return { items };
+    }
+
+    return {
+      items: [
+        {
+          id: spritePromptReviewId("sheet", plan.spriteType, `${plan.cols}x${plan.rows}-${plan.expressions.join(",")}`),
+          kind: "sprite",
+          title:
+            plan.spriteType === "full-body"
+              ? `Full-body sprites: ${plan.cols}x${plan.rows}`
+              : `Expression sprites: ${plan.cols}x${plan.rows}`,
+          prompt: plan.prompt,
+          width: plan.sheetWidth,
+          height: plan.sheetHeight,
+        },
+      ],
+    };
+  });
+
+  /**
+   * POST /api/sprites/generate-sheet
+   * Generate a sprite sheet via image generation, then slice it into individual cells.
+   * Body: { connectionId, appearance, referenceImages?, expressions: string[], cols, rows }
+   * Returns: { sheetBase64, cells: [{ expression, base64 }] }
+   */
+  app.post("/generate-sheet", async (req, reply) => {
+    const body = req.body as SpriteGenerateSheetBody;
+
+    if (!body.connectionId) {
+      return reply.status(400).send({ error: "connectionId is required" });
+    }
+    if (!body.appearance?.trim()) {
+      return reply.status(400).send({ error: "appearance description is required" });
+    }
+    if (!body.expressions || body.expressions.length === 0) {
+      return reply.status(400).send({ error: "At least one expression is required" });
+    }
+
     const cleanupStrength = Number.isFinite(body.cleanupStrength) ? Number(body.cleanupStrength) : 35;
 
     // Resolve image generation connection
@@ -1296,75 +1495,16 @@ export async function spritesRoutes(app: FastifyInstance) {
     const imgSource = (conn as any).imageGenerationSource || imgModel;
     const imgServiceHint = conn.imageService || imgSource;
     const imageDefaults = resolveConnectionImageDefaults(conn);
-
-    // Build the prompt for an expression sheet or full-body pose sheet.
-    const expressionList = expressions.join(", ");
-    const singlePortrait = body.spriteType !== "full-body" && expressions.length === 1 && cols === 1 && rows === 1;
-    const singleFullBody = body.spriteType === "full-body" && expressions.length === 1 && cols === 1 && rows === 1;
-    const generateExpressionsIndividually =
-      body.spriteType !== "full-body" && !singlePortrait && isOpenAIGptImageModel(imgModel);
-    const promptOverridesStorage = createPromptOverridesStorage(app.db);
-    const trimmedAppearance = body.appearance?.trim() || "";
     const nativeTransparentPng = body.nativeTransparentPng === true;
     const cleanupFriendlyTransparentPrompt =
       nativeTransparentPng && shouldUseCleanupFriendlyTransparentPrompt(imgModel);
-    // Size the prompt to the actual canvas that will be sent to the provider.
-    // GPT Image models only accept a small set of canvas sizes, so keep the
-    // prompt's grid math aligned with the generated image instead of asking for
-    // a larger sheet that the provider silently normalizes.
-    const { sheetWidth, sheetHeight, cellWidth, cellHeight } = resolveSpriteSheetCanvas({
-      cols,
-      rows,
-      spriteType: body.spriteType,
-      model: imgModel,
-    });
-    let prompt = "";
-    if (fullBodyExpressionMode) {
-      prompt = buildFullBodyExpressionSheetPrompt({
-        cols,
-        rows,
-        expressions,
-        appearance: trimmedAppearance,
-        sheetWidth,
-        sheetHeight,
-        cellWidth,
-        cellHeight,
-      });
-    } else if (singleFullBody) {
-      prompt = await loadPrompt(promptOverridesStorage, SPRITES_SINGLE_FULL_BODY, {
-        appearance: trimmedAppearance,
-        pose: expressions[0] ?? "idle",
-      });
-    } else if (body.spriteType === "full-body") {
-      prompt = await loadPrompt(promptOverridesStorage, SPRITES_FULL_BODY_SHEET, {
-        cols,
-        rows,
-        cellCount: cols * rows,
-        poseCount: expressions.length,
-        poseList: expressionList,
-        appearance: trimmedAppearance,
-        sheetWidth,
-        sheetHeight,
-        cellWidth,
-        cellHeight,
-      });
-    } else if (singlePortrait) {
-      prompt = await loadPrompt(promptOverridesStorage, SPRITES_SINGLE_PORTRAIT, {
-        appearance: trimmedAppearance,
-        expression: expressions[0] ?? "neutral",
-      });
-    } else {
-      prompt = await loadPrompt(promptOverridesStorage, SPRITES_EXPRESSION_SHEET, {
-        cols,
-        rows,
-        expressionCount: expressions.length,
-        expressionList,
-        appearance: trimmedAppearance,
-      });
-    }
-    if (nativeTransparentPng) {
-      prompt = applyNativeTransparentPngPrompt(prompt, cleanupFriendlyTransparentPrompt);
-    }
+    const plan = await buildSpritePromptPlan(app, body, imgModel);
+    const sheetPromptId = spritePromptReviewId(
+      "sheet",
+      plan.spriteType,
+      `${plan.cols}x${plan.rows}-${plan.expressions.join(",")}`,
+    );
+    const prompt = plan.promptOverrides.get(sheetPromptId) ?? plan.prompt;
 
     // Parse reference images to raw base64 (supports data URL, raw base64, or local avatar URL)
     const rawRefs = body.referenceImages?.length
@@ -1375,19 +1515,22 @@ export async function spritesRoutes(app: FastifyInstance) {
     const resolvedRefs = rawRefs.map(resolveReferenceImageBase64).filter((r): r is string => !!r);
 
     try {
-      if (generateExpressionsIndividually) {
+      if (plan.generateExpressionsIndividually) {
         const cells: Array<{ expression: string; base64: string }> = [];
         const failedExpressions: Array<{ expression: string; error: string }> = [];
 
-        for (const expression of expressions) {
+        for (const expression of plan.expressions) {
           try {
-            let expressionPrompt = await loadPrompt(promptOverridesStorage, SPRITES_SINGLE_PORTRAIT, {
-              appearance: trimmedAppearance,
+            let expressionPrompt = await loadPrompt(plan.promptOverridesStorage, SPRITES_SINGLE_PORTRAIT, {
+              appearance: body.appearance?.trim() || "",
               expression,
             });
             if (nativeTransparentPng) {
               expressionPrompt = applyNativeTransparentPngPrompt(expressionPrompt, cleanupFriendlyTransparentPrompt);
             }
+            expressionPrompt =
+              plan.promptOverrides.get(spritePromptReviewId("expression", plan.spriteType, expression)) ??
+              expressionPrompt;
 
             const targetSize = 1024;
             const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, imgServiceHint, {
@@ -1450,8 +1593,8 @@ export async function spritesRoutes(app: FastifyInstance) {
       const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, imgServiceHint, {
         prompt,
         model: imgModel,
-        width: sheetWidth,
-        height: sheetHeight,
+        width: plan.sheetWidth,
+        height: plan.sheetHeight,
         referenceImage: resolvedRefs[0],
         referenceImages: resolvedRefs.length > 1 ? resolvedRefs : undefined,
         transparentBackground: nativeTransparentPng,
@@ -1478,20 +1621,20 @@ export async function spritesRoutes(app: FastifyInstance) {
         }
       }
 
-      const imgWidth = metadata.width ?? (cols <= 2 ? 1024 : 1536);
-      const imgHeight = metadata.height ?? (rows <= 2 ? 1024 : 1536);
+      const imgWidth = metadata.width ?? (plan.cols <= 2 ? 1024 : 1536);
+      const imgHeight = metadata.height ?? (plan.rows <= 2 ? 1024 : 1536);
 
-      const cellWidth = Math.floor(imgWidth / cols);
-      const cellHeight = Math.floor(imgHeight / rows);
+      const cellWidth = Math.floor(imgWidth / plan.cols);
+      const cellHeight = Math.floor(imgHeight / plan.rows);
 
       const cellPromises: Promise<{ expression: string; base64: string }>[] = [];
 
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          const idx = row * cols + col;
-          if (idx >= expressions.length) break;
+      for (let row = 0; row < plan.rows; row++) {
+        for (let col = 0; col < plan.cols; col++) {
+          const idx = row * plan.cols + col;
+          if (idx >= plan.expressions.length) break;
 
-          const expression = expressions[idx]!;
+          const expression = plan.expressions[idx]!;
           const left = col * cellWidth;
           const top = row * cellHeight;
 

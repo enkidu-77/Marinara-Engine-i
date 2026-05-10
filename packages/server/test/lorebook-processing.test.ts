@@ -270,7 +270,11 @@ test("token budgets are enforced independently per lorebook", () => {
 test("max activated lorebook entries keeps highest-priority entries", () => {
   const activatedEntries: ActivatedEntry[] = [
     { entry: makeEntry({ id: "late", order: 30 }), matchedKeys: ["keyword"], injectionOrder: 30 },
-    { entry: makeEntry({ id: "constant", constant: true, order: 40 }), matchedKeys: ["[constant]"], injectionOrder: 40 },
+    {
+      entry: makeEntry({ id: "constant", constant: true, order: 40 }),
+      matchedKeys: ["[constant]"],
+      injectionOrder: 40,
+    },
     { entry: makeEntry({ id: "early", order: 10 }), matchedKeys: ["keyword"], injectionOrder: 10 },
   ];
 
@@ -322,7 +326,10 @@ test("timing state persists delay, cooldown, and sticky activation windows", () 
     timingStates: afterDelay,
     currentMessageIndex: 2,
   });
-  assert.deepEqual(activated.map((result) => result.entry.id), [entry.id]);
+  assert.deepEqual(
+    activated.map((result) => result.entry.id),
+    [entry.id],
+  );
 
   const afterActivation = updateTimingStatesForScan([entry], activated, afterDelay, 2);
   assert.equal(afterActivation.get(entry.id)?.stickyCount, 1);
@@ -332,7 +339,10 @@ test("timing state persists delay, cooldown, and sticky activation windows", () 
     timingStates: afterActivation,
     currentMessageIndex: 3,
   });
-  assert.deepEqual(sticky.map((result) => result.matchedKeys[0]), ["[sticky]"]);
+  assert.deepEqual(
+    sticky.map((result) => result.matchedKeys[0]),
+    ["[sticky]"],
+  );
 
   const afterSticky = updateTimingStatesForScan([entry], sticky, afterActivation, 3);
   assert.equal(afterSticky.get(entry.id)?.stickyCount, 0);
@@ -354,7 +364,10 @@ test("timing state clears when sticky-only and cooldown-only windows expire", ()
     timingStates: afterStickyActivation,
     currentMessageIndex: 2,
   });
-  assert.deepEqual(sticky.map((result) => result.matchedKeys[0]), ["[sticky]"]);
+  assert.deepEqual(
+    sticky.map((result) => result.matchedKeys[0]),
+    ["[sticky]"],
+  );
   const afterStickyExpires = updateTimingStatesForScan([stickyEntry], sticky, afterStickyActivation, 2);
   assert.deepEqual(Array.from(afterStickyExpires.entries()), []);
   assert.deepEqual(serializeTimingStateMap(afterStickyExpires), {});
@@ -382,27 +395,14 @@ test("preview scans ignore mutable timing state without sticky activations", () 
   const coolingDown = makeEntry({ id: "cooldown", cooldown: 3, order: 20 });
   const sticky = makeEntry({ id: "sticky", sticky: 2, order: 30 });
 
-  const activated = scanForActivatedEntries(
-    [{ role: "user", content: "keyword" }],
-    [delayed, coolingDown, sticky],
-    {
-      ignoreTiming: true,
-      timingStates: new Map([
-        [
-          delayed.id,
-          { lastActivatedAt: null, stickyCount: 0, cooldownRemaining: 0, delayRemaining: 2 },
-        ],
-        [
-          coolingDown.id,
-          { lastActivatedAt: 1, stickyCount: 0, cooldownRemaining: 3, delayRemaining: 0 },
-        ],
-        [
-          sticky.id,
-          { lastActivatedAt: 1, stickyCount: 2, cooldownRemaining: 0, delayRemaining: 0 },
-        ],
-      ]),
-    },
-  );
+  const activated = scanForActivatedEntries([{ role: "user", content: "keyword" }], [delayed, coolingDown, sticky], {
+    ignoreTiming: true,
+    timingStates: new Map([
+      [delayed.id, { lastActivatedAt: null, stickyCount: 0, cooldownRemaining: 0, delayRemaining: 2 }],
+      [coolingDown.id, { lastActivatedAt: 1, stickyCount: 0, cooldownRemaining: 3, delayRemaining: 0 }],
+      [sticky.id, { lastActivatedAt: 1, stickyCount: 2, cooldownRemaining: 0, delayRemaining: 0 }],
+    ]),
+  });
 
   assert.deepEqual(
     activated.map((result) => result.entry.id),
@@ -416,10 +416,7 @@ test("preview scans ignore mutable timing state without sticky activations", () 
   const noKeywordActivated = scanForActivatedEntries([{ role: "user", content: "no match" }], [sticky], {
     ignoreTiming: true,
     timingStates: new Map([
-      [
-        sticky.id,
-        { lastActivatedAt: 1, stickyCount: 2, cooldownRemaining: 0, delayRemaining: 0 },
-      ],
+      [sticky.id, { lastActivatedAt: 1, stickyCount: 2, cooldownRemaining: 0, delayRemaining: 0 }],
     ]),
   });
 
@@ -436,11 +433,9 @@ test("preview-style scans honor supplied timing state without forcing activation
     [sticky.id, { lastActivatedAt: 1, stickyCount: 2, cooldownRemaining: 0, delayRemaining: 0 }],
   ]);
 
-  const activated = scanForActivatedEntries(
-    [{ role: "user", content: "keyword" }],
-    [delayed, coolingDown, sticky],
-    { timingStates },
-  );
+  const activated = scanForActivatedEntries([{ role: "user", content: "keyword" }], [delayed, coolingDown, sticky], {
+    timingStates,
+  });
 
   assert.deepEqual(
     activated.map((result) => result.entry.id),
@@ -486,7 +481,10 @@ test("sticky activations still obey game-state conditions and schedules", () => 
     gameState: { location: "forest", time: "night" },
     timingStates,
   });
-  assert.deepEqual(activated.map((result) => result.matchedKeys[0]), ["[sticky]"]);
+  assert.deepEqual(
+    activated.map((result) => result.matchedKeys[0]),
+    ["[sticky]"],
+  );
 });
 
 test("constant entries obey delay and activation conditions", () => {
@@ -541,7 +539,10 @@ test("constant entries obey delay and activation conditions", () => {
       ],
     ]),
   });
-  assert.deepEqual(activated.map((result) => result.matchedKeys[0]), ["[constant]"]);
+  assert.deepEqual(
+    activated.map((result) => result.matchedKeys[0]),
+    ["[constant]"],
+  );
 });
 
 test("semantic fallback obeys timing, conditions, and schedule", () => {
@@ -606,6 +607,9 @@ test("semantic fallback obeys timing, conditions, and schedule", () => {
     ]),
   });
 
-  assert.deepEqual(activated.map((result) => result.entry.id), ["semantic-entry"]);
+  assert.deepEqual(
+    activated.map((result) => result.entry.id),
+    ["semantic-entry"],
+  );
   assert.ok(activated[0]?.matchedKeys[0]?.startsWith("[semantic:"));
 });

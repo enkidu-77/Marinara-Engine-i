@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Braces, CheckCircle2, Loader2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type JsonRepairRequest } from "../../lib/api-client";
@@ -34,6 +34,7 @@ export function GameJsonRepairModal({ request, onClose, onApplied }: GameJsonRep
   const [draft, setDraft] = useState("");
   const [isApplying, setIsApplying] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const lineNumbersRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     setDraft(request?.rawJson ?? "");
@@ -42,6 +43,11 @@ export function GameJsonRepairModal({ request, onClose, onApplied }: GameJsonRep
   }, [request]);
 
   const validation = useMemo(() => validateJson(draft), [draft]);
+  const lineNumbers = useMemo(
+    () =>
+      Array.from({ length: Math.max(1, draft.split(/\r\n|\r|\n/).length) }, (_, index) => String(index + 1)).join("\n"),
+    [draft],
+  );
 
   const handleFormat = () => {
     const next = validateJson(draft);
@@ -108,15 +114,29 @@ export function GameJsonRepairModal({ request, onClose, onApplied }: GameJsonRep
           </div>
         )}
 
-        <textarea
-          value={draft}
-          onChange={(event) => {
-            setDraft(event.target.value);
-            setServerError(null);
-          }}
-          spellCheck={false}
-          className="min-h-[45vh] w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)] max-md:min-h-[52vh]"
-        />
+        <div className="grid min-h-[45vh] grid-cols-[3.25rem_minmax(0,1fr)] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--primary)] max-md:min-h-[52vh]">
+          <pre
+            ref={lineNumbersRef}
+            aria-hidden="true"
+            className="select-none overflow-hidden border-r border-[var(--border)] bg-[var(--secondary)]/50 px-2 py-2 text-right font-mono text-xs leading-relaxed text-[var(--muted-foreground)]/70"
+          >
+            {lineNumbers}
+          </pre>
+          <textarea
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setServerError(null);
+            }}
+            onScroll={(event) => {
+              if (lineNumbersRef.current) {
+                lineNumbersRef.current.scrollTop = event.currentTarget.scrollTop;
+              }
+            }}
+            spellCheck={false}
+            className="min-h-[45vh] w-full resize-y border-0 bg-transparent px-3 py-2 font-mono text-xs leading-relaxed text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)] max-md:min-h-[52vh]"
+          />
+        </div>
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
           <button

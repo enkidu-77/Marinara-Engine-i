@@ -318,9 +318,12 @@ function extractRawCharacterBook(raw: Record<string, unknown>): unknown {
 function getCharacterBookEntries(raw: unknown): Record<string, unknown>[] {
   if (!raw || typeof raw !== "object") return [];
   const entries = (raw as Record<string, unknown>).entries;
-  if (Array.isArray(entries)) return entries.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object");
+  if (Array.isArray(entries))
+    return entries.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object");
   if (entries && typeof entries === "object") {
-    return Object.values(entries).filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object");
+    return Object.values(entries).filter(
+      (entry): entry is Record<string, unknown> => !!entry && typeof entry === "object",
+    );
   }
   return [];
 }
@@ -382,7 +385,31 @@ function resolveCharXAsset(zip: AdmZip, uri: string, ext?: string): string | nul
   return `data:image/${mime};base64,${entry.getData().toString("base64")}`;
 }
 
+function normalizeAltDescriptions(raw: unknown): CharacterData["extensions"]["altDescriptions"] {
+  const entries = (() => {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw !== "string" || !raw.trim()) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })();
+
+  return entries
+    .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+    .map((entry, index) => ({
+      id: typeof entry.id === "string" && entry.id.trim() ? entry.id : `extension-${index}`,
+      label: typeof entry.label === "string" ? entry.label : "Extension",
+      content: typeof entry.content === "string" ? entry.content : "",
+      active: entry.active !== false,
+    }));
+}
+
 function normalizeV2(raw: Record<string, unknown>): CharacterData {
+  const rawExtensions =
+    raw.extensions && typeof raw.extensions === "object" ? (raw.extensions as Record<string, unknown>) : {};
   return {
     name: String(raw.name ?? "Unknown"),
     description: String(raw.description ?? ""),
@@ -398,24 +425,19 @@ function normalizeV2(raw: Record<string, unknown>): CharacterData {
     character_version: String(raw.character_version ?? ""),
     alternate_greetings: Array.isArray(raw.alternate_greetings) ? raw.alternate_greetings.map(String) : [],
     extensions: {
-      talkativeness: Number((raw.extensions as Record<string, unknown>)?.talkativeness ?? 0.5),
-      fav: Boolean((raw.extensions as Record<string, unknown>)?.fav),
-      world: String((raw.extensions as Record<string, unknown>)?.world ?? ""),
+      talkativeness: Number(rawExtensions.talkativeness ?? 0.5),
+      fav: Boolean(rawExtensions.fav),
+      world: String(rawExtensions.world ?? ""),
       depth_prompt: {
-        prompt: String(
-          ((raw.extensions as Record<string, unknown>)?.depth_prompt as Record<string, unknown>)?.prompt ?? "",
-        ),
-        depth: Number(
-          ((raw.extensions as Record<string, unknown>)?.depth_prompt as Record<string, unknown>)?.depth ?? 4,
-        ),
+        prompt: String((rawExtensions.depth_prompt as Record<string, unknown>)?.prompt ?? ""),
+        depth: Number((rawExtensions.depth_prompt as Record<string, unknown>)?.depth ?? 4),
         role:
-          (((raw.extensions as Record<string, unknown>)?.depth_prompt as Record<string, unknown>)?.role as
-            | "system"
-            | "user"
-            | "assistant") ?? "system",
+          ((rawExtensions.depth_prompt as Record<string, unknown>)?.role as "system" | "user" | "assistant") ??
+          "system",
       },
-      backstory: String((raw.extensions as Record<string, unknown>)?.backstory ?? ""),
-      appearance: String((raw.extensions as Record<string, unknown>)?.appearance ?? ""),
+      backstory: String(rawExtensions.backstory ?? ""),
+      appearance: String(rawExtensions.appearance ?? ""),
+      altDescriptions: normalizeAltDescriptions(rawExtensions.altDescriptions ?? rawExtensions.descriptionExtensions),
     },
     character_book: normalizeCharacterBook(raw.character_book),
   };

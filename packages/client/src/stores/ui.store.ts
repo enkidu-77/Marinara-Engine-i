@@ -62,6 +62,10 @@ export const TRACKER_DATA_PANEL_SECTIONS: TrackerDataPanelSection[] = [
   "quests",
   "custom",
 ];
+const ROLEPLAY_AVATAR_SCALE_MIN = 0.75;
+const ROLEPLAY_AVATAR_SCALE_MAX = 2.5;
+const ROLEPLAY_SPRITE_SCALE_MIN = 0.5;
+const ROLEPLAY_SPRITE_SCALE_MAX = 1.75;
 
 const DEFAULT_GAME_SETUP_LEARNED_OPTIONS: GameSetupLearnedOptions = {
   genres: [],
@@ -284,6 +288,10 @@ interface UIState {
   chatFontOpacity: number;
   /** Layout style for roleplay message avatars */
   roleplayAvatarStyle: RoleplayAvatarStyle;
+  /** Scale multiplier for Roleplay message avatars. */
+  roleplayAvatarScale: number;
+  /** Default scale multiplier for Roleplay full-body sprites. */
+  roleplaySpriteScale: number;
   /** Scale multiplier for Game mode VN dialogue portraits. */
   gameAvatarScale: number;
   /** Scale multiplier for Game mode center full-body sprites. */
@@ -468,6 +476,8 @@ interface UIState {
   setChatFontColor: (v: string) => void;
   setChatFontOpacity: (v: number) => void;
   setRoleplayAvatarStyle: (v: RoleplayAvatarStyle) => void;
+  setRoleplayAvatarScale: (v: number) => void;
+  setRoleplaySpriteScale: (v: number) => void;
   setGameAvatarScale: (v: number) => void;
   setGameFullBodySpriteScale: (v: number) => void;
   setTextStrokeWidth: (v: number) => void;
@@ -577,6 +587,8 @@ export function pickSyncedSettings(state: UIState) {
     chatFontColor: state.chatFontColor,
     chatFontOpacity: state.chatFontOpacity,
     roleplayAvatarStyle: state.roleplayAvatarStyle,
+    roleplayAvatarScale: state.roleplayAvatarScale,
+    roleplaySpriteScale: state.roleplaySpriteScale,
     gameAvatarScale: state.gameAvatarScale,
     gameFullBodySpriteScale: state.gameFullBodySpriteScale,
     textStrokeWidth: state.textStrokeWidth,
@@ -684,6 +696,8 @@ export const useUIStore = create<UIState>()(
       chatFontColor: "",
       chatFontOpacity: 90,
       roleplayAvatarStyle: "circles" as RoleplayAvatarStyle,
+      roleplayAvatarScale: 1,
+      roleplaySpriteScale: 1,
       gameAvatarScale: 1,
       gameFullBodySpriteScale: 1.35,
       textStrokeWidth: 0.5,
@@ -1014,6 +1028,10 @@ export const useUIStore = create<UIState>()(
       setChatFontColor: (v) => set({ chatFontColor: v }),
       setChatFontOpacity: (v) => set({ chatFontOpacity: Math.max(0, Math.min(100, v)) }),
       setRoleplayAvatarStyle: (v) => set({ roleplayAvatarStyle: v }),
+      setRoleplayAvatarScale: (v) =>
+        set({ roleplayAvatarScale: Math.max(ROLEPLAY_AVATAR_SCALE_MIN, Math.min(ROLEPLAY_AVATAR_SCALE_MAX, v)) }),
+      setRoleplaySpriteScale: (v) =>
+        set({ roleplaySpriteScale: Math.max(ROLEPLAY_SPRITE_SCALE_MIN, Math.min(ROLEPLAY_SPRITE_SCALE_MAX, v)) }),
       setGameAvatarScale: (v) => set({ gameAvatarScale: Math.max(0.75, Math.min(1.75, v)) }),
       setGameFullBodySpriteScale: (v) => set({ gameFullBodySpriteScale: Math.max(0.75, Math.min(2.75, v)) }),
       setTextStrokeWidth: (v) => set({ textStrokeWidth: Math.max(0, Math.min(5, v)) }),
@@ -1089,10 +1107,10 @@ export const useUIStore = create<UIState>()(
       setUserStatus: (status) => set({ userStatus: status }),
       setUserStatusManual: (status) => set({ userStatusManual: status, userStatus: status }),
       setUserActivity: (activity) => set({ userActivity: activity.slice(0, 120) }),
-      }),
+    }),
     {
       name: "marinara-engine-ui",
-      version: 26,
+      version: 27,
       // Debounce localStorage writes to avoid sync I/O on every state change
       storage: createJSONStorage(() => {
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1334,6 +1352,15 @@ export const useUIStore = create<UIState>()(
           persisted.trackerPanelSectionOrder = normalizeTrackerPanelSectionOrder(persisted.trackerPanelSectionOrder);
         }
         persisted.trackerPanelSectionOrder = normalizeTrackerPanelSectionOrder(persisted.trackerPanelSectionOrder);
+        // v26 -> v27: add Roleplay avatar and default sprite scale controls.
+        if (version <= 26) {
+          if (persisted.roleplayAvatarScale === undefined) {
+            persisted.roleplayAvatarScale = 1;
+          }
+          if (persisted.roleplaySpriteScale === undefined) {
+            persisted.roleplaySpriteScale = 1;
+          }
+        }
         return persisted;
       },
       partialize: (state) => ({
@@ -1391,6 +1418,8 @@ export const useUIStore = create<UIState>()(
         chatFontColor: state.chatFontColor,
         chatFontOpacity: state.chatFontOpacity,
         roleplayAvatarStyle: state.roleplayAvatarStyle,
+        roleplayAvatarScale: state.roleplayAvatarScale,
+        roleplaySpriteScale: state.roleplaySpriteScale,
         gameAvatarScale: state.gameAvatarScale,
         gameFullBodySpriteScale: state.gameFullBodySpriteScale,
         textStrokeWidth: state.textStrokeWidth,

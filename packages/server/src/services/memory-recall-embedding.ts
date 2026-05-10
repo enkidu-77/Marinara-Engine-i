@@ -25,6 +25,7 @@ function parseMetadata(raw: unknown): Record<string, unknown> {
 function resolveBaseUrl(connection: { baseUrl: string | null; provider: string }): string {
   if (connection.baseUrl) return connection.baseUrl.replace(/\/+$/, "");
   if (connection.provider === "claude_subscription") return "claude-agent-sdk://local";
+  if (connection.provider === "openai_chatgpt") return "openai-chatgpt://codex-auth";
   const providerDef = PROVIDERS[connection.provider as keyof typeof PROVIDERS];
   return providerDef?.defaultBaseUrl ?? "";
 }

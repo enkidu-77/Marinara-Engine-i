@@ -15,6 +15,7 @@ import { createCharactersStorage } from "../storage/characters.storage.js";
 import { createAgentsStorage } from "../storage/agents.storage.js";
 import { processLorebooks } from "../lorebook/index.js";
 import { wrapContent } from "./format-engine.js";
+import { getCharacterDescriptionWithExtensions } from "./character-description-extensions.js";
 import { agentRuns } from "../../db/schema/index.js";
 import { gameStateSnapshots } from "../../db/schema/index.js";
 import { eq, and, desc } from "drizzle-orm";
@@ -164,7 +165,7 @@ function getCharacterField(data: CharacterData, field: string): string {
     case "name":
       return data.name;
     case "description":
-      return data.description;
+      return getCharacterDescriptionWithExtensions(data);
     case "personality":
       return data.personality;
     case "scenario":

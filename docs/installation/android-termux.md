@@ -59,7 +59,7 @@ Simply run `./start-termux.sh` to get the latest version each time.
 
 ### In-App Update Check
 
-You can also go to **Settings → Advanced → Updates** and click **Check for Updates**, then **Apply Update** to trigger a pull and rebuild from within the app. When it finishes, run `./start-termux.sh` again to relaunch the updated build.
+You can also go to **Settings → Advanced → Updates** and click **Check for Updates** to see whether a new release exists. The in-app **Apply Update** button is disabled by default; to enable it, set `UPDATES_APPLY_ENABLED=true`, set `ADMIN_SECRET`, and save that same secret in **Settings → Advanced → Admin Access**. Otherwise, run `./start-termux.sh` again to let the launcher update and relaunch the app.
 
 ---
 

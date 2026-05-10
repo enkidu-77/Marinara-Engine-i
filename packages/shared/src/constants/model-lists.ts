@@ -144,6 +144,22 @@ export const CLAUDE_SUBSCRIPTION_MODELS: KnownModel[] = [
   { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", context: 200000, maxOutput: 8192 },
 ];
 
+// ── OpenAI (ChatGPT login via Codex auth) ──
+// The ChatGPT-backed Codex endpoint can return an account-specific model
+// catalog when authenticated. This curated fallback keeps the selector useful
+// before the user has run `codex login`.
+export const OPENAI_CHATGPT_MODELS: KnownModel[] = [
+  { id: "gpt-5.2", name: "GPT-5.2", context: 1000000, maxOutput: 32768 },
+  { id: "gpt-5.1", name: "GPT-5.1", context: 1000000, maxOutput: 32768 },
+  { id: "gpt-5", name: "GPT-5", context: 1000000, maxOutput: 32768 },
+  { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", context: 400000, maxOutput: 128000 },
+  { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", context: 400000, maxOutput: 128000 },
+  { id: "gpt-5.1-codex", name: "GPT-5.1 Codex", context: 400000, maxOutput: 128000 },
+  { id: "gpt-5-codex", name: "GPT-5 Codex", context: 400000, maxOutput: 128000 },
+  { id: "gpt-4o", name: "GPT-4o", context: 128000, maxOutput: 16384 },
+  { id: "chatgpt-4o-latest", name: "ChatGPT 4o Latest", context: 128000, maxOutput: 16384 },
+];
+
 // ── Google AI Studio (from #model_google_select) ──
 
 export const GOOGLE_MODELS: KnownModel[] = [
@@ -427,6 +443,13 @@ export const IMAGE_GENERATION_SOURCES: ImageGenSource[] = [
     requiresApiKey: true,
   },
   {
+    id: "openrouter",
+    name: "OpenRouter Images",
+    description: "Image generation models exposed through OpenRouter's chat completions API.",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+    requiresApiKey: true,
+  },
+  {
     id: "pollinations",
     name: "Pollinations",
     description: "Free, no-key-needed image generation via Pollinations AI.",
@@ -500,6 +523,22 @@ const IMAGE_GEN_MODELS: KnownModel[] = [
   { id: "black-forest-labs/FLUX.1-schnell", name: "FLUX.1 Schnell", context: 0, maxOutput: 0 },
   { id: "black-forest-labs/FLUX.1.1-pro", name: "FLUX 1.1 Pro", context: 0, maxOutput: 0 },
   { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "SDXL Base 1.0", context: 0, maxOutput: 0 },
+  // OpenRouter image output models
+  { id: "google/gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image (OpenRouter)", context: 0, maxOutput: 0 },
+  {
+    id: "google/gemini-3.1-flash-image-preview",
+    name: "Gemini 3.1 Flash Image Preview (OpenRouter)",
+    context: 0,
+    maxOutput: 0,
+  },
+  { id: "black-forest-labs/flux.2-pro", name: "FLUX 2 Pro (OpenRouter)", context: 0, maxOutput: 0 },
+  { id: "black-forest-labs/flux.2-flex", name: "FLUX 2 Flex (OpenRouter)", context: 0, maxOutput: 0 },
+  {
+    id: "sourceful/riverflow-v2-standard-preview",
+    name: "RiverFlow V2 Standard Preview (OpenRouter)",
+    context: 0,
+    maxOutput: 0,
+  },
   // NovelAI
   { id: "nai-diffusion-4-curated-preview", name: "NAI Diffusion 4 Curated", context: 0, maxOutput: 0 },
   { id: "nai-diffusion-4-5-full", name: "NAI Diffusion 4.5 Full", context: 0, maxOutput: 0 },
@@ -523,6 +562,7 @@ export function inferImageSource(model: string, baseUrl: string): string {
     m === "pollinations" ||
     m === "horde" ||
     m === "blockentropy" ||
+    m === "openrouter" ||
     m === "comfyui" ||
     m === "automatic1111" ||
     m === "gemini_image"
@@ -531,6 +571,7 @@ export function inferImageSource(model: string, baseUrl: string): string {
   }
   if (m === "drawthings") return "automatic1111";
   if (u.includes("nano-gpt.com")) return "nanogpt";
+  if (u.includes("openrouter.ai")) return "openrouter";
   if (m.startsWith("dall-e") || m.startsWith("gpt-image") || u.includes("openai.com")) return "openai";
   if (m.startsWith("sd3") || u.includes("stability.ai")) return "stability";
   if (m.includes("nai-diffusion") || u.includes("novelai.net")) return "novelai";
@@ -551,6 +592,7 @@ export function inferImageSource(model: string, baseUrl: string): string {
 
 export const MODEL_LISTS: Record<APIProvider, KnownModel[]> = {
   openai: OPENAI_MODELS,
+  openai_chatgpt: OPENAI_CHATGPT_MODELS,
   anthropic: ANTHROPIC_MODELS,
   claude_subscription: CLAUDE_SUBSCRIPTION_MODELS,
   google: GOOGLE_MODELS,

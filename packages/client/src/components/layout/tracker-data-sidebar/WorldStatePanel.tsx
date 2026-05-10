@@ -75,7 +75,6 @@ export function WorldStatePanel({
   );
 }
 
-
 function WorldTileShell({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
     <div
@@ -388,5 +387,3 @@ function WorldLocationPlate({
     </WorldTileShell>
   );
 }
-
-

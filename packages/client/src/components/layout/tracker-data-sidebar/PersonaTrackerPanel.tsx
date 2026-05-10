@@ -149,7 +149,12 @@ export function PersonaInventoryPanel({
         <div className="relative pb-1 @min-[380px]:px-1 @min-[380px]:pb-1.5">
           <div className="relative overflow-hidden rounded-md border border-[var(--tracker-profile-box)]/18 bg-[image:var(--tracker-profile-surface)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--foreground)_5%,transparent)]">
             <div className="grid grid-cols-[minmax(0,1fr)_clamp(5.75rem,42cqw,7.35rem)] @min-[380px]:grid-cols-[minmax(0,1fr)_9rem] @min-[380px]:grid-rows-[auto_minmax(0,1fr)]">
-              <div className={cn("min-w-0 border-r border-[var(--tracker-profile-box)]/16", fillPersonaStats && "flex flex-col")}>
+              <div
+                className={cn(
+                  "min-w-0 border-r border-[var(--tracker-profile-box)]/16",
+                  fillPersonaStats && "flex flex-col",
+                )}
+              >
                 <div className="relative flex min-h-5 items-center justify-center overflow-hidden border-b border-[var(--tracker-profile-box)]/16 bg-[color-mix(in_srgb,var(--background)_88%,var(--tracker-profile-box)_12%)] px-1.5 py-0">
                   <TrackerProfileDisplayWash className="opacity-[0.16]" />
                   <FittedText
@@ -305,5 +310,3 @@ function CompactInventoryRow({
     </div>
   );
 }
-
-

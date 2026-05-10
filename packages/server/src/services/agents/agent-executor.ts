@@ -689,7 +689,9 @@ function buildGameSpotifyAgentMessages(template: string, context: AgentContext):
     userParts.push(``);
   }
 
-  userParts.push(`Pick music for this game turn only. Use tools to inspect playback and fetch/search candidate tracks.`);
+  userParts.push(
+    `Pick music for this game turn only. Use tools to inspect playback and fetch/search candidate tracks.`,
+  );
   userParts.push(`Now return the requested format.`);
 
   return [
@@ -1081,12 +1083,6 @@ function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): str
       parts.push(extractions[i]!);
     }
     parts.push(`</previous_extractions>`);
-  }
-
-  if (context.memory._knowledgeRetrievalMaterial) {
-    parts.push(`<knowledge_material>`);
-    parts.push(context.memory._knowledgeRetrievalMaterial as string);
-    parts.push(`</knowledge_material>`);
   }
 
   if (context.memory._connectedDevices) {

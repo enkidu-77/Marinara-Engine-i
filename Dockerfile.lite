@@ -33,11 +33,11 @@ COPY packages/client/package.json packages/client/
 # Install all build dependencies. --ignore-scripts is what prevents
 # onnxruntime-node's GPU postinstall (the Lite-mode requirement); optional
 # deps are kept so Rollup and esbuild's platform-native binaries land in
-# node_modules. We then rebuild both to register their native bindings,
-# which --ignore-scripts skipped at install time.
+# node_modules. We then rebuild native packages used in Lite mode to register
+# their bindings, which --ignore-scripts skipped at install time.
 RUN --mount=type=cache,target=/app/.pnpm-store \
     pnpm install --frozen-lockfile --ignore-scripts && \
-    pnpm rebuild esbuild rollup
+    pnpm rebuild esbuild rollup sharp
 
 # Copy source code
 COPY tsconfig.base.json ./

@@ -223,12 +223,7 @@ function normalizeNovelAiDefaults(rawDefaults: unknown): NovelAiDefaults {
     noiseSchedule: readString(raw.noiseSchedule, DEFAULT_NOVELAI_DEFAULTS.noiseSchedule),
     steps: readInteger(raw.steps, DEFAULT_NOVELAI_DEFAULTS.steps, 1, 150),
     promptGuidance: readNumber(raw.promptGuidance, DEFAULT_NOVELAI_DEFAULTS.promptGuidance, 0, 30),
-    promptGuidanceRescale: readNumber(
-      raw.promptGuidanceRescale,
-      DEFAULT_NOVELAI_DEFAULTS.promptGuidanceRescale,
-      0,
-      1,
-    ),
+    promptGuidanceRescale: readNumber(raw.promptGuidanceRescale, DEFAULT_NOVELAI_DEFAULTS.promptGuidanceRescale, 0, 1),
     undesiredContentPreset: readInteger(
       raw.undesiredContentPreset,
       DEFAULT_NOVELAI_DEFAULTS.undesiredContentPreset,

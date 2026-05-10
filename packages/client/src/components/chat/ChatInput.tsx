@@ -104,6 +104,11 @@ interface ChatInputProps {
     avatarUrl: string | null;
     avatarCrop?: { zoom: number; offsetX: number; offsetY: number } | null;
   }>;
+  onExpressionChange?: (
+    characterId: string,
+    expression: string,
+    options?: { immediate?: boolean },
+  ) => void | Promise<void>;
   onPeekPrompt?: () => void;
 }
 
@@ -112,6 +117,7 @@ export const ChatInput = memo(function ChatInput({
   characterNames = [],
   groupResponseOrder,
   chatCharacters,
+  onExpressionChange,
   onPeekPrompt,
 }: ChatInputProps) {
   const [hasInput, setHasInput] = useState(false);
@@ -204,6 +210,23 @@ export const ChatInput = memo(function ChatInput({
         }
       }
     };
+  }, []);
+
+  // Flush immediately when the page is being closed or discarded.
+  useEffect(() => {
+    const flushDraft = () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+      const chatId = useChatStore.getState().activeChatId;
+      const text = textareaRef.current?.value ?? "";
+      if (!chatId) return;
+      if (text.trim()) {
+        useChatStore.getState().setInputDraft(chatId, text);
+      } else {
+        useChatStore.getState().clearInputDraft(chatId);
+      }
+    };
+    window.addEventListener("pagehide", flushDraft);
+    return () => window.removeEventListener("pagehide", flushDraft);
   }, []);
 
   // Reactively derive the last message's role from the query cache.
@@ -346,12 +369,17 @@ export const ChatInput = memo(function ChatInput({
     if (!activeChatId) return null;
     return {
       chatId: activeChatId,
+      mode,
       generate,
       createMessage: (data) => createMessage.mutate(data),
       invalidate: () => qc.invalidateQueries({ queryKey: chatKeys.all }),
       characterNames,
+      characters: chatCharacters,
+      setSpriteExpression: onExpressionChange
+        ? (characterId, expression) => onExpressionChange(characterId, expression, { immediate: true })
+        : undefined,
     };
-  }, [activeChatId, generate, createMessage, characterNames, qc]);
+  }, [activeChatId, mode, generate, createMessage, characterNames, chatCharacters, onExpressionChange, qc]);
 
   const handleSend = useCallback(async () => {
     const raw = getValue();

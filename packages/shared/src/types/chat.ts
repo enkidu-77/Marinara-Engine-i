@@ -110,6 +110,8 @@ export interface ChatMetadata {
   activeToolIds: string[];
   /** Per-chat variable selections for preset variables (variableName → value or values) */
   presetChoices: Record<string, string | string[]>;
+  /** Chat-wide string variables persisted by agent tool calls (key → value). */
+  agentVariables?: Record<string, string>;
   /** Group chat mode: "merged" (narrator) or "individual" (separate characters) */
   groupChatMode?: GroupChatMode;
   /** Group individual mode: color dialogues with speaker tags */
@@ -159,8 +161,8 @@ export interface ChatMetadata {
   // ── Conversation Mode Fields ──
   /** Whether conversation character schedules are enabled for this chat. */
   conversationSchedulesEnabled?: boolean;
-  /** Allow conversation characters to use hidden Spotify song commands. */
-  conversationSpotifyCommandsEnabled?: boolean;
+  /** Allow conversation characters to use hidden command tags. Default: true. */
+  characterCommands?: boolean;
   /** Chat-scoped generated schedules for conversation characters. */
   characterSchedules?: Record<string, unknown>;
   /** Week start timestamp for the current generated conversation schedules. */

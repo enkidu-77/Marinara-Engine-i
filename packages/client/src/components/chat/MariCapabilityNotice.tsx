@@ -2,8 +2,8 @@
 // Chat: Mari Capability Notice
 // ──────────────────────────────────────────────
 // One-time warning shown above the input bar in any chat where Professor
-// Mari is a participant. Tells the user that her [update_character] /
-// [update_persona] commands write straight to the library with no preview
+// Mari is a participant. Tells the user that her [update_character],
+// [update_persona], and [update_lorebook] commands write straight to the library with no preview
 // and no undo, so they should back up cards before asking her to edit
 // existing ones. Dismissal persists in localStorage so the warning shows
 // at most once across all of the user's Mari chats.
@@ -71,10 +71,10 @@ export const MariCapabilityNotice = memo(function MariCapabilityNotice() {
     >
       <AlertTriangle size="0.875rem" className="mt-0.5 shrink-0 text-amber-500" />
       <p className="flex-1 leading-relaxed">
-        Mari can edit your characters and personas directly when you ask her to update them. Character edits keep a
-        recoverable version snapshot you can roll back to from the character's history.{" "}
+        Mari can edit your characters, personas, and lorebooks directly when you ask her to update them. Character edits
+        keep a recoverable version snapshot you can roll back to from the character's history.{" "}
         <strong className="font-semibold">
-          Persona edits overwrite without a snapshot — back up the persona first
+          Persona and lorebook edits overwrite without a snapshot, so back them up first
         </strong>{" "}
         if you want to keep the old version.
       </p>

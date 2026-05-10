@@ -7,6 +7,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { usePersonas, useUpdatePersona, useUploadPersonaAvatar, useDeletePersona } from "../../hooks/use-characters";
+import { useConnections } from "../../hooks/use-connections";
 import { useUIStore } from "../../stores/ui.store";
 import {
   ArrowLeft,
@@ -55,6 +56,7 @@ import {
 } from "../../hooks/use-characters";
 import { useQueryClient } from "@tanstack/react-query";
 import { SpriteGenerationModal } from "../ui/SpriteGenerationModal";
+import { AvatarGenerationModal } from "../ui/AvatarGenerationModal";
 import { SpriteFrameEditor } from "../ui/SpriteFrameEditor";
 import { SpriteWandCleanupEditor } from "../ui/SpriteWandCleanupEditor";
 import { ExportFormatDialog, type ExportFormatChoice } from "../ui/ExportFormatDialog";
@@ -123,12 +125,14 @@ export function PersonaEditor() {
   const updatePersona = useUpdatePersona();
   const uploadAvatar = useUploadPersonaAvatar();
   const deletePersona = useDeletePersona();
+  const { data: connectionsList } = useConnections();
 
   const [activeTab, setActiveTab] = useState<TabId>("description");
   const [formData, setFormData] = useState<PersonaFormData | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [avatarGeneratorOpen, setAvatarGeneratorOpen] = useState(false);
   const loadedPersonaIdRef = useRef<string | null>(null);
   const latestAvatarUploadTokenRef = useRef<string | null>(null);
   const setEditorDirty = useUIStore((s) => s.setEditorDirty);
@@ -138,6 +142,9 @@ export function PersonaEditor() {
   const [saving, setSaving] = useState(false);
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageGenerationAvailable =
+    Array.isArray(connectionsList) &&
+    (connectionsList as Array<{ provider?: string }>).some((connection) => connection.provider === "image_generation");
 
   // Find the persona from the list
   const rawPersona = (allPersonas as PersonaRow[] | undefined)?.find((p) => p.id === personaId);
@@ -235,6 +242,22 @@ export function PersonaEditor() {
     e.target.value = "";
   };
 
+  const handleGeneratedAvatar = useCallback(
+    async (avatarDataUrl: string) => {
+      if (!personaId) return;
+      const uploadToken = generateClientId();
+      latestAvatarUploadTokenRef.current = uploadToken;
+      setAvatarPreview(avatarDataUrl);
+      await uploadAvatar.mutateAsync({
+        id: personaId,
+        avatar: avatarDataUrl,
+        filename: `persona-${personaId}-${Date.now()}.png`,
+      });
+      toast.success("Persona avatar generated.");
+    },
+    [personaId, uploadAvatar],
+  );
+
   const handleDelete = async () => {
     if (!personaId) return;
     if (
@@ -290,6 +313,15 @@ export function PersonaEditor() {
           void api.download(`/characters/personas/${personaId}/export?format=${format}`);
         }}
       />
+      <AvatarGenerationModal
+        open={avatarGeneratorOpen}
+        title="Generate Persona Avatar"
+        entityName={formData.name}
+        defaultAppearance={formData.appearance || formData.description || formData.personality}
+        defaultAvatarUrl={avatarPreview}
+        onClose={() => setAvatarGeneratorOpen(false)}
+        onUseAvatar={handleGeneratedAvatar}
+      />
 
       {/* ── Header ── */}
       <div className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] bg-[var(--card)] px-4 py-3 max-md:gap-2 max-md:px-3">
@@ -314,6 +346,19 @@ export function PersonaEditor() {
           <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
             <Camera size="1rem" className="text-white" />
           </div>
+          {imageGenerationAvailable && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setAvatarGeneratorOpen(true);
+              }}
+              className="absolute right-0.5 top-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--card)]/95 text-[var(--primary)] opacity-0 shadow-md ring-1 ring-[var(--border)] transition-opacity hover:bg-[var(--card)] group-hover:opacity-100 max-md:opacity-100"
+              title="Generate avatar"
+            >
+              <Wand2 size="0.75rem" />
+            </button>
+          )}
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
         </div>
 

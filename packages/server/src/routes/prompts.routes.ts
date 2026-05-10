@@ -341,23 +341,22 @@ export async function promptsRoutes(app: FastifyInstance) {
       activeLorebookIds: Array.isArray(chatMeta.activeLorebookIds) ? (chatMeta.activeLorebookIds as string[]) : [],
       chatEmbedding: null,
       entryStateOverrides:
-        ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
-        typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+        (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+        typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object"
           ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
               string,
               { ephemeral?: number | null; enabled?: boolean }
             >)
           : undefined,
       entryTimingStates:
-        ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
-        typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+        (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+        typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object"
           ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
               string,
               LorebookEntryTimingState
             >)
           : undefined,
-      lorebookTokenBudget:
-        typeof chatMeta.lorebookTokenBudget === "number" ? chatMeta.lorebookTokenBudget : undefined,
+      lorebookTokenBudget: typeof chatMeta.lorebookTokenBudget === "number" ? chatMeta.lorebookTokenBudget : undefined,
       generationTriggers: Array.isArray(chatMeta.generationTriggers)
         ? (chatMeta.generationTriggers as string[])
         : undefined,

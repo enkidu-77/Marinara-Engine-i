@@ -279,6 +279,7 @@ export function ChatSettingsDrawer({
   const agentProcessing = useAgentStore((s) => s.isProcessing);
   const scheduleGenerationPreferences = useUIStore((s) => s.scheduleGenerationPreferences);
   const setScheduleGenerationPreferences = useUIStore((s) => s.setScheduleGenerationPreferences);
+  const roleplaySpriteScale = useUIStore((s) => s.roleplaySpriteScale);
 
   const { data: allCharacters } = useCharacters();
   const { data: characterGroups } = useCharacterGroups();
@@ -390,7 +391,7 @@ export function ChatSettingsDrawer({
     (metadata.enableAgents ? 1 : 0) + (gameLorebookKeeperEnabled ? 1 : 0) + (gameUseSpotifyMusic ? 1 : 0);
   const spriteCharacterIds: string[] = Array.isArray(metadata.spriteCharacterIds) ? metadata.spriteCharacterIds : [];
   const spritePosition: "left" | "right" = metadata.spritePosition === "right" ? "right" : "left";
-  const spriteScale = normalizeSpriteDisplayValue(metadata.spriteScale, 1, 0.5, 1.75);
+  const spriteScale = normalizeSpriteDisplayValue(metadata.spriteScale, roleplaySpriteScale, 0.5, 1.75);
   const spriteOpacity = normalizeSpriteDisplayValue(metadata.spriteOpacity, 1, 0.15, 1);
   const [spriteScalePercent, setSpriteScalePercent] = useState(() => Math.round(spriteScale * 100));
   const [spriteOpacityPercent, setSpriteOpacityPercent] = useState(() => Math.round(spriteOpacity * 100));
@@ -421,15 +422,7 @@ export function ChatSettingsDrawer({
     }
     return map;
   }, [agentConfigs]);
-  const conversationSpotifyCommandsEnabled = metadata.conversationSpotifyCommandsEnabled === true;
-  const spotifyConnectionQuery = useQuery({
-    queryKey: ["spotify", "player", "conversation-settings"],
-    queryFn: () => api.get<{ connected: boolean }>("/spotify/player"),
-    enabled: open && isConversation,
-    staleTime: 60_000,
-    retry: false,
-  });
-  const spotifyConnected = spotifyConnectionQuery.data?.connected === true;
+  const conversationCommandsEnabled = metadata.characterCommands !== false;
 
   // Build the available agent list: built-in + custom agents from DB
   // In roleplay mode, hide agents that are either automatic or handled internally.
@@ -1824,18 +1817,136 @@ export function ChatSettingsDrawer({
             >
               <div className="space-y-1.5">
                 <label className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Persona</label>
-                <select
-                  value={chat.personaId ?? ""}
-                  onChange={(e) => updateChat.mutate({ id: chat.id, personaId: e.target.value || null })}
-                  className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
-                >
-                  <option value="">None</option>
-                  {personas.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                {chat.personaId ? (
+                  <div className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-2.5 py-2 ring-1 ring-[var(--primary)]/30">
+                    {(() => {
+                      const p = personas.find((persona) => persona.id === chat.personaId);
+                      return p ? (
+                        <>
+                          {p.avatarPath ? (
+                            <img
+                              src={p.avatarPath}
+                              alt={p.name}
+                              loading="lazy"
+                              className="h-7 w-7 shrink-0 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 text-white">
+                              <User size="0.75rem" />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate text-xs">{p.name}</span>
+                            {p.comment && (
+                              <span className="block truncate text-[0.625rem] italic text-[var(--muted-foreground)]">
+                                {p.comment}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="flex-1 truncate text-xs text-[var(--muted-foreground)]">Unknown persona</span>
+                      );
+                    })()}
+                    <button
+                      onClick={() => updateChat.mutate({ id: chat.id, personaId: null })}
+                      className="ml-auto shrink-0 rounded p-0.5 text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
+                      title="Remove persona"
+                    >
+                      <X size="0.75rem" />
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-[0.6875rem] text-[var(--muted-foreground)]">No persona selected.</p>
+                )}
+
+                {!showPersonaPicker ? (
+                  <button
+                    onClick={() => {
+                      setShowPersonaPicker(true);
+                      setPersonaSearch("");
+                    }}
+                    className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)] transition-colors hover:border-[var(--primary)]/40 hover:text-[var(--primary)]"
+                  >
+                    <Plus size="0.75rem" /> {chat.personaId ? "Change" : "Choose"} Persona
+                  </button>
+                ) : (
+                  <PickerDropdown
+                    search={personaSearch}
+                    onSearchChange={setPersonaSearch}
+                    onClose={() => setShowPersonaPicker(false)}
+                    placeholder="Search personas..."
+                  >
+                    <button
+                      onClick={() => {
+                        updateChat.mutate({ id: chat.id, personaId: null });
+                        setShowPersonaPicker(false);
+                      }}
+                      className={cn(
+                        "flex items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all hover:bg-[var(--accent)]",
+                        !chat.personaId && "bg-[var(--primary)]/10",
+                      )}
+                    >
+                      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--muted-foreground)]">
+                        <X size="0.625rem" />
+                      </div>
+                      <span className="flex-1 truncate text-xs">None</span>
+                      {!chat.personaId && <Check size="0.625rem" className="ml-auto shrink-0 text-[var(--primary)]" />}
+                    </button>
+                    {personas
+                      .filter(
+                        (p) =>
+                          p.name.toLowerCase().includes(personaSearch.toLowerCase()) ||
+                          (p.comment && p.comment.toLowerCase().includes(personaSearch.toLowerCase())),
+                      )
+                      .map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => {
+                            updateChat.mutate({ id: chat.id, personaId: p.id });
+                            setShowPersonaPicker(false);
+                          }}
+                          className={cn(
+                            "flex items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all hover:bg-[var(--accent)]",
+                            chat.personaId === p.id && "bg-[var(--primary)]/10",
+                          )}
+                        >
+                          {p.avatarPath ? (
+                            <img
+                              src={p.avatarPath}
+                              alt={p.name}
+                              loading="lazy"
+                              className="h-6 w-6 shrink-0 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 text-white">
+                              <User size="0.625rem" />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate text-xs">{p.name}</span>
+                            {p.comment && (
+                              <span className="block truncate text-[0.625rem] italic text-[var(--muted-foreground)]">
+                                {p.comment}
+                              </span>
+                            )}
+                          </div>
+                          {chat.personaId === p.id && (
+                            <Check size="0.625rem" className="ml-auto shrink-0 text-[var(--primary)]" />
+                          )}
+                        </button>
+                      ))}
+                    {personas.filter(
+                      (p) =>
+                        p.name.toLowerCase().includes(personaSearch.toLowerCase()) ||
+                        (p.comment && p.comment.toLowerCase().includes(personaSearch.toLowerCase())),
+                    ).length === 0 && (
+                      <p className="px-3 py-2 text-[0.6875rem] text-[var(--muted-foreground)]">
+                        {personas.length === 0 ? "No personas created yet." : "No matches."}
+                      </p>
+                    )}
+                  </PickerDropdown>
+                )}
               </div>
 
               <div className="mt-2 space-y-1.5">
@@ -1854,14 +1965,38 @@ export function ChatSettingsDrawer({
                           key={c.id}
                           className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30"
                         >
-                          <div className="min-w-0 flex-1">
-                            <span className="block truncate text-xs">{name}</span>
-                            {title && (
-                              <span className="block truncate text-[0.625rem] italic text-[var(--muted-foreground)]">
-                                {title}
+                          <button
+                            onClick={() => {
+                              onClose();
+                              useUIStore.getState().openCharacterDetail(c.id);
+                            }}
+                            className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:opacity-80"
+                            title="Open character card"
+                          >
+                            {c.avatarPath ? (
+                              <span className="block h-7 w-7 shrink-0 overflow-hidden rounded-full">
+                                <img
+                                  src={c.avatarPath}
+                                  alt={name}
+                                  loading="lazy"
+                                  className="h-full w-full object-cover"
+                                  style={getAvatarCropStyle(charAvatarCrop(c))}
+                                />
                               </span>
+                            ) : (
+                              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[0.625rem] font-bold">
+                                {name[0]}
+                              </div>
                             )}
-                          </div>
+                            <div className="min-w-0 flex-1">
+                              <span className="block truncate text-xs">{name}</span>
+                              {title && (
+                                <span className="block truncate text-[0.625rem] italic text-[var(--muted-foreground)]">
+                                  {title}
+                                </span>
+                              )}
+                            </div>
+                          </button>
                           <button
                             onClick={() => toggleCharacter(c.id)}
                             className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
@@ -1933,7 +2068,7 @@ export function ChatSettingsDrawer({
           {!isGame && (
             <Section
               label="Persona"
-              icon={<Users size="0.875rem" />}
+              icon={<User size="0.875rem" />}
               help="Your persona defines who you are in this chat. The AI will address you by this persona's name and use its details for context."
             >
               {/* Currently selected persona */}
@@ -2608,47 +2743,6 @@ export function ChatSettingsDrawer({
                   </button>
                 )}
 
-                <button
-                  onClick={() => {
-                    updateMeta.mutate({
-                      id: chat.id,
-                      conversationSpotifyCommandsEnabled: !conversationSpotifyCommandsEnabled,
-                    });
-                  }}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-all",
-                    conversationSpotifyCommandsEnabled
-                      ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
-                      : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
-                  )}
-                >
-                  <div className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5 text-xs font-medium">
-                      Spotify Song Commands
-                    </span>
-                    <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                      {spotifyConnected
-                        ? "Characters may pick songs for your active Spotify player"
-                        : spotifyConnectionQuery.isFetching
-                          ? "Checking Spotify connection..."
-                          : "Only works after Spotify is connected in Agents"}
-                    </p>
-                  </div>
-                  <div
-                    className={cn(
-                      "h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors",
-                      conversationSpotifyCommandsEnabled ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/50",
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                        conversationSpotifyCommandsEnabled && "translate-x-3.5",
-                      )}
-                    />
-                  </div>
-                </button>
-
                 {/* Conversation schedules toggle */}
                 <button
                   onClick={() => {
@@ -2685,111 +2779,6 @@ export function ChatSettingsDrawer({
                     />
                   </div>
                 </button>
-
-                {/* Selfie Connection — connection picker for character selfies */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <Image size="0.75rem" className="text-[var(--primary)]" />
-                    <span className="text-xs font-medium">Selfie Connection</span>
-                  </div>
-                  <select
-                    value={(metadata.imageGenConnectionId as string) ?? ""}
-                    onChange={(e) => updateMeta.mutate({ id: chat.id, imageGenConnectionId: e.target.value || null })}
-                    className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
-                  >
-                    <option value="">None (selfies disabled)</option>
-                    {imageConnectionsList.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.provider})
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[0.55rem] text-[var(--muted-foreground)]">
-                    Used for character selfies. The Illustrator agent uses its own connection from the Agents tab.
-                  </p>
-
-                  {/* Selfie resolution picker */}
-                  {(metadata.imageGenConnectionId as string) && (
-                    <div className="mt-2 space-y-1">
-                      <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Resolution</span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {[
-                          { label: "512×512", w: 512, h: 512 },
-                          { label: "512×768", w: 512, h: 768 },
-                          { label: "768×768", w: 768, h: 768 },
-                          { label: "768×1024", w: 768, h: 1024 },
-                          { label: "1024×1024", w: 1024, h: 1024 },
-                        ].map((opt) => {
-                          const current = (metadata.selfieResolution as string) ?? "512x768";
-                          const val = `${opt.w}x${opt.h}`;
-                          const active = current === val;
-                          return (
-                            <button
-                              key={val}
-                              type="button"
-                              onClick={() => updateMeta.mutate({ id: chat.id, selfieResolution: val })}
-                              className={`rounded-md px-2 py-1 text-[0.625rem] font-medium transition-colors ${
-                                active
-                                  ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                                  : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Selfie tags */}
-                  {(metadata.imageGenConnectionId as string) && (
-                    <SelfieTagsEditor
-                      tags={(metadata.selfieTags as string[]) ?? []}
-                      onChange={(tags) => updateMeta.mutate({ id: chat.id, selfieTags: tags })}
-                    />
-                  )}
-                </div>
-
-                {/* Schedule generation preferences — free-form authorial guidance */}
-                <label className="flex flex-col gap-1.5">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-                    <Sparkles size="0.75rem" className="text-[var(--primary)]" />
-                    Schedule generation preferences
-                    <HelpTooltip text="Free-form guidance that steers how character schedules are generated. Both directives ('no characters past midnight') and factual constraints ('I work 9-5') work. This setting is global — it applies to every conversation chat." />
-                  </span>
-                  <textarea
-                    value={scheduleGenerationPreferences}
-                    onChange={(e) => setScheduleGenerationPreferences(e.target.value)}
-                    placeholder="e.g. Make everyone go to sleep before midnight. Give characters free time 10am-noon. I work 9-5 on weekdays."
-                    className="min-h-[5rem] resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-2.5 text-[0.6875rem] text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]/50 placeholder:text-[var(--muted-foreground)]/40"
-                  />
-                  <p className="text-[0.59375rem] text-[var(--muted-foreground)]/70">
-                    Global setting. Applies to every conversation chat&apos;s next schedule regeneration — manual or
-                    weekly auto.
-                  </p>
-                </label>
-
-                {/* Active schedule-generation preference indicator */}
-                {scheduleGenerationPreferences.trim() && (
-                  <div
-                    className="flex items-start gap-2 rounded-lg border border-[var(--primary)]/30 bg-[var(--primary)]/10 px-3 py-2.5"
-                    title={scheduleGenerationPreferences.trim()}
-                  >
-                    <Sparkles size="0.875rem" className="mt-0.5 shrink-0 text-[var(--primary)]" />
-                    <div className="flex-1 min-w-0">
-                      <span className="block text-[0.6875rem] font-medium leading-snug text-[var(--foreground)]">
-                        Schedule generation preference active
-                      </span>
-                      <p className="mt-0.5 truncate text-[0.625rem] italic text-[var(--muted-foreground)]">
-                        “{scheduleGenerationPreferences.trim()}”
-                      </p>
-                      <p className="mt-1 text-[0.59375rem] text-[var(--muted-foreground)]/70">
-                        Will be applied the next time schedules are regenerated.
-                      </p>
-                    </div>
-                  </div>
-                )}
 
                 {/* Schedule status */}
                 <div className="flex items-center gap-2 rounded-lg bg-[var(--secondary)] px-3 py-2.5">
@@ -2843,6 +2832,159 @@ export function ChatSettingsDrawer({
                       updateMeta.mutate({ id: chat.id, characterSchedules: updated });
                     }}
                   />
+                )}
+              </div>
+            </Section>
+          )}
+
+          {/* Commands — conversation mode only */}
+          {isConversation && (
+            <Section
+              label="Commands"
+              icon={<Sparkles size="0.875rem" />}
+              help="Allow characters to use hidden command tags for actions that happen outside the visible message."
+            >
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    updateMeta.mutate({ id: chat.id, characterCommands: !conversationCommandsEnabled });
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-all",
+                    conversationCommandsEnabled
+                      ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
+                      : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5 text-xs font-medium">
+                      <Sparkles size="0.75rem" className="text-[var(--primary)]" />
+                      Commands
+                    </span>
+                    <p className="text-[0.625rem] text-[var(--muted-foreground)]">
+                      Allow models to interact with you via commands. This way, they can send you selfies, play songs
+                      for you, change their schedules, start scenes, and do much more!
+                    </p>
+                  </div>
+                  <div
+                    className={cn(
+                      "h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors",
+                      conversationCommandsEnabled ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/50",
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                        conversationCommandsEnabled && "translate-x-3.5",
+                      )}
+                    />
+                  </div>
+                </button>
+
+                {/* Selfie Connection — connection picker for character selfies */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Image size="0.75rem" className="text-[var(--primary)]" />
+                    <span className="text-xs font-medium">Selfie Connection</span>
+                  </div>
+                  <select
+                    value={(metadata.imageGenConnectionId as string) ?? ""}
+                    onChange={(e) => updateMeta.mutate({ id: chat.id, imageGenConnectionId: e.target.value || null })}
+                    className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-[var(--primary)]/40"
+                  >
+                    <option value="">None (selfies disabled)</option>
+                    {imageConnectionsList.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.provider})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[0.55rem] text-[var(--muted-foreground)]">
+                    Used for character selfies when Commands are enabled. The Illustrator agent uses its own connection
+                    from the Agents tab.
+                  </p>
+
+                  {/* Selfie resolution picker */}
+                  {(metadata.imageGenConnectionId as string) && (
+                    <div className="mt-2 space-y-1">
+                      <span className="text-[0.6875rem] font-medium text-[var(--muted-foreground)]">Resolution</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { label: "512x512", w: 512, h: 512 },
+                          { label: "512x768", w: 512, h: 768 },
+                          { label: "768x768", w: 768, h: 768 },
+                          { label: "768x1024", w: 768, h: 1024 },
+                          { label: "1024x1024", w: 1024, h: 1024 },
+                        ].map((opt) => {
+                          const current = (metadata.selfieResolution as string) ?? "512x768";
+                          const val = `${opt.w}x${opt.h}`;
+                          const active = current === val;
+                          return (
+                            <button
+                              key={val}
+                              type="button"
+                              onClick={() => updateMeta.mutate({ id: chat.id, selfieResolution: val })}
+                              className={`rounded-md px-2 py-1 text-[0.625rem] font-medium transition-colors ${
+                                active
+                                  ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                                  : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Selfie tags */}
+                  {(metadata.imageGenConnectionId as string) && (
+                    <SelfieTagsEditor
+                      tags={(metadata.selfieTags as string[]) ?? []}
+                      onChange={(tags) => updateMeta.mutate({ id: chat.id, selfieTags: tags })}
+                    />
+                  )}
+                </div>
+
+                {/* Schedule generation preferences — free-form authorial guidance */}
+                <label className="flex flex-col gap-1.5">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                    <Sparkles size="0.75rem" className="text-[var(--primary)]" />
+                    Schedule generation preferences
+                    <HelpTooltip text="Free-form guidance that steers how character schedules are generated. Both directives ('no characters past midnight') and factual constraints ('I work 9-5') work. This setting is global, it applies to every conversation chat." />
+                  </span>
+                  <textarea
+                    value={scheduleGenerationPreferences}
+                    onChange={(e) => setScheduleGenerationPreferences(e.target.value)}
+                    placeholder="e.g. Make everyone go to sleep before midnight. Give characters free time 10am-noon. I work 9-5 on weekdays."
+                    className="min-h-[5rem] resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-2.5 text-[0.6875rem] text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]/50 placeholder:text-[var(--muted-foreground)]/40"
+                  />
+                  <p className="text-[0.59375rem] text-[var(--muted-foreground)]/70">
+                    Global setting. Applies to every conversation chat&apos;s next schedule regeneration, manual or
+                    weekly auto.
+                  </p>
+                </label>
+
+                {/* Active schedule-generation preference indicator */}
+                {scheduleGenerationPreferences.trim() && (
+                  <div
+                    className="flex items-start gap-2 rounded-lg border border-[var(--primary)]/30 bg-[var(--primary)]/10 px-3 py-2.5"
+                    title={scheduleGenerationPreferences.trim()}
+                  >
+                    <Sparkles size="0.875rem" className="mt-0.5 shrink-0 text-[var(--primary)]" />
+                    <div className="min-w-0 flex-1">
+                      <span className="block text-[0.6875rem] font-medium leading-snug text-[var(--foreground)]">
+                        Schedule generation preference active
+                      </span>
+                      <p className="mt-0.5 truncate text-[0.625rem] italic text-[var(--muted-foreground)]">
+                        "{scheduleGenerationPreferences.trim()}"
+                      </p>
+                      <p className="mt-1 text-[0.59375rem] text-[var(--muted-foreground)]/70">
+                        Will be applied the next time schedules are regenerated.
+                      </p>
+                    </div>
+                  </div>
                 )}
               </div>
             </Section>
@@ -4078,42 +4220,80 @@ export function ChatSettingsDrawer({
                               count={activeInCat.length}
                             >
                               {cat.key === "writer" && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    updateMeta.mutate({
-                                      id: chat.id,
-                                      showInjectionsPanel: metadata.showInjectionsPanel !== true,
-                                    })
-                                  }
-                                  aria-pressed={metadata.showInjectionsPanel === true}
-                                  className="ml-auto flex w-fit max-w-full items-center gap-2 rounded-md bg-[var(--background)]/20 px-1.5 py-1 text-left text-[0.5625rem] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]/35 hover:text-[var(--foreground)]"
-                                  title={
-                                    metadata.showInjectionsPanel === true
-                                      ? "Hide the Injections tab in the roleplay Agents menu. This is mainly for troubleshooting Prose Guardian, Narrative Director, or custom injected text before regenerating the current reply."
-                                      : "Show the Injections tab in the roleplay Agents menu. This is mainly for troubleshooting Prose Guardian, Narrative Director, or custom injected text before regenerating the current reply."
-                                  }
-                                >
-                                  <span className="flex min-w-0 items-center gap-1.5">
-                                    <FilePlus2 size="0.625rem" className="shrink-0 text-[var(--primary)]" />
-                                    <span className="truncate font-medium">Injections tab</span>
-                                  </span>
-                                  <span
-                                    className={cn(
-                                      "h-3.5 w-6 shrink-0 rounded-full p-0.5 transition-colors",
-                                      metadata.showInjectionsPanel === true
-                                        ? "bg-[var(--primary)]"
-                                        : "bg-[var(--muted-foreground)]/50",
-                                    )}
+                                <div className="ml-auto flex w-fit max-w-full flex-wrap justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateMeta.mutate({
+                                        id: chat.id,
+                                        reviewWriterAgentOutputs: metadata.reviewWriterAgentOutputs !== true,
+                                      })
+                                    }
+                                    aria-pressed={metadata.reviewWriterAgentOutputs === true}
+                                    className="flex max-w-full items-center gap-2 rounded-md bg-[var(--background)]/20 px-1.5 py-1 text-left text-[0.5625rem] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]/35 hover:text-[var(--foreground)]"
+                                    title={
+                                      metadata.reviewWriterAgentOutputs === true
+                                        ? "Stop pausing before the main reply to review writer agent output."
+                                        : "Pause before the main reply so Prose Guardian, Narrative Director, and similar writer outputs can be reviewed and edited."
+                                    }
                                   >
+                                    <span className="flex min-w-0 items-center gap-1.5">
+                                      <Pencil size="0.625rem" className="shrink-0 text-[var(--primary)]" />
+                                      <span className="truncate font-medium">Review outputs</span>
+                                    </span>
                                     <span
                                       className={cn(
-                                        "block h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform",
-                                        metadata.showInjectionsPanel === true && "translate-x-2.5",
+                                        "h-3.5 w-6 shrink-0 rounded-full p-0.5 transition-colors",
+                                        metadata.reviewWriterAgentOutputs === true
+                                          ? "bg-[var(--primary)]"
+                                          : "bg-[var(--muted-foreground)]/50",
                                       )}
-                                    />
-                                  </span>
-                                </button>
+                                    >
+                                      <span
+                                        className={cn(
+                                          "block h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform",
+                                          metadata.reviewWriterAgentOutputs === true && "translate-x-2.5",
+                                        )}
+                                      />
+                                    </span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateMeta.mutate({
+                                        id: chat.id,
+                                        showInjectionsPanel: metadata.showInjectionsPanel !== true,
+                                      })
+                                    }
+                                    aria-pressed={metadata.showInjectionsPanel === true}
+                                    className="flex max-w-full items-center gap-2 rounded-md bg-[var(--background)]/20 px-1.5 py-1 text-left text-[0.5625rem] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]/35 hover:text-[var(--foreground)]"
+                                    title={
+                                      metadata.showInjectionsPanel === true
+                                        ? "Hide the Injections tab in the roleplay Agents menu. This is mainly for troubleshooting Prose Guardian, Narrative Director, or custom injected text before regenerating the current reply."
+                                        : "Show the Injections tab in the roleplay Agents menu. This is mainly for troubleshooting Prose Guardian, Narrative Director, or custom injected text before regenerating the current reply."
+                                    }
+                                  >
+                                    <span className="flex min-w-0 items-center gap-1.5">
+                                      <FilePlus2 size="0.625rem" className="shrink-0 text-[var(--primary)]" />
+                                      <span className="truncate font-medium">Injections tab</span>
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        "h-3.5 w-6 shrink-0 rounded-full p-0.5 transition-colors",
+                                        metadata.showInjectionsPanel === true
+                                          ? "bg-[var(--primary)]"
+                                          : "bg-[var(--muted-foreground)]/50",
+                                      )}
+                                    >
+                                      <span
+                                        className={cn(
+                                          "block h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform",
+                                          metadata.showInjectionsPanel === true && "translate-x-2.5",
+                                        )}
+                                      />
+                                    </span>
+                                  </button>
+                                </div>
                               )}
                               {/* Active agents in this category */}
                               {activeInCat.length > 0 && (

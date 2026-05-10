@@ -41,6 +41,9 @@ export type MetadataPatchInput = MetadataPatch | MetadataUpdater;
 
 const MAX_APPEND_BYTES = 16 * 1024;
 const MAX_TOTAL_SUMMARY_BYTES = 64 * 1024;
+const MAX_CHAT_VARIABLE_KEY_LENGTH = 128;
+const MAX_CHAT_VARIABLE_VALUE_BYTES = 64 * 1024;
+const MAX_CHAT_VARIABLES = 256;
 const SPOTIFY_TRACK_INDEX_TTL_MS = 20 * 60_000;
 const SPOTIFY_TRACK_INDEX_CACHE_MAX = 24;
 const SPOTIFY_TRACK_INDEX_MAX_TRACKS = 2_500;
@@ -178,6 +181,10 @@ async function executeSingleTool(
       return readChatSummary(context?.chatMeta);
     case "append_chat_summary":
       return appendChatSummary(args, context);
+    case "read_chat_variable":
+      return readChatVariable(args, context?.chatMeta);
+    case "write_chat_variable":
+      return writeChatVariable(args, context);
     case "spotify_get_current_playback":
       return spotifyGetCurrentPlayback(args, context?.spotify);
     case "spotify_get_playlists":
@@ -204,6 +211,8 @@ async function executeSingleTool(
           "search_lorebook",
           "read_chat_summary",
           "append_chat_summary",
+          "read_chat_variable",
+          "write_chat_variable",
           "spotify_get_current_playback",
           "spotify_get_playlists",
           "spotify_get_playlist_tracks",
@@ -357,6 +366,38 @@ function readChatSummary(chatMeta?: Record<string, unknown>): Record<string, unk
   return { summary };
 }
 
+function normalizeChatVariableKey(args: Record<string, unknown>): { key: string } | { error: string } {
+  if (typeof args.key !== "string") {
+    return { error: "chat variable key must be a non-empty string" };
+  }
+  const key = args.key.trim();
+  if (!key) {
+    return { error: "chat variable key must be a non-empty string" };
+  }
+  if (key.length > MAX_CHAT_VARIABLE_KEY_LENGTH) {
+    return { error: `chat variable key must be ${MAX_CHAT_VARIABLE_KEY_LENGTH} characters or fewer` };
+  }
+  return { key };
+}
+
+function normalizeAgentVariables(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const variables: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (!key || typeof rawValue !== "string") continue;
+    variables[key] = rawValue;
+  }
+  return variables;
+}
+
+function readChatVariable(args: Record<string, unknown>, chatMeta?: Record<string, unknown>): Record<string, unknown> {
+  const keyResult = normalizeChatVariableKey(args);
+  if ("error" in keyResult) return { error: keyResult.error };
+  const variables = normalizeAgentVariables(chatMeta?.agentVariables);
+  const exists = Object.prototype.hasOwnProperty.call(variables, keyResult.key);
+  return { key: keyResult.key, value: variables[keyResult.key] ?? "", exists };
+}
+
 function sanitizePersistedSummaryText(text: string): string {
   return text
     .replace(/&(amp|lt|gt);/g, (_match, entity: string) => {
@@ -426,6 +467,40 @@ async function appendChatSummary(
     return { summary: trimToUtf8Bytes(summary, MAX_TOTAL_SUMMARY_BYTES, true).trim() };
   });
   return { summary: typeof updated.summary === "string" ? updated.summary : sanitizedText };
+}
+
+async function writeChatVariable(
+  args: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<Record<string, unknown>> {
+  const keyResult = normalizeChatVariableKey(args);
+  if ("error" in keyResult) return { error: keyResult.error };
+  if (typeof args.value !== "string") {
+    return { error: "write_chat_variable requires a string value" };
+  }
+  if (!context?.onUpdateMetadata) {
+    return { error: "Chat metadata updates are not available in this context" };
+  }
+
+  const existingVariables = normalizeAgentVariables(context.chatMeta?.agentVariables);
+  const existed = Object.prototype.hasOwnProperty.call(existingVariables, keyResult.key);
+  if (!existed && Object.keys(existingVariables).length >= MAX_CHAT_VARIABLES) {
+    return { error: `chat variable limit reached (${MAX_CHAT_VARIABLES})` };
+  }
+
+  const value = trimToUtf8Bytes(args.value, MAX_CHAT_VARIABLE_VALUE_BYTES);
+  const updated = await context.onUpdateMetadata((currentMeta) => {
+    const variables = normalizeAgentVariables(currentMeta.agentVariables);
+    return { agentVariables: { ...variables, [keyResult.key]: value } };
+  });
+  const variables = normalizeAgentVariables(updated.agentVariables);
+  return {
+    key: keyResult.key,
+    value: variables[keyResult.key] ?? value,
+    replaced: existed,
+    truncated: value !== args.value,
+    bytes: utf8ByteLength(value),
+  };
 }
 
 function triggerEvent(args: Record<string, unknown>): Record<string, unknown> {
@@ -502,7 +577,10 @@ async function spotifyGetCurrentPlayback(
       ? {
           uri: data.item.uri ?? null,
           name: data.item.name ?? "Unknown track",
-          artist: (data.item.artists ?? []).map((artist) => artist.name).filter(Boolean).join(", "),
+          artist: (data.item.artists ?? [])
+            .map((artist) => artist.name)
+            .filter(Boolean)
+            .join(", "),
           album: data.item.album?.name ?? null,
           durationMs: data.item.duration_ms ?? null,
         }
@@ -682,7 +760,11 @@ function scoreSpotifyCandidate(track: SpotifyTrackCandidate, phrase: string, tok
   return score + hashFraction(`${track.uri}:${phrase}`) * 0.01;
 }
 
-function sampleSpotifyTracksEvenly(tracks: SpotifyTrackCandidate[], count: number, seed: string): SpotifyTrackCandidate[] {
+function sampleSpotifyTracksEvenly(
+  tracks: SpotifyTrackCandidate[],
+  count: number,
+  seed: string,
+): SpotifyTrackCandidate[] {
   if (tracks.length <= count) return tracks;
   const start = Math.floor(hashFraction(seed) * Math.max(1, Math.floor(tracks.length / count)));
   const step = tracks.length / count;
@@ -762,7 +844,11 @@ function mapSpotifyTrackItems(
       return {
         uri: track.uri,
         name: track.name || "Unknown track",
-        artist: (track.artists ?? []).map((a) => a.name).filter(Boolean).join(", ") || "Unknown artist",
+        artist:
+          (track.artists ?? [])
+            .map((a) => a.name)
+            .filter(Boolean)
+            .join(", ") || "Unknown artist",
         album: track.album?.name || "Unknown album",
         position: offset + index + 1,
       };
@@ -867,8 +953,7 @@ async function spotifyGetPlaylistTracks(
         query: query || null,
         matchedTokens: selection.tokens,
         truncated: index.truncated,
-        hint:
-          "Server indexed the playlist and returned only selected candidates. Pick 3-5 URIs from this shortlist; do not request every page unless you truly need manual browsing.",
+        hint: "Server indexed the playlist and returned only selected candidates. Pick 3-5 URIs from this shortlist; do not request every page unless you truly need manual browsing.",
       };
     }
 

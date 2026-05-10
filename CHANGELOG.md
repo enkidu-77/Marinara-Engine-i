@@ -2,6 +2,81 @@
 
 This file is the release-notes source of truth for Marinara Engine. Reuse these entries when publishing GitHub Releases for tags in the `vX.Y.Z` format.
 
+## [1.5.9]
+
+### Added
+
+- Improved sprite generation for expressions and full-body ones, allowing you to create matching full-body sprites for game mode to be shown alongside the expression ones.
+- Spotify music player with DJ Mari (can be toggled in Settings).
+- Cross-device extension storage, so browser extensions can sync through the server instead of staying tied to one device.
+- Editable agent context injections and secret plot controls.
+  Configurable impersonation controls, including an option to use CYOA choices as impersonation directions.
+- /hide and /unhide slash commands for bulk AI-context visibility control.
+- Start Chat actions from character views and the character panel.
+- Persona-specific saved status options.
+- Random expression sprite groups.
+- Copy-message support in Game mode.
+- Documentation updates for setup, updates, troubleshooting, iOS PWA use, and platform-specific install paths.
+- The `.env` is now auto-created on first run (empty placeholder pointing at .env.example).
+- Per-connection Fast Mode toggle for Claude (Subscription) — currently a no-op, kept for when Anthropic restores fast-mode routing.
+- "Diagnose Model Routing" button on Claude (Subscription) connections, reporting which model the SDK actually billed against.
+- OpenAI (ChatGPT) connections that use the local Codex ChatGPT login instead of an OpenAI API key.
+- Server-side warning when the SDK silently bills against a different model than requested.
+- Roleplay avatar and default sprite scale controls in Appearance settings.
+- Per-connection max parallel agent job controls, allowing agent-heavy chats to split same-connection work across multiple LLM calls.
+- Editable Game Session History map JSON in the current-session spoiler section.
+- Markdown rendering and live preview for Game journal notes.
+- `/emote name="Character" expression="expression"` for listing and manually switching roleplay sprite expressions.
+- Duplicate action for individual prompt preset blocks.
+- Close controls for Game mode choice prompts and quick-time event windows.
+- Agent tool calls for reading and replacing chat-wide string variables.
+- OpenRouter as an image generation service through the existing image connection flow.
+- Game setup can now review, edit, or remove generated HUD widgets and custom stat fields before the first turn starts.
+- Character cards now support Persona-style Description Extensions, with active blocks appended to prompt descriptions.
+- Game mode NPC side banter now spreads long runs across later VN segments, reducing oversized popup stacks.
+- Roleplay Writer Agents can now pause before the main reply so their prompt injections can be reviewed and edited.
+- Game Session Logs now highlight entries included in a pending multi-message deletion.
+- Conversation settings now include a Commands section for toggling hidden character commands and configuring selfie and schedule command support.
+- Rare Chibi Professor Mari scroll toast easter egg with a matching thank-you response in Professor Mari chats.
+- Active World Info controls in Conversation and Game mode, including mobile access through the overflow menus.
+
+### Changed
+
+- Agents in Roleplay display rework.
+- Game mode inventory no longer has a hard item cap.
+- The `.env` changes hot-reload without a server restart for most settings (auth, IP allowlist, CSRF/CORS origins, and local-URL flags). Boot-bound vars still warn on change.
+- Tailscale (100.64.0.0/10) and Docker (172.16.0.0/12) traffic are trusted by default, skipping IP allowlist and Basic Auth, with BYPASS_AUTH_TAILSCALE / BYPASS_AUTH_DOCKER opt-outs.
+- CORS_ORIGINS is now hot-reloadable, and same-origin requests are auto-allowed regardless of config.
+- Network rejection, SSRF, CSRF, and CORS errors now name the exact env var and the line to paste into `.env` to fix them.
+
+### Fixed
+
+- Fixed local LM Studio connection JSON errors and .local provider endpoint validation.
+- Fixed agent output leaking into the main prompt, local model fallback handling, and Narrative Director cadence in group replies.
+- Fixed spurious aborts on normal generation completion and raw conversation streaming buffers appearing in the UI.
+- Fixed Roleplay DM routing to linked Conversation chats and connected chat branch labels.
+- Fixed retrying Conversation generation from the send button and refreshing Conversation status when opening chats.
+- Fixed Memory Recall refresh after message edits, reroll invalidation, and Termux embedding handling.
+- Fixed Lorebook import, embedded lorebook sync, legacy link hydration, duplicate links, stale linked counts, disabled lorebook activation, prompt preview gates, and several scoping edge cases.
+- Fixed Game mode combat targeting, mobile combat layout, combat HP initialization, enemy portraits, skill-check attributes, scene time drift, map regeneration after restored turns, typed choice prompts, background switching races, and scene intro recovery after asset failures.
+- Fixed grouped Conversation image attachments and selfie persistence to active swipes.
+- Fixed NovelAI image request settings and V4 native prompt input.
+- Fixed Google provider empty candidate handling, Claude Subscription model identity loss, llama.cpp embedding response parsing, and TTS provider diagnostics.
+- Fixed Docker and Lite Docker startup/install issues, including recursive app ownership layers, CPU-only hosts, and Rollup native binary restoration.
+- Fixed Lite Docker sprite generation by rebuilding the `sharp` native module after scriptless dependency installs.
+- Fixed conversation schedule generation so a connection max-token override replaces the old fixed schedule budget.
+- Removed the oversized Characters panel New Chat row button so character names and metadata are no longer truncated.
+- Fixed Active World Info so it reflects the lorebook entries used by the last generation instead of previewing the next turn.
+- Fixed Game setup JSON parsing for common LLM omissions such as a missing comma before the next property, and added line numbers to the JSON repair editor.
+- Fixed Game mode Talk to GM and Talk to Party turns so they skip scene/weather analysis instead of running the full scene-prep pipeline.
+- Fixed right-panel resize handle layering and custom font family normalization.
+- Improved combat in Game mode.
+- Claude (Subscription) silent model-identity loss; Opus and Haiku falsely self-identified as Sonnet because the SDK strips version awareness without the claude_code preset wrapping.
+- Bounded the CSRF/CORS rejection-log throttle caches (capped at 2048 with FIFO eviction) so attacker-controlled origin strings can't grow process memory without bound.
+- Unified the CSRF 403 response body to use origin across all branches (it was inconsistent for the Referer-not-trusted case).
+- Fixed Game mode inventory item names so long names wrap instead of truncating, and removed stale item-description rendering from inventory surfaces.
+- Various UI improvements.
+
 ## [1.5.8]
 
 ### Added

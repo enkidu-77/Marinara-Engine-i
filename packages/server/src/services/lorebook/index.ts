@@ -188,7 +188,9 @@ function hasSerializedTimingStates(states?: Record<string, LorebookEntryTimingSt
   return states !== undefined && Object.keys(states).length > 0;
 }
 
-export function serializeTimingStateMap(states: Map<string, EntryTimingState>): Record<string, LorebookEntryTimingState> {
+export function serializeTimingStateMap(
+  states: Map<string, EntryTimingState>,
+): Record<string, LorebookEntryTimingState> {
   const record: Record<string, LorebookEntryTimingState> = {};
   for (const [entryId, state] of states) {
     record[entryId] = {
@@ -342,7 +344,9 @@ export async function processLorebooks(
       totalEntries: 0,
       totalTokensEstimate: 0,
       activatedEntryIds: [],
-      ...(!previewOnly && hasSerializedTimingStates(options?.entryTimingStates) ? { updatedEntryTimingStates: {} } : {}),
+      ...(!previewOnly && hasSerializedTimingStates(options?.entryTimingStates)
+        ? { updatedEntryTimingStates: {} }
+        : {}),
     };
   }
 

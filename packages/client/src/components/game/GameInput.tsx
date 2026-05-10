@@ -36,7 +36,7 @@ interface GameInputProps {
   isStreaming: boolean;
   /** When true, renders without the bottom-bar chrome (for embedding inside narration box) */
   inline?: boolean;
-  /** Key for persisting the input draft to sessionStorage (e.g. chatId) */
+  /** Key for persisting the input draft to localStorage (e.g. chatId) */
   draftKey?: string;
   /** Increment to request focus on the textarea (used by the Interrupt button to jump the player into typing). */
   focusToken?: number;
@@ -49,6 +49,43 @@ interface GameInputProps {
 }
 
 const QUICK_DICE = ["d20", "d6", "2d6", "d10", "d100", "d4", "d8", "d12"];
+
+function readGameInputDraft(storageKey: string | null): string {
+  if (!storageKey) return "";
+  try {
+    const stored = localStorage.getItem(storageKey);
+    if (stored !== null) return stored;
+    const legacy = sessionStorage.getItem(storageKey);
+    if (legacy !== null) {
+      localStorage.setItem(storageKey, legacy);
+      sessionStorage.removeItem(storageKey);
+      return legacy;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+function writeGameInputDraft(storageKey: string | null, value: string): void {
+  if (!storageKey) return;
+  try {
+    localStorage.setItem(storageKey, value);
+    sessionStorage.removeItem(storageKey);
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearGameInputDraft(storageKey: string | null): void {
+  if (!storageKey) return;
+  try {
+    localStorage.removeItem(storageKey);
+    sessionStorage.removeItem(storageKey);
+  } catch {
+    /* ignore */
+  }
+}
 
 function formatDiceResultTag(result: DiceRollResult): string {
   const rollDetail =
@@ -74,14 +111,7 @@ export function GameInput({
   const enterToSend = useUIStore((s) => s.enterToSendGame);
   const speechToTextEnabled = useUIStore((s) => s.speechToTextEnabled);
   const storageKey = draftKey ? `game-input-draft:${draftKey}` : null;
-  const [text, setText] = useState(() => {
-    if (!storageKey) return "";
-    try {
-      return sessionStorage.getItem(storageKey) ?? "";
-    } catch {
-      return "";
-    }
-  });
+  const [text, setText] = useState(() => readGameInputDraft(storageKey));
   const [showDice, setShowDice] = useState(false);
   const [customDice, setCustomDice] = useState("");
   const [queuedDice, setQueuedDice] = useState<string | null>(null);
@@ -108,6 +138,16 @@ export function GameInput({
     }
   }, [activeChat?.metadata]);
   const showDraftTranslateButton = chatMetadata.showInputTranslateButton === true;
+
+  useEffect(() => {
+    const draft = readGameInputDraft(storageKey);
+    setText(draft);
+    requestAnimationFrame(() => {
+      if (!inputRef.current) return;
+      inputRef.current.style.height = "auto";
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
+    });
+  }, [storageKey]);
 
   useEffect(() => {
     if (addressMode !== "party" || hasPartyMembers) return;
@@ -142,26 +182,14 @@ export function GameInput({
   const updateText = useCallback(
     (value: string) => {
       setText(value);
-      if (storageKey) {
-        try {
-          sessionStorage.setItem(storageKey, value);
-        } catch {
-          /* */
-        }
-      }
+      writeGameInputDraft(storageKey, value);
     },
     [storageKey],
   );
 
   /** Clear the persisted draft */
   const clearDraft = useCallback(() => {
-    if (storageKey) {
-      try {
-        sessionStorage.removeItem(storageKey);
-      } catch {
-        /* */
-      }
-    }
+    clearGameInputDraft(storageKey);
   }, [storageKey]);
 
   const handleAddressModeSelect = useCallback((nextMode: Exclude<AddressMode, "scene">) => {

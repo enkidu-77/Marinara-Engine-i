@@ -109,7 +109,7 @@ When you launch Marinara Engine via `./start.sh` from a git checkout, the launch
 
 ### In-App Update Check
 
-Go to **Settings → Advanced → Updates** and click **Check for Updates**. If a new version is available, click **Apply Update** to pull and rebuild from within the app. When it finishes, relaunch Marinara Engine from `./start.sh` to start the updated build.
+Go to **Settings → Advanced → Updates** and click **Check for Updates** to see whether a new release exists. The in-app **Apply Update** button is disabled by default; to enable it, set `UPDATES_APPLY_ENABLED=true`, set `ADMIN_SECRET`, and save that same secret in **Settings → Advanced → Admin Access**. Otherwise, relaunch Marinara Engine from `./start.sh` to let the launcher update the app.
 
 ### Manual Update
 

@@ -214,6 +214,8 @@ export interface NpcPortraitRequest {
   promptOverridesStorage?: PromptOverridesStorage;
   size?: ImageGenerationSize;
   promptOverride?: string;
+  /** When true, overwrite an existing generated NPC portrait instead of reusing it. */
+  force?: boolean;
 }
 
 export async function buildNpcPortraitImagePrompt(req: NpcPortraitRequest): Promise<string> {
@@ -236,8 +238,8 @@ export async function generateNpcPortrait(req: NpcPortraitRequest): Promise<stri
   const avatarDir = join(NPC_AVATAR_DIR, req.chatId);
   const avatarPath = join(avatarDir, `${slug}.png`);
 
-  // Skip if already exists
-  if (existsSync(avatarPath)) {
+  // Skip if already exists unless the caller explicitly asked for a fresh portrait.
+  if (!req.force && existsSync(avatarPath)) {
     return `/api/avatars/npc/${req.chatId}/${slug}.png`;
   }
 

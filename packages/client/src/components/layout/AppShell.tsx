@@ -499,9 +499,7 @@ export function AppShell() {
       setTrackerPanelTop((current) => (current === nextTop ? current : nextTop));
       return;
     }
-    const anchors = Array.from(
-      (root ?? document).querySelectorAll<HTMLElement>(TRACKER_PANEL_ANCHOR_SELECTOR),
-    );
+    const anchors = Array.from((root ?? document).querySelectorAll<HTMLElement>(TRACKER_PANEL_ANCHOR_SELECTOR));
     const visibleAnchor = anchors.find((anchor) => {
       const rect = anchor.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && window.getComputedStyle(anchor).display !== "none";

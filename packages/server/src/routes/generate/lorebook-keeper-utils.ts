@@ -273,8 +273,7 @@ export function mergeLorebookKeeperUpdateContent(args: {
   replacementContent: unknown;
   newFacts: unknown;
 }): string {
-  const existing =
-    typeof args.existingContent === "string" ? dedupeKeeperContentParagraphs(args.existingContent) : "";
+  const existing = typeof args.existingContent === "string" ? dedupeKeeperContentParagraphs(args.existingContent) : "";
   const replacement =
     typeof args.replacementContent === "string" ? dedupeKeeperContentParagraphs(args.replacementContent) : "";
   const facts = normalizeKeeperFacts(args.newFacts);

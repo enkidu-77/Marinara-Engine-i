@@ -20,6 +20,7 @@ export interface SlashCommand {
 
 export interface SlashCommandContext {
   chatId: string;
+  mode?: "conversation" | "roleplay";
   /** Trigger an LLM generation (with optional user message) */
   generate: (params: {
     chatId: string;
@@ -38,6 +39,10 @@ export interface SlashCommandContext {
   invalidate: () => void;
   /** Character names in the current chat */
   characterNames: string[];
+  /** Characters available in the current roleplay scene */
+  characters?: Array<{ id: string; name: string }>;
+  /** Apply a manual sprite expression override */
+  setSpriteExpression?: (characterId: string, expression: string) => void | Promise<void>;
 }
 
 export interface SlashCommandResult {
@@ -138,6 +143,72 @@ function parseImpersonatePromptArg(args: string): string {
   return prompt.trim();
 }
 
+function parseNamedArgs(input: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  const argPattern = /([A-Za-z][\w-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))/g;
+  let match: RegExpExecArray | null;
+  while ((match = argPattern.exec(input))) {
+    values[match[1]!.toLowerCase()] = (match[2] ?? match[3] ?? match[4] ?? "").trim();
+  }
+  return values;
+}
+
+function normalizeLookup(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function findSceneCharacter(
+  characters: Array<{ id: string; name: string }>,
+  name: string,
+): { id: string; name: string } | null {
+  const normalized = normalizeLookup(name);
+  if (!normalized) return null;
+  return (
+    characters.find((character) => normalizeLookup(character.name) === normalized) ??
+    characters.find((character) => normalizeLookup(character.name).includes(normalized)) ??
+    null
+  );
+}
+
+async function listSpriteExpressions(characterId: string): Promise<string[]> {
+  try {
+    const sprites = await api.get<Array<{ expression?: string }>>(`/sprites/${encodeURIComponent(characterId)}`);
+    const expressions = sprites
+      .map((sprite) => sprite.expression?.trim())
+      .filter((expression): expression is string => !!expression);
+    return Array.from(new Set(expressions)).sort((a, b) => a.localeCompare(b));
+  } catch {
+    return [];
+  }
+}
+
+async function buildEmoteListFeedback(characters: Array<{ id: string; name: string }>): Promise<string> {
+  const rows = await Promise.all(
+    characters.map(async (character) => {
+      const expressions = await listSpriteExpressions(character.id);
+      return `${character.name}: ${expressions.length > 0 ? expressions.join(", ") : "no uploaded expression sprites"}`;
+    }),
+  );
+
+  return [
+    "Available Emotes:",
+    "",
+    ...rows,
+    "",
+    'Use /emote name="Character" expression="expression" to switch one manually.',
+  ].join("\n");
+}
+
+function matchSpriteExpression(expressions: string[], requested: string): string | null {
+  const normalized = normalizeLookup(requested);
+  if (!normalized) return null;
+  return (
+    expressions.find((expression) => normalizeLookup(expression) === normalized) ??
+    expressions.find((expression) => normalizeLookup(expression).includes(normalized)) ??
+    null
+  );
+}
+
 // ── Message index parser (for /hide and /unhide) ────────────────
 
 /**
@@ -161,8 +232,7 @@ function parseMessageIndices(input: string): number[] | null {
       const [left, right] = segment.split("-", 2);
       const start = Number.parseInt(left!.trim(), 10);
       const end = Number.parseInt(right!.trim(), 10);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 1 || end < 1)
-        return null;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 1 || end < 1) return null;
       const lo = Math.min(start, end);
       const hi = Math.max(start, end);
       for (let i = lo; i <= hi; i++) indices.add(i);
@@ -269,6 +339,80 @@ const COMMANDS: SlashCommand[] = [
         userMessage: `[Respond as ${match}]`,
       });
       return { handled: true };
+    },
+  },
+  {
+    name: "emote",
+    aliases: ["emotion", "sprite"],
+    description: "List or switch roleplay sprite expressions",
+    usage: '/emote name="Character" expression="expression"',
+    local: true,
+    async execute(args, ctx) {
+      const sceneCharacters = ctx.characters ?? [];
+      if (sceneCharacters.length === 0) {
+        return {
+          handled: true,
+          feedback: "No roleplay characters are available for /emote in this chat.",
+        };
+      }
+
+      const namedArgs = parseNamedArgs(args);
+      const requestedName = namedArgs.name ?? namedArgs.character ?? "";
+      const requestedExpression = namedArgs.expression ?? namedArgs.emotion ?? namedArgs.sprite ?? "";
+
+      if (!args.trim() || (!requestedExpression && !requestedName)) {
+        return { handled: true, feedback: await buildEmoteListFeedback(sceneCharacters) };
+      }
+
+      let target = requestedName ? findSceneCharacter(sceneCharacters, requestedName) : null;
+      if (!target && !requestedName && sceneCharacters.length === 1) {
+        target = sceneCharacters[0]!;
+      }
+
+      if (!target) {
+        return {
+          handled: true,
+          feedback: `Character "${requestedName || "(missing)"}" not found. Available: ${sceneCharacters
+            .map((character) => character.name)
+            .join(", ")}`,
+        };
+      }
+
+      const availableExpressions = await listSpriteExpressions(target.id);
+      if (!requestedExpression) {
+        return {
+          handled: true,
+          feedback: [
+            `Available Emotes for ${target.name}:`,
+            "",
+            availableExpressions.length > 0 ? availableExpressions.join(", ") : "No uploaded expression sprites.",
+            "",
+            `Use /emote name="${target.name}" expression="expression" to switch one manually.`,
+          ].join("\n"),
+        };
+      }
+
+      const expression = matchSpriteExpression(availableExpressions, requestedExpression);
+      if (!expression) {
+        return {
+          handled: true,
+          feedback:
+            availableExpressions.length > 0
+              ? `Expression "${requestedExpression}" not found for ${target.name}. Available: ${availableExpressions.join(", ")}`
+              : `No uploaded expression sprites found for ${target.name}.`,
+        };
+      }
+
+      if (!ctx.setSpriteExpression) {
+        return {
+          handled: true,
+          feedback: "Sprite switching is only available in roleplay chats with sprites enabled.",
+        };
+      }
+
+      await ctx.setSpriteExpression(target.id, expression);
+      ctx.invalidate();
+      return { handled: true, feedback: `Emote updated: ${target.name} -> ${expression}` };
     },
   },
   {

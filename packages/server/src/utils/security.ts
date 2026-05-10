@@ -253,7 +253,9 @@ function isBlockedResolvedAddress(address: string, policy: OutboundUrlPolicy): b
   return !(policy.allowLoopback && isLoopbackIp(address));
 }
 
-function preferIpv4Records(records: Array<{ address: string; family: 4 | 6 }>): Array<{ address: string; family: 4 | 6 }> {
+function preferIpv4Records(
+  records: Array<{ address: string; family: 4 | 6 }>,
+): Array<{ address: string; family: 4 | 6 }> {
   return [...records].sort((a, b) => a.family - b.family);
 }
 
@@ -263,7 +265,9 @@ function flagHint(policy: OutboundUrlPolicy): string {
 }
 
 function describeBlockedAddresses(addresses: Array<{ address: string }>, policy: OutboundUrlPolicy): string {
-  const blocked = addresses.filter((record) => isBlockedResolvedAddress(record.address, policy)).map((record) => record.address);
+  const blocked = addresses
+    .filter((record) => isBlockedResolvedAddress(record.address, policy))
+    .map((record) => record.address);
   if (blocked.length === 0) return "";
   return ` (resolved to ${blocked.join(", ")})`;
 }
@@ -289,10 +293,7 @@ async function validateResolvedAddresses(
     const target = originalUrl ?? hostname;
     throw new Error(`Refused to fetch ${target}: hostname '${hostname}' did not resolve to any address.`);
   }
-  if (
-    !policy.allowLocal &&
-    addresses.some((record) => isBlockedResolvedAddress(record.address, policy))
-  ) {
+  if (!policy.allowLocal && addresses.some((record) => isBlockedResolvedAddress(record.address, policy))) {
     // Genuine policy.allowLocal-driven rejection — naming the flag is useful.
     const target = originalUrl ?? hostname;
     throw new Error(

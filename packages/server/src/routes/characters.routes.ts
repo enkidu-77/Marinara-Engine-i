@@ -14,6 +14,10 @@ import {
 import type { ExportEnvelope } from "@marinara-engine/shared";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createCharacterGalleryStorage } from "../services/storage/character-gallery.storage.js";
+import { createConnectionsStorage } from "../services/storage/connections.storage.js";
+import { generateImage } from "../services/image/image-generation.js";
+import { resolveConnectionImageDefaults } from "../services/image/image-generation-defaults.js";
+import { loadImageGenerationUserSettings } from "../services/image/image-generation-settings.js";
 import { writeFile, mkdir, readFile } from "fs/promises";
 import { join } from "path";
 import { DATA_DIR } from "../utils/data-dir.js";
@@ -42,6 +46,58 @@ function toSafeExportName(name: string, fallback: string) {
     .replace(/\s+/g, " ")
     .trim();
   return sanitized || fallback;
+}
+
+type AvatarGenerationPromptOverride = {
+  id: string;
+  prompt: string;
+};
+
+type AvatarGenerationBody = {
+  connectionId?: string;
+  name?: string;
+  appearance?: string;
+  referenceImages?: string[];
+  width?: number;
+  height?: number;
+  promptOverrides?: AvatarGenerationPromptOverride[];
+};
+
+const avatarGenerationPromptId = (name: string) =>
+  `avatar:${
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 120) || "character"
+  }`;
+
+function buildAvatarGenerationPrompt(body: AvatarGenerationBody): string {
+  const name = body.name?.trim() || "Character";
+  const appearance = body.appearance?.trim() || name;
+  return [
+    `Create a polished character avatar portrait for ${name}.`,
+    `Canonical appearance: ${appearance}.`,
+    `Composition: centered face-and-shoulders portrait, readable expression, clear silhouette, suitable as a chat avatar.`,
+    `Avoid text, captions, logos, watermarks, borders, UI, collage layouts, duplicate faces, extra people, and cropped-off heads.`,
+  ].join(" ");
+}
+
+async function resolveAvatarGenerationConnection(app: FastifyInstance, body: AvatarGenerationBody) {
+  if (!body.connectionId) {
+    return { error: "connectionId is required" as const };
+  }
+  if (!body.appearance?.trim()) {
+    return { error: "appearance description is required" as const };
+  }
+
+  const connections = createConnectionsStorage(app.db);
+  const conn = await connections.getWithKey(body.connectionId);
+  if (!conn || conn.provider !== "image_generation") {
+    return { error: "Image generation connection not found or could not be decrypted" as const };
+  }
+  return { conn };
 }
 
 type ExportFormat = "native" | "compatible";
@@ -119,6 +175,75 @@ export async function charactersRoutes(app: FastifyInstance) {
 
   app.get("/", async () => {
     return storage.list();
+  });
+
+  app.post("/avatar-generation/preview", async (req, reply) => {
+    const body = req.body as AvatarGenerationBody;
+    const resolved = await resolveAvatarGenerationConnection(app, body);
+    if ("error" in resolved) return reply.status(400).send({ error: resolved.error });
+
+    const imageSettings = await loadImageGenerationUserSettings(app.db);
+    const width = body.width ?? imageSettings.portrait.width;
+    const height = body.height ?? imageSettings.portrait.height;
+    const prompt = buildAvatarGenerationPrompt(body);
+
+    return {
+      items: [
+        {
+          id: avatarGenerationPromptId(body.name ?? "character"),
+          kind: "avatar",
+          title: `Avatar: ${body.name?.trim() || "Character"}`,
+          prompt,
+          width,
+          height,
+        },
+      ],
+    };
+  });
+
+  app.post("/avatar-generation", async (req, reply) => {
+    const body = req.body as AvatarGenerationBody;
+    const resolved = await resolveAvatarGenerationConnection(app, body);
+    if ("error" in resolved) return reply.status(400).send({ error: resolved.error });
+
+    const conn = resolved.conn;
+    const imageSettings = await loadImageGenerationUserSettings(app.db);
+    const width = body.width ?? imageSettings.portrait.width;
+    const height = body.height ?? imageSettings.portrait.height;
+    const promptOverrideById = new Map((body.promptOverrides ?? []).map((item) => [item.id, item.prompt.trim()]));
+    const prompt =
+      promptOverrideById.get(avatarGenerationPromptId(body.name ?? "character")) ?? buildAvatarGenerationPrompt(body);
+    const referenceImages = (body.referenceImages ?? [])
+      .map((image) => image.trim())
+      .filter((image) => image.startsWith("data:image/") || /^[A-Za-z0-9+/=\s]+$/.test(image))
+      .slice(0, 4);
+
+    const imgModel = conn.model || "";
+    const imgBaseUrl = conn.baseUrl || "https://image.pollinations.ai";
+    const imgApiKey = conn.apiKey || "";
+    const imgSource = conn.imageGenerationSource || imgModel;
+    const imgServiceHint = conn.imageService || imgSource;
+    const imageDefaults = resolveConnectionImageDefaults(conn);
+
+    try {
+      const result = await generateImage(imgModel, imgBaseUrl, imgApiKey, imgServiceHint, {
+        prompt,
+        model: imgModel || undefined,
+        width,
+        height,
+        referenceImage: referenceImages[0],
+        referenceImages: referenceImages.length > 1 ? referenceImages : undefined,
+        comfyWorkflow: conn.comfyuiWorkflow || undefined,
+        imageDefaults,
+      });
+      return {
+        image: `data:${result.mimeType};base64,${result.base64}`,
+        prompt,
+      };
+    } catch (err) {
+      req.log.error(err, "Avatar generation failed");
+      return reply.status(500).send({ error: err instanceof Error ? err.message : "Avatar generation failed" });
+    }
   });
 
   app.get<{ Params: { id: string } }>("/:id", async (req, reply) => {

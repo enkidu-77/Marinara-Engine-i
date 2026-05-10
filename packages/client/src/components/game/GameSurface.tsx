@@ -64,6 +64,7 @@ import { normalizeGameSegmentEdit, serializeGameSegmentEdit, type GameSegmentEdi
 import { useSceneAnalysis } from "../../hooks/use-scene-analysis";
 import { useSidecarStore } from "../../stores/sidecar.store";
 import { parsePartyDialogue } from "../../lib/party-dialogue-parser";
+import { ActiveWorldInfoButton, ActiveWorldInfoModal } from "../chat/ActiveWorldInfoButton";
 import type {
   PartyDialogueLine,
   CombatSummary,
@@ -125,6 +126,7 @@ type GameAssetGenerationPayload = {
   chatId: string;
   backgroundTag?: string;
   npcsNeedingAvatars?: Array<{ name: string; description: string }>;
+  forceNpcAvatarNames?: string[];
   illustration?: import("@marinara-engine/shared").SceneIllustrationRequest;
   debugMode?: boolean;
   imageSizes?: {
@@ -162,6 +164,15 @@ type GameSpotifyPlayResponse = {
   repeatState: "off" | "track" | "context" | null;
   device: string | null;
 };
+
+type GameDirectAddressMode = "party" | "gm";
+
+function getGameDirectAddressMode(content: string | null | undefined): GameDirectAddressMode | null {
+  const normalized = content?.trimStart().toLowerCase() ?? "";
+  if (normalized.startsWith("[to the party]")) return "party";
+  if (normalized.startsWith("[to the gm]")) return "gm";
+  return null;
+}
 
 function getConfiguredGameAssetImageSizes(): NonNullable<GameAssetGenerationPayload["imageSizes"]> {
   const settings = useUIStore.getState();
@@ -870,13 +881,7 @@ const SpriteOverlay = lazy(async () => {
 });
 
 import { Modal } from "../ui/Modal";
-import type {
-  Chat,
-  SessionSummary,
-  Combatant,
-  Message,
-  GameCombatStateSnapshot,
-} from "@marinara-engine/shared";
+import type { Chat, SessionSummary, Combatant, Message, GameCombatStateSnapshot } from "@marinara-engine/shared";
 import type { CharacterMap, PersonaInfo } from "../chat/chat-area.types";
 
 /** Typewriter component for the intro screen — reveals text character-by-character. */
@@ -1422,6 +1427,7 @@ function renameInventoryItem<T extends { name: string; quantity: number }>(
 import {
   AlertTriangle,
   BookOpen,
+  Globe,
   HelpCircle,
   History,
   Image,
@@ -1646,6 +1652,8 @@ interface GameSurfaceProps {
   chatBackground?: string | null;
   onOpenSettings: () => void;
   onDeleteMessage: (messageId: string) => void;
+  multiSelectMode?: boolean;
+  selectedMessageIds?: Set<string>;
 }
 
 export function GameSurface({
@@ -1660,6 +1668,8 @@ export function GameSurface({
   chatBackground: _chatBackground,
   onOpenSettings,
   onDeleteMessage,
+  multiSelectMode = false,
+  selectedMessageIds,
   isMessagesLoading,
 }: GameSurfaceProps) {
   // Sync game metadata → store
@@ -1840,6 +1850,7 @@ export function GameSurface({
   const [nextSessionRequest, setNextSessionRequest] = useState("");
   const [jsonRepairRequest, setJsonRepairRequest] = useState<JsonRepairRequest | null>(null);
   const [prepareSessionWidgetsOpen, setPrepareSessionWidgetsOpen] = useState(false);
+  const [prepareInitialWidgetsOpen, setPrepareInitialWidgetsOpen] = useState(false);
   const [savingSessionSummary, setSavingSessionSummary] = useState<number | null>(null);
   const [savingCurrentSessionSecrets, setSavingCurrentSessionSecrets] = useState(false);
   const [activeChoices, setActiveChoices] = useState<string[] | null>(null);
@@ -2050,6 +2061,7 @@ export function GameSurface({
   const imagePromptReviewResolveRef = useRef<((overrides: GameImagePromptOverride[] | null) => void) | null>(null);
   const [volumePopoverOpen, setVolumePopoverOpen] = useState(false);
   const [retryMenuOpen, setRetryMenuOpen] = useState(false);
+  const [mobileWorldInfoOpen, setMobileWorldInfoOpen] = useState(false);
   const [persistedGameAudioSettings] = useState(readPersistedGameAudioSettings);
   const [masterVolume, setMasterVolume] = useState(persistedGameAudioSettings.masterVolume);
   const [musicVolume, setMusicVolume] = useState(persistedGameAudioSettings.musicVolume);
@@ -2080,6 +2092,7 @@ export function GameSurface({
   const [introPresented, setIntroPresented] = useState(false);
   const npcPortraitUploadInputRef = useRef<HTMLInputElement>(null);
   const [pendingNpcPortraitUploadName, setPendingNpcPortraitUploadName] = useState<string | null>(null);
+  const [generatingNpcPortraitNames, setGeneratingNpcPortraitNames] = useState<Set<string>>(() => new Set());
 
   const narrationAutoPlayBlocked =
     !!activeReadable ||
@@ -2620,6 +2633,18 @@ export function GameSurface({
     return null;
   }, [messages]);
 
+  const latestAssistantDirectAddressMode = useMemo(() => {
+    if (!latestAssistantMsg) return null;
+    const assistantIndex = messages.findIndex((message) => message.id === latestAssistantMsg.id);
+    if (assistantIndex < 0) return null;
+    for (let i = assistantIndex - 1; i >= 0; i--) {
+      const message = messages[i]!;
+      if (message.role === "user") return getGameDirectAddressMode(message.content);
+      if (message.role === "assistant" || message.role === "narrator") return null;
+    }
+    return null;
+  }, [latestAssistantMsg, messages]);
+
   // Keep latest assistant message in a ref so the Zustand subscription can read it
   const latestAssistantMsgRef = useRef(latestAssistantMsg);
   latestAssistantMsgRef.current = latestAssistantMsg;
@@ -2822,9 +2847,9 @@ export function GameSurface({
   // Track which message has had its scene effects prepared so narration
   // isn't displayed until backgrounds/music/etc. are ready.
   const sceneReadyMsgIdRef = useRef<string | undefined>(undefined);
-  const applySceneResultRef = useRef<((result: import("@marinara-engine/shared").SceneAnalysis) => void | Promise<void>) | null>(
-    null,
-  );
+  const applySceneResultRef = useRef<
+    ((result: import("@marinara-engine/shared").SceneAnalysis) => void | Promise<void>) | null
+  >(null);
   const [sceneReadyTick, setSceneReadyTick] = useState(0);
   void sceneReadyTick; // used only to trigger re-renders
 
@@ -3049,18 +3074,15 @@ export function GameSurface({
   // Shared helper used by combat-end + return-to-pre-combat-turn so both paths reliably
   // wipe the persisted snapshot, even if the exploration-state PATCH is still in flight
   // when the user refreshes.
-  const clearCombatSnapshot = useCallback(
-    (chatId: string | null) => {
-      if (!chatId) return;
-      if (combatPersistTimer.current) {
-        clearTimeout(combatPersistTimer.current);
-        combatPersistTimer.current = null;
-      }
-      combatPendingSnapshotRef.current = null;
-      api.patch(`/chats/${chatId}/metadata`, { gameCombatState: null }).catch(() => {});
-    },
-    [],
-  );
+  const clearCombatSnapshot = useCallback((chatId: string | null) => {
+    if (!chatId) return;
+    if (combatPersistTimer.current) {
+      clearTimeout(combatPersistTimer.current);
+      combatPersistTimer.current = null;
+    }
+    combatPendingSnapshotRef.current = null;
+    api.patch(`/chats/${chatId}/metadata`, { gameCombatState: null }).catch(() => {});
+  }, []);
   useEffect(() => {
     if (combatRestoredChatIdRef.current !== activeChatId) return;
     if (!combatParty || !combatEnemies || gameState !== "combat") return;
@@ -3234,6 +3256,7 @@ export function GameSurface({
     hasAsyncScenePrep &&
     !isStreaming &&
     latestAssistantMsg != null &&
+    !latestAssistantDirectAddressMode &&
     sceneReadyMsgIdRef.current !== latestAssistantMsg.id &&
     !sceneAnalysisFailed;
 
@@ -3253,6 +3276,7 @@ export function GameSurface({
 
   useEffect(() => {
     if (!latestAssistantMsg?.content || isStreaming) return;
+    if (latestAssistantDirectAddressMode) return;
     if (weatherMsgRef.current === latestAssistantMsg.id) return;
     weatherMsgRef.current = latestAssistantMsg.id;
     // Map game state to weather action for probabilistic change
@@ -3261,6 +3285,7 @@ export function GameSurface({
   }, [
     latestAssistantMsg?.content,
     latestAssistantMsg?.id,
+    latestAssistantDirectAddressMode,
     isStreaming,
     activeChatId,
     updateWeather,
@@ -3326,6 +3351,7 @@ export function GameSurface({
       .catch(() => {});
 
     const tags = parseGmTags(msg.content);
+    const directAddressMode = latestAssistantDirectAddressMode;
     const suppressInteractiveCommands = interruptedInteractiveCommandKeysRef.current.has(
       interactiveCommandKey(activeChatId, msg.id),
     );
@@ -3477,6 +3503,12 @@ export function GameSurface({
 
     if (tags.partyChanges.length > 0) {
       handlePartyChangeCommands(msg.id, tags.partyChanges);
+    }
+
+    if (directAddressMode) {
+      console.warn("[scene-wrapup] skipping scene analysis for direct %s address", directAddressMode);
+      markSceneReady(msg.id);
+      return;
     }
 
     console.warn("[scene-wrapup] path:", useSidecar ? "sidecar" : sceneConnId ? "connection" : "inline-only");
@@ -3747,7 +3779,8 @@ export function GameSurface({
         let preview: { items: GameImagePromptReviewItem[] } | undefined;
         try {
           preview = await withTimeout(
-            (signal) => api.post<{ items: GameImagePromptReviewItem[] }>("/game/generate-assets/preview", payload, { signal }),
+            (signal) =>
+              api.post<{ items: GameImagePromptReviewItem[] }>("/game/generate-assets/preview", payload, { signal }),
             GAME_ASSET_PREVIEW_TIMEOUT_MS,
             () => {
               toast.error("Image prompt preview timed out. Continuing with the default prompts.");
@@ -4399,6 +4432,28 @@ export function GameSurface({
   const startSessionLocked = startSession.isPending || startSessionRequested;
   const gameId = (chatMeta.gameId as string) || null;
 
+  const handleStartGameNow = useCallback(() => {
+    if (startGame.isPending || startGameRequested || startGameGuardRef.current) return;
+    startGameGuardRef.current = true;
+    setStartGameRequested(true);
+    console.log("[GameSurface] Start Game clicked, chatId:", activeChatId);
+    startGame.mutate(
+      { chatId: activeChatId },
+      {
+        onSuccess: (res) => {
+          console.log("[GameSurface] startGame succeeded:", res);
+          generateInitialGameTurn();
+          console.log("[GameSurface] initial game turn generation requested");
+        },
+        onError: (err) => {
+          startGameGuardRef.current = false;
+          setStartGameRequested(false);
+          console.error("[GameSurface] startGame failed:", err);
+        },
+      },
+    );
+  }, [activeChatId, generateInitialGameTurn, startGame, startGameRequested]);
+
   const handleJsonRepairError = useCallback((error: unknown) => {
     const request = getJsonRepairRequest(error);
     if (!request) return false;
@@ -4546,6 +4601,76 @@ export function GameSurface({
       }
     },
     [activeChatId, updateChatMetadata],
+  );
+
+  const handleNpcPortraitGenerate = useCallback(
+    async (npcName: string) => {
+      if (!activeChatId) return;
+
+      const displayName = cleanGameNpcDisplayName(npcName).trim();
+      const normalizedName = displayName.toLowerCase();
+      if (!normalizedName) return;
+
+      if (!chatMeta.enableSpriteGeneration || !chatMeta.gameImageConnectionId) {
+        toast.error("Enable Game image generation and choose an image connection first.");
+        return;
+      }
+
+      const currentNpcs = useGameModeStore.getState().npcs;
+      const targetNpc =
+        currentNpcs.find((npc) => npc.name.trim().toLowerCase() === normalizedName) ??
+        ({
+          id: buildPartyNpcId(displayName),
+          name: displayName,
+          emoji: "👤",
+          description: "",
+          descriptionSource: "user",
+          gender: null,
+          pronouns: null,
+          location: "",
+          reputation: 0,
+          met: true,
+          notes: [],
+        } satisfies GameNpc);
+
+      setGeneratingNpcPortraitNames((current) => new Set(current).add(normalizedName));
+      try {
+        const result = await runGameAssetGeneration(
+          {
+            chatId: activeChatId,
+            npcsNeedingAvatars: [{ name: targetNpc.name, description: targetNpc.description ?? "" }],
+            forceNpcAvatarNames: [targetNpc.name],
+            debugMode: useUIStore.getState().debugMode,
+          },
+          { allowPromptReview: true },
+        );
+        if (!result) return;
+        await applyGeneratedAssets(result);
+        const generated = result.generatedNpcAvatars.find(
+          (avatar) => avatar.name.trim().toLowerCase() === targetNpc.name.trim().toLowerCase(),
+        );
+        if (generated) {
+          toast.success(`${targetNpc.name} portrait generated.`);
+        } else {
+          toast.error(`No portrait was generated for ${targetNpc.name}.`);
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : `Failed to generate ${displayName} portrait.`);
+      } finally {
+        setGeneratingNpcPortraitNames((current) => {
+          const next = new Set(current);
+          next.delete(normalizedName);
+          return next;
+        });
+      }
+    },
+    [
+      activeChatId,
+      applyGeneratedAssets,
+      chatMeta.enableSpriteGeneration,
+      chatMeta.gameImageConnectionId,
+      runGameAssetGeneration,
+    ],
   );
 
   const handleRemoveNpcFromJournal = useCallback(
@@ -5315,7 +5440,9 @@ export function GameSurface({
         )
           .map((enemy) => ({
             name: String(enemy.name ?? "").trim(),
-            description: String(enemy.prompt ?? "").trim().slice(0, 1000),
+            description: String(enemy.prompt ?? "")
+              .trim()
+              .slice(0, 1000),
           }))
           .filter((enemy) => enemy.name && enemy.description)
           .slice(0, 10);
@@ -5348,10 +5475,9 @@ export function GameSurface({
           void requestAssetGeneration(assetPayload, { allowPromptReview: false }).then((assetResult) => {
             if (!assetResult?.generatedNpcAvatars?.length) return;
             const avatarByName = new Map(
-              assetResult.generatedNpcAvatars.map((entry) => [
-                normalizeSceneAssetName(entry.name),
-                entry.avatarUrl,
-              ] as const),
+              assetResult.generatedNpcAvatars.map(
+                (entry) => [normalizeSceneAssetName(entry.name), entry.avatarUrl] as const,
+              ),
             );
             setCombatEnemies((currentEnemies) =>
               currentEnemies
@@ -5406,9 +5532,7 @@ export function GameSurface({
   useEffect(() => {
     if (!queuedQte || !latestAssistantMsg?.id) return;
     if (queuedQte.messageId !== latestAssistantMsg.id) return;
-    if (
-      interruptedInteractiveCommandKeysRef.current.has(interactiveCommandKey(activeChatId, queuedQte.messageId))
-    ) {
+    if (interruptedInteractiveCommandKeysRef.current.has(interactiveCommandKey(activeChatId, queuedQte.messageId))) {
       setQueuedQte(null);
       return;
     }
@@ -5985,12 +6109,14 @@ export function GameSurface({
       partyArcs: Array.isArray(chatMeta.gamePartyArcs)
         ? (chatMeta.gamePartyArcs as CurrentSessionSecrets["partyArcs"])
         : [],
+      maps: availableMaps,
       npcs: Array.isArray(chatMeta.gameNpcs) ? (chatMeta.gameNpcs as GameNpc[]) : [],
       characterCards: Array.isArray(chatMeta.gameCharacterCards)
         ? (chatMeta.gameCharacterCards as Array<Record<string, unknown>>)
         : [],
     }),
     [
+      availableMaps,
       chatMeta.gameCharacterCards,
       chatMeta.gameNpcs,
       chatMeta.gamePartyArcs,
@@ -6063,6 +6189,10 @@ export function GameSurface({
     async (nextSecrets: CurrentSessionSecrets) => {
       if (!activeChatId) return;
 
+      const nextActiveMap =
+        nextSecrets.maps.find((map, index) => getGameMapId(map, index) === activeMapId) ?? nextSecrets.maps[0] ?? null;
+      const nextActiveMapId = nextActiveMap ? getGameMapId(nextActiveMap) : null;
+
       setSavingCurrentSessionSecrets(true);
       try {
         await updateChatMetadata.mutateAsync({
@@ -6071,10 +6201,14 @@ export function GameSurface({
           gameStoryArc: nextSecrets.storyArc,
           gamePlotTwists: nextSecrets.plotTwists,
           gamePartyArcs: nextSecrets.partyArcs,
+          gameMaps: nextSecrets.maps,
+          gameMap: nextActiveMap,
+          activeGameMapId: nextActiveMapId,
           gameNpcs: nextSecrets.npcs,
           gameCharacterCards: nextSecrets.characterCards,
         });
         useGameModeStore.getState().setNpcs(nextSecrets.npcs);
+        useGameModeStore.getState().setMaps(nextSecrets.maps, nextActiveMapId);
         toast.success("Current session spoilers updated.");
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to update current session spoilers.";
@@ -6084,7 +6218,7 @@ export function GameSurface({
         setSavingCurrentSessionSecrets(false);
       }
     },
-    [activeChatId, updateChatMetadata],
+    [activeChatId, activeMapId, updateChatMetadata],
   );
 
   const handleRegenerateSessionConclusion = useCallback(
@@ -6148,6 +6282,10 @@ export function GameSurface({
     },
     [sendMessage, sessionInteractive],
   );
+
+  const handleDismissChoices = useCallback(() => {
+    setActiveChoices(null);
+  }, []);
 
   const handleGenerateMap = useCallback(() => {
     if (isStreaming || !sessionInteractive) return;
@@ -6387,6 +6525,12 @@ export function GameSurface({
     }
   }, [sessionStatus]);
 
+  useEffect(() => {
+    if (sessionStatus !== "ready" || introPresented) {
+      setPrepareInitialWidgetsOpen(false);
+    }
+  }, [introPresented, sessionStatus]);
+
   const handleQteSelect = useCallback(
     (action: string, timeRemaining: number) => {
       if (!sessionInteractive) return;
@@ -6402,6 +6546,11 @@ export function GameSurface({
     setActiveQte(null);
     sendMessage('*hesitates too long* [qte_result: status="fail" modifier="-5"]');
   }, [sendMessage, sessionInteractive]);
+
+  const handleDismissQte = useCallback(() => {
+    setActiveQte(null);
+    setQueuedQte(null);
+  }, []);
 
   const handleReturnToPreCombatTurn = useCallback(() => {
     if (!latestAssistantMsg?.id) return;
@@ -6687,6 +6836,15 @@ export function GameSurface({
       return w;
     });
   }, [hudWidgets]);
+
+  const handleStartGameRequest = useCallback(() => {
+    if (startGame.isPending || startGameRequested || startGameGuardRef.current) return;
+    if (normalizedWidgets.length > 0) {
+      setPrepareInitialWidgetsOpen(true);
+      return;
+    }
+    handleStartGameNow();
+  }, [handleStartGameNow, normalizedWidgets.length, startGame.isPending, startGameRequested]);
 
   useEffect(() => {
     if (combatUiActive || normalizedWidgets.length === 0) {
@@ -7021,27 +7179,7 @@ export function GameSurface({
                 </div>
               ) : (
                 <button
-                  onClick={() => {
-                    if (startGame.isPending || startGameRequested || startGameGuardRef.current) return;
-                    startGameGuardRef.current = true;
-                    setStartGameRequested(true);
-                    console.log("[GameSurface] Start Game clicked, chatId:", activeChatId);
-                    startGame.mutate(
-                      { chatId: activeChatId },
-                      {
-                        onSuccess: (res) => {
-                          console.log("[GameSurface] startGame succeeded:", res);
-                          generateInitialGameTurn();
-                          console.log("[GameSurface] initial game turn generation requested");
-                        },
-                        onError: (err) => {
-                          startGameGuardRef.current = false;
-                          setStartGameRequested(false);
-                          console.error("[GameSurface] startGame failed:", err);
-                        },
-                      },
-                    );
-                  }}
+                  onClick={handleStartGameRequest}
                   disabled={startGame.isPending || startGameRequested}
                   className="group flex items-center gap-2 rounded-xl bg-[var(--primary)] px-6 py-3 text-sm font-semibold text-white transition-all hover:scale-105 hover:shadow-lg hover:shadow-[var(--primary)]/30 disabled:opacity-50 disabled:hover:scale-100"
                 >
@@ -7116,6 +7254,11 @@ export function GameSurface({
                   >
                     <History size={14} />
                   </button>
+                  <ActiveWorldInfoButton
+                    chatId={activeChatId}
+                    iconSize={14}
+                    buttonClassName="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/80 backdrop-blur-md transition-colors hover:bg-black/60 hover:text-white"
+                  />
                   {sessionStatus !== "concluded" ? (
                     <button
                       onClick={handleRequestEndSession}
@@ -7283,6 +7426,17 @@ export function GameSurface({
                         >
                           <History size={14} />
                         </button>
+                        <button
+                          onClick={() => {
+                            setMobileWorldInfoOpen(true);
+                            setMobileActionsOpen(false);
+                          }}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+                          title="Active World Info"
+                          aria-label="Active World Info"
+                        >
+                          <Globe size={14} />
+                        </button>
                         {sessionStatus !== "concluded" ? (
                           <button
                             onClick={() => {
@@ -7438,6 +7592,12 @@ export function GameSurface({
                   </div>
                 </div>
               </div>
+
+              <ActiveWorldInfoModal
+                chatId={activeChatId}
+                open={mobileWorldInfoOpen}
+                onClose={() => setMobileWorldInfoOpen(false)}
+              />
 
               {pendingReaction && (
                 <GameElementReaction reaction={pendingReaction} onDismiss={() => setPendingReaction(null)} />
@@ -7618,6 +7778,7 @@ export function GameSurface({
                         <GameChoiceCards
                           choices={activeChoices}
                           onSelect={handleChoiceSelect}
+                          onDismiss={handleDismissChoices}
                           disabled={isStreaming || !sessionInteractive}
                         />
                       </div>
@@ -7711,6 +7872,12 @@ export function GameSurface({
                           onNarrationComplete={handleNarrationComplete}
                           onReadable={handleReadable}
                           onNpcPortraitClick={handleNpcPortraitClick}
+                          onNpcPortraitGenerate={handleNpcPortraitGenerate}
+                          npcPortraitGenerationEnabled={
+                            chatMeta.enableSpriteGeneration === true &&
+                            typeof chatMeta.gameImageConnectionId === "string"
+                          }
+                          generatingNpcPortraitNames={generatingNpcPortraitNames}
                           autoPlayBlocked={narrationAutoPlayBlocked}
                           voicePlaybackBlocked={narrationVoicePlaybackBlocked}
                           gameVoiceVolume={effectiveGameVoiceVolume}
@@ -7722,6 +7889,8 @@ export function GameSurface({
                           onOpenInventory={() => setInventoryOpen(true)}
                           inventoryCount={inventoryItems.length}
                           onDeleteMessage={onDeleteMessage}
+                          multiSelectMode={multiSelectMode}
+                          selectedMessageIds={selectedMessageIds}
                           onDeleteSegment={handleDeleteSegment}
                           onEditMessage={handleEditMessage}
                           segmentEdits={segmentEdits}
@@ -7782,6 +7951,11 @@ export function GameSurface({
                       onNarrationComplete={handleNarrationComplete}
                       onReadable={handleReadable}
                       onNpcPortraitClick={handleNpcPortraitClick}
+                      onNpcPortraitGenerate={handleNpcPortraitGenerate}
+                      npcPortraitGenerationEnabled={
+                        chatMeta.enableSpriteGeneration === true && typeof chatMeta.gameImageConnectionId === "string"
+                      }
+                      generatingNpcPortraitNames={generatingNpcPortraitNames}
                       autoPlayBlocked={narrationAutoPlayBlocked}
                       voicePlaybackBlocked={narrationVoicePlaybackBlocked}
                       gameVoiceVolume={effectiveGameVoiceVolume}
@@ -7793,6 +7967,8 @@ export function GameSurface({
                       onOpenInventory={() => setInventoryOpen(true)}
                       inventoryCount={inventoryItems.length}
                       onDeleteMessage={onDeleteMessage}
+                      multiSelectMode={multiSelectMode}
+                      selectedMessageIds={selectedMessageIds}
                       onDeleteSegment={handleDeleteSegment}
                       onEditMessage={handleEditMessage}
                       segmentEdits={segmentEdits}
@@ -7834,6 +8010,7 @@ export function GameSurface({
                       timerSeconds={activeQte.timer}
                       onSelect={handleQteSelect}
                       onTimeout={handleQteTimeout}
+                      onDismiss={handleDismissQte}
                     />
                   </div>
                 )}
@@ -7975,6 +8152,11 @@ export function GameSurface({
                   npcs={npcs}
                   onClose={() => setJournalOpen(false)}
                   onNpcPortraitClick={handleNpcPortraitClick}
+                  onNpcPortraitGenerate={handleNpcPortraitGenerate}
+                  npcPortraitGenerationEnabled={
+                    chatMeta.enableSpriteGeneration === true && typeof chatMeta.gameImageConnectionId === "string"
+                  }
+                  generatingNpcPortraitNames={generatingNpcPortraitNames}
                   onNpcRemove={handleRemoveNpcFromJournal}
                 />
               )}
@@ -8200,12 +8382,26 @@ export function GameSurface({
       </Modal>
 
       <GameWidgetSessionPrepModal
-        open={prepareSessionWidgetsOpen}
+        open={prepareInitialWidgetsOpen || prepareSessionWidgetsOpen}
         widgets={normalizedWidgets}
         chatId={activeChatId}
-        onClose={() => setPrepareSessionWidgetsOpen(false)}
-        onStartSession={handleStartNewSessionNow}
-        isStartingSession={startSessionLocked}
+        mode={prepareInitialWidgetsOpen ? "initial" : "next"}
+        onClose={() => {
+          if (prepareInitialWidgetsOpen) {
+            setPrepareInitialWidgetsOpen(false);
+            return;
+          }
+          setPrepareSessionWidgetsOpen(false);
+        }}
+        onStartSession={
+          prepareInitialWidgetsOpen
+            ? () => {
+                setPrepareInitialWidgetsOpen(false);
+                handleStartGameNow();
+              }
+            : handleStartNewSessionNow
+        }
+        isStartingSession={prepareInitialWidgetsOpen ? startGame.isPending || startGameRequested : startSessionLocked}
       />
 
       <GameJsonRepairModal

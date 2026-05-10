@@ -117,10 +117,9 @@ export function SecretPlotPanel({
   const draftSignature = useMemo(() => (draft ? draftFingerprint(draft) : null), [draft]);
   const hasUnsavedChanges = !!draft && savedFingerprint !== null && draftSignature !== savedFingerprint;
   const hasArcMemory = !!draft && !!(draft.arcDescription.trim() || draft.arcProtagonist.trim());
-  const saveLabel =
-    !draft
-      ? "Secret plot state unavailable"
-      : saved && !hasUnsavedChanges
+  const saveLabel = !draft
+    ? "Secret plot state unavailable"
+    : saved && !hasUnsavedChanges
       ? "Secret plot state saved"
       : hasUnsavedChanges
         ? "Save secret plot changes"
@@ -348,9 +347,7 @@ export function SecretPlotPanel({
                   <div className="space-y-1.5 border-t border-[var(--border)] px-1.5 py-1.5">
                     {draft.sceneDirections.length === 0 && (
                       <div className="space-y-1.5 rounded-md border border-[var(--border)] bg-[var(--secondary)]/35 px-2 py-1.5">
-                        <p className="text-[0.5625rem] text-[var(--muted-foreground)]">
-                          No direction currently set.
-                        </p>
+                        <p className="text-[0.5625rem] text-[var(--muted-foreground)]">No direction currently set.</p>
                         <button
                           type="button"
                           onClick={() => {
@@ -359,10 +356,7 @@ export function SecretPlotPanel({
                               current
                                 ? {
                                     ...current,
-                                    sceneDirections: [
-                                      ...current.sceneDirections,
-                                      { direction: "", fulfilled: false },
-                                    ],
+                                    sceneDirections: [...current.sceneDirections, { direction: "", fulfilled: false }],
                                   }
                                 : current,
                             );
@@ -420,9 +414,7 @@ export function SecretPlotPanel({
                         checked={draft.staleDetected}
                         onChange={(e) => {
                           setSaved(false);
-                          setDraft((current) =>
-                            current ? { ...current, staleDetected: e.target.checked } : current,
-                          );
+                          setDraft((current) => (current ? { ...current, staleDetected: e.target.checked } : current));
                         }}
                         className="h-3 w-3 rounded border-[var(--input)] accent-[var(--primary)]"
                       />
@@ -505,9 +497,7 @@ export function SecretPlotPanel({
                         value={draft.arcDescription}
                         onChange={(e) => {
                           setSaved(false);
-                          setDraft((current) =>
-                            current ? { ...current, arcDescription: e.target.value } : current,
-                          );
+                          setDraft((current) => (current ? { ...current, arcDescription: e.target.value } : current));
                         }}
                         rows={3}
                         spellCheck={false}
@@ -522,9 +512,7 @@ export function SecretPlotPanel({
                         value={draft.arcProtagonist}
                         onChange={(e) => {
                           setSaved(false);
-                          setDraft((current) =>
-                            current ? { ...current, arcProtagonist: e.target.value } : current,
-                          );
+                          setDraft((current) => (current ? { ...current, arcProtagonist: e.target.value } : current));
                         }}
                         rows={2}
                         spellCheck={false}

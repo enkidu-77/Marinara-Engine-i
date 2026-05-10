@@ -10,9 +10,7 @@ export function parseChatMetadata(raw: unknown): Record<string, any> {
   if (typeof raw === "string") {
     try {
       const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, any>)
-        : {};
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, any>) : {};
     } catch {
       return {};
     }

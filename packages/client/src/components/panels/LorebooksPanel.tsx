@@ -115,14 +115,20 @@ export function LorebooksPanel() {
   }, [rawPersonas]);
   const getCharacterNames = useCallback(
     (lb: Lorebook) => {
-      const ids = Array.isArray(lb.characterIds) && lb.characterIds.length > 0 ? lb.characterIds : lb.characterId ? [lb.characterId] : [];
+      const ids =
+        Array.isArray(lb.characterIds) && lb.characterIds.length > 0
+          ? lb.characterIds
+          : lb.characterId
+            ? [lb.characterId]
+            : [];
       return ids.map((id) => characterNameById.get(id) ?? id);
     },
     [characterNameById],
   );
   const getPersonaNames = useCallback(
     (lb: Lorebook) => {
-      const ids = Array.isArray(lb.personaIds) && lb.personaIds.length > 0 ? lb.personaIds : lb.personaId ? [lb.personaId] : [];
+      const ids =
+        Array.isArray(lb.personaIds) && lb.personaIds.length > 0 ? lb.personaIds : lb.personaId ? [lb.personaId] : [];
       return ids.map((id) => personaNameById.get(id) ?? id);
     },
     [personaNameById],

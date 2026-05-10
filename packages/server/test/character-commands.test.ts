@@ -98,6 +98,48 @@ test("parses create_lorebook JSON block and strips it from visible text", () => 
   ]);
 });
 
+test("parses update_lorebook JSON block and strips it from visible text", () => {
+  const { commands, cleanContent } = parseCharacterCommands(
+    `I'll refine that lorebook.\n<update_lorebook>{"name":"Arcadia World Lore","description":"","tags":["fantasy","revised"],"entries":[{"matchName":"Silver Court","name":"Silver Court","content":"The Silver Court rules the northern border through old pacts.","keys":["Silver Court","northern border"],"tag":"faction","constant":true},{"name":"Moon Gate","content":"The Moon Gate opens only during eclipses.","keys":["Moon Gate"]}]}</update_lorebook>`,
+  );
+
+  assert.equal(cleanContent, "I'll refine that lorebook.");
+  assert.deepEqual(commands, [
+    {
+      type: "update_lorebook",
+      name: "Arcadia World Lore",
+      newName: undefined,
+      description: "",
+      category: undefined,
+      tags: ["fantasy", "revised"],
+      entries: [
+        {
+          name: "Silver Court",
+          matchName: "Silver Court",
+          content: "The Silver Court rules the northern border through old pacts.",
+          description: undefined,
+          keys: ["Silver Court", "northern border"],
+          secondaryKeys: undefined,
+          tag: "faction",
+          constant: true,
+          selective: undefined,
+        },
+        {
+          name: "Moon Gate",
+          matchName: undefined,
+          content: "The Moon Gate opens only during eclipses.",
+          description: undefined,
+          keys: ["Moon Gate"],
+          secondaryKeys: undefined,
+          tag: undefined,
+          constant: undefined,
+          selective: undefined,
+        },
+      ],
+    },
+  ]);
+});
+
 test("parses loose selfie command context variants", () => {
   const { commands, cleanContent } = parseCharacterCommands(
     `Here you go. [selfie] [selfie: context="rainy kitchen"] [selfie: "new dress"] [selfie: sleepy morning hair]`,

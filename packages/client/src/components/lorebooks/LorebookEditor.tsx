@@ -180,7 +180,9 @@ function LinkedResourcePicker({
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-xs">{item.name}</span>
                 {item.description && (
-                  <span className="block truncate text-[0.625rem] text-[var(--muted-foreground)]">{item.description}</span>
+                  <span className="block truncate text-[0.625rem] text-[var(--muted-foreground)]">
+                    {item.description}
+                  </span>
                 )}
               </span>
               <button
@@ -213,7 +215,10 @@ function LinkedResourcePicker({
               autoFocus
               className="flex-1 bg-transparent text-xs outline-none placeholder:text-[var(--muted-foreground)]"
             />
-            <button onClick={onClose} className="text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]">
+            <button
+              onClick={onClose}
+              className="text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
+            >
               <X size="0.75rem" />
             </button>
           </div>
@@ -415,7 +420,8 @@ export function LorebookEditor() {
   }, [characters]);
   const personaNameById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const persona of personas) map.set(persona.id, persona.comment ? `${persona.name} - ${persona.comment}` : persona.name);
+    for (const persona of personas)
+      map.set(persona.id, persona.comment ? `${persona.name} - ${persona.comment}` : persona.name);
     return map;
   }, [personas]);
 
@@ -1308,7 +1314,9 @@ export function LorebookEditor() {
                             )}
                             {scopeSummary.personas && (
                               <p>
-                                <span className="font-medium text-[var(--foreground)]">{scopeSummary.personas.label}</span>{" "}
+                                <span className="font-medium text-[var(--foreground)]">
+                                  {scopeSummary.personas.label}
+                                </span>{" "}
                                 {scopeSummary.personas.names}
                               </p>
                             )}

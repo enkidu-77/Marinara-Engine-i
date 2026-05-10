@@ -9,6 +9,7 @@ import type { CharacterData, MacroContext } from "@marinara-engine/shared";
 import { resolveMacros } from "@marinara-engine/shared";
 import type { DB } from "../../db/connection.js";
 import { createCharactersStorage } from "../storage/characters.storage.js";
+import { getCharacterDescriptionWithExtensions } from "./character-description-extensions.js";
 
 type PersonaFields = NonNullable<MacroContext["personaFields"]>;
 
@@ -65,9 +66,10 @@ export async function resolveCharacterMacroData(db: DB, characterIds: string[]):
 
     if (data.name) names.push(data.name);
 
+    const description = getCharacterDescriptionWithExtensions(data);
     const profile = {
       name: data.name ?? "Character",
-      description: data.description ?? "",
+      description,
       personality: data.personality ?? "",
       backstory: data.extensions?.backstory ?? "",
       appearance: data.extensions?.appearance ?? "",
@@ -151,7 +153,7 @@ export async function collectCharacterDepthPromptEntries(
       ...macroCtx,
       char: data?.name ?? macroCtx.char,
       characterFields: {
-        description: data?.description ?? "",
+        description: data ? getCharacterDescriptionWithExtensions(data) : "",
         personality: data?.personality ?? "",
         backstory: data?.extensions?.backstory ?? "",
         appearance: data?.extensions?.appearance ?? "",

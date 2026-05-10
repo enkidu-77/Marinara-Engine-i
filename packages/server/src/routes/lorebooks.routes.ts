@@ -73,6 +73,19 @@ function resolveScanGenerationTriggers(mode: unknown): string[] {
   return Array.from(new Set(["test_scan", modeTrigger, "chat"]));
 }
 
+function selectMessagesForLastGenerationScan<T extends { role: string }>(messages: T[]): T[] {
+  let lastGeneratedIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!;
+    if (message.role === "assistant" || message.role === "narrator") {
+      lastGeneratedIndex = index;
+      break;
+    }
+  }
+  if (lastGeneratedIndex < 0) return messages;
+  return messages.slice(0, lastGeneratedIndex);
+}
+
 function buildCompatibleLorebookExport(lb: Record<string, unknown>, entries: Array<Record<string, unknown>>) {
   const exportedEntries: Record<string, Record<string, unknown>> = {};
   entries.forEach((entry, index) => {
@@ -209,8 +222,7 @@ export async function lorebooksRoutes(app: FastifyInstance) {
     // pointer at extensions.importMetadata.embeddedLorebook that needs
     // clearing alongside the V2 character_book mirror.
     const lorebook = (await storage.getById(req.params.id)) as Record<string, unknown> | null;
-    const linkedCharacterId =
-      lorebook && typeof lorebook.characterId === "string" ? lorebook.characterId : null;
+    const linkedCharacterId = lorebook && typeof lorebook.characterId === "string" ? lorebook.characterId : null;
 
     const chatsStorage = createChatsStorage(app.db);
     await chatsStorage.removeLorebookFromChatMetadata(req.params.id);
@@ -557,7 +569,8 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       }
     }
 
-    const scanMessages = chatMessages.map((m) => ({
+    const scanSourceMessages = selectMessagesForLastGenerationScan(chatMessages);
+    const scanMessages = scanSourceMessages.map((m) => ({
       role: (m.role === "narrator" ? "system" : m.role) as string,
       content: typeof m.content === "string" ? m.content : "",
     }));
@@ -569,16 +582,16 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       activeLorebookIds,
       tokenBudget: typeof chatMeta.lorebookTokenBudget === "number" ? chatMeta.lorebookTokenBudget : undefined,
       entryStateOverrides:
-        ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
-        typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+        (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+        typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object"
           ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
               string,
               { ephemeral?: number | null; enabled?: boolean }
             >)
           : undefined,
       entryTimingStates:
-        ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
-        typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+        (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+        typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object"
           ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
               string,
               LorebookEntryTimingState

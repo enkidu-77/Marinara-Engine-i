@@ -379,6 +379,7 @@ async function resolveProviderConnection(db: DB) {
     baseUrl = provider?.defaultBaseUrl ?? "";
   }
   if (!baseUrl && conn.provider === "claude_subscription") baseUrl = "claude-agent-sdk://local";
+  if (!baseUrl && conn.provider === "openai_chatgpt") baseUrl = "openai-chatgpt://codex-auth";
   if (!baseUrl) fail(400, "The selected model connection has no base URL configured.");
 
   return { conn, baseUrl };

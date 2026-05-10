@@ -683,7 +683,7 @@ export function buildGmFormatReminder(
       : []),
     `- Keep each character's vocabulary, grammar, and cadence distinct, shaped by personality and mood.`,
     `- Pace the plot without rushing it, allowing character moments between developments.`,
-    `- ZERO TOLERANCE FOR AI SLOP IN YOUR WRITING! Absolutely NO: "doesn't X, doesn't Y", "not X, not Y," "jaw working," "mechanical precision," "ozone," "somewhere," "outside," and other overused patterns like repeated negations in your evocative prose. Replace them with creative detail, human cadence, and consequential action. Show what does happen instead of what doesn't.`,
+    `- ZERO TOLERANCE FOR AI SLOP IN YOUR WRITING! Absolutely NO: "doesn't X, doesn't Y", "not X, not Y," "jaw working," "mechanical precision," "ozone," "somewhere," "outside," and other overused patterns like repeated negations in your evocative prose. Replace them with creative detail, human cadence, and consequential action. Describe what does happen instead of what doesn't.`,
     `- Default expressions: neutral, happy, sad, angry, surprised, scared, disgusted, thinking, laughing, crying, blushing, smirk, embarrassed, determined, confused, sleepy.`,
     ...(customSpriteLines.length
       ? [
@@ -709,7 +709,7 @@ export function buildGmFormatReminder(
     ``,
     `PLAYER INPUT:`,
     `- Continue with new content directly from the player's input, treating it like a concluded beat. Do not reiterate it.`,
-    `- Treat only quoted player text as spoken aloud; unquoted text is action, narration, or internal thoughts to which NPCs don't have access to, only GM has. NEVER quote or speak for the player character (${ctx.playerName ?? "Player"}). You may narrate obvious, low-stakes participation and their thoughts (nodding during conversation, laying out details, looking around, etc.) indirectly in the second person, but never decide their strategic decisions or exact dialogue. Example:`,
+    `- Treat only quoted player text as spoken aloud; unquoted text is action, narration, or internal thoughts cannot be accessed by NPCs unless made observable. NEVER quote or speak for the player character (${ctx.playerName ?? "Player"}). You may narrate obvious, low-stakes participation and their thoughts (nodding during conversation, laying out details, looking around, etc.) indirectly in the second person, but never decide their strategic decisions or exact dialogue. Example:`,
     `[${ctx.playerName ?? "Player"}] [thought] [smirk]: You think to yourself that you're the best.`,
     `- CRITICAL: NEVER echo the player's distinctive words, phrases, or dialogue. NO PARROTTING!`,
     `- Player agency is not player immunity: the player controls intent, not the world's response. Let successes earned through effort, luck, or cleverness and failures caused by mistakes, bad luck, or poor decisions land with consequences; both good and bad ends can be earned. The player has opted into the game and will state OOC boundaries if needed.`,

@@ -517,7 +517,9 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
         enableSpotifyDj: enableSpotifyDj || undefined,
         spotifySourceType: enableSpotifyDj ? gameSpotifySourceType : undefined,
         spotifyPlaylistId:
-          enableSpotifyDj && gameSpotifySourceType === "playlist" ? gameSpotifyPlaylistId.trim() || undefined : undefined,
+          enableSpotifyDj && gameSpotifySourceType === "playlist"
+            ? gameSpotifyPlaylistId.trim() || undefined
+            : undefined,
         spotifyPlaylistName:
           enableSpotifyDj && gameSpotifySourceType === "playlist"
             ? gameSpotifyPlaylistName.trim() || undefined
@@ -1247,9 +1249,7 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
                   {enableSpotifyDj && (
                     <div className="mt-2 space-y-2 rounded-lg bg-[var(--background)]/55 p-3 ring-1 ring-[var(--border)]">
                       <label className="flex flex-col gap-1">
-                        <span className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">
-                          Music source
-                        </span>
+                        <span className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">Music source</span>
                         <select
                           value={gameSpotifySourceType}
                           onChange={(event) => {

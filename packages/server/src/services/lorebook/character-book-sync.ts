@@ -130,12 +130,7 @@ export async function syncCharacterBookFromLorebook(db: DB, lorebookId: string):
     const entries = (await lorebookStorage.listEntries(lorebookId)) as LoreEntryRow[];
     const nextBook = toCharacterBook(lorebook, entries);
 
-    await charactersStorage.update(
-      characterId,
-      { character_book: nextBook },
-      undefined,
-      { skipVersionSnapshot: true },
-    );
+    await charactersStorage.update(characterId, { character_book: nextBook }, undefined, { skipVersionSnapshot: true });
   } catch (err) {
     logger.error(err, "Failed to sync character_book from lorebook %s", lorebookId);
   }

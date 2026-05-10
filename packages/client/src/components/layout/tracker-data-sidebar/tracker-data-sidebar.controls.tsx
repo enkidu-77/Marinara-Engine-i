@@ -1,11 +1,4 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronDown, Pencil, Plus } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { TRACKER_TEXT_MICRO } from "./tracker-data-sidebar.constants";
@@ -211,10 +204,7 @@ export function InlineEdit({
         <FittedText
           minScale={fitMinScale}
           align={fitAlign}
-          className={cn(
-            "flex-1",
-            currentValue ? "text-[var(--foreground)]" : "italic text-[var(--muted-foreground)]",
-          )}
+          className={cn("flex-1", currentValue ? "text-[var(--foreground)]" : "italic text-[var(--muted-foreground)]")}
         >
           {previewText}
         </FittedText>
@@ -534,13 +524,7 @@ export function TrackerProfileEdgeHighlight({
   );
 }
 
-export function TrackerPortraitStageBackdrop({
-  media,
-  className,
-}: {
-  media?: string | null;
-  className?: string;
-}) {
+export function TrackerPortraitStageBackdrop({ media, className }: { media?: string | null; className?: string }) {
   return (
     <div className={cn("pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]", className)}>
       <div className="absolute inset-0 bg-[linear-gradient(150deg,color-mix(in_srgb,var(--tracker-profile-box)_30%,var(--background)_70%)_0%,color-mix(in_srgb,var(--background)_88%,var(--tracker-profile-display-solid)_12%)_48%,color-mix(in_srgb,var(--card)_70%,var(--tracker-profile-box)_30%)_100%)]" />
@@ -569,5 +553,3 @@ export function EmptySection({ children }: { children: ReactNode }) {
     </div>
   );
 }
-
-

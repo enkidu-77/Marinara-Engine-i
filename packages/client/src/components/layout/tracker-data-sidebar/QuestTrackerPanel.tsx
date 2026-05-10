@@ -316,4 +316,3 @@ function QuestRow({
     </article>
   );
 }
-

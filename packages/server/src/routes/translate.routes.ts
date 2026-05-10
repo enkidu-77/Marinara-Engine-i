@@ -72,6 +72,7 @@ async function translateWithAI(
   }
   // Claude (Subscription) uses the local Claude Agent SDK; no HTTP endpoint.
   if (!baseUrl && conn.provider === "claude_subscription") baseUrl = "claude-agent-sdk://local";
+  if (!baseUrl && conn.provider === "openai_chatgpt") baseUrl = "openai-chatgpt://codex-auth";
   if (!baseUrl) {
     throw Object.assign(new Error("No base URL configured for this connection"), { statusCode: 400 });
   }

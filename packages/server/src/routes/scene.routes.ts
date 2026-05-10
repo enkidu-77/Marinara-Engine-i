@@ -16,6 +16,7 @@ import { createCharactersStorage } from "../services/storage/characters.storage.
 import { createGameStateStorage } from "../services/storage/game-state.storage.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { stripConversationPromptTimestamps } from "../services/conversation/transcript-sanitize.js";
+import { getCharacterDescriptionWithExtensions } from "../services/prompt/index.js";
 import { DATA_DIR } from "../utils/data-dir.js";
 import type { ChatCompletionResult, ChatMessage } from "../services/llm/base-provider.js";
 import type {
@@ -71,6 +72,7 @@ async function resolveConnection(
   // Claude (Subscription) uses the local Claude Agent SDK and has no HTTP
   // endpoint — return a sentinel so the gate passes. The provider ignores it.
   if (!baseUrl && conn.provider === "claude_subscription") baseUrl = "claude-agent-sdk://local";
+  if (!baseUrl && conn.provider === "openai_chatgpt") baseUrl = "openai-chatgpt://codex-auth";
   if (!baseUrl) throw new Error("No base URL configured for this connection");
 
   return { conn, baseUrl };
@@ -82,8 +84,9 @@ async function buildCharacterContext(chars: ReturnType<typeof createCharactersSt
     const row = await chars.getById(cid);
     if (!row) continue;
     const data = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+    const description = getCharacterDescriptionWithExtensions(data);
     ctx += `<character="${data.name}" id="${cid}">\n`;
-    if (data.description) ctx += `${data.description}\n`;
+    if (description) ctx += `${description}\n`;
     if (data.personality) ctx += `${data.personality}\n`;
     if (data.extensions?.appearance) ctx += `Appearance: ${data.extensions.appearance}\n`;
     if (data.extensions?.backstory) ctx += `Backstory: ${data.extensions.backstory}\n`;

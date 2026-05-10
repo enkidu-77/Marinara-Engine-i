@@ -14,15 +14,15 @@ Anything else — your phone on the same Wi-Fi, a public-internet client, a coff
 
 ## Which option do I pick?
 
-| Your situation | Pick this | Section |
-| --- | --- | --- |
-| Tailscale, ZeroTier-on-100.64/10, or another VPN you control | **Already works** — no setup needed | [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default) |
-| Docker / Podman container, accessing from the same host | **Already works** — no setup needed | [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default) |
-| Phone, tablet, or laptop on your home Wi-Fi | **Basic Auth** | [Option 1](#option-1-basic-auth-recommended) |
-| Public-internet exposure (custom domain, port forwarding) | **Basic Auth + HTTPS** | [Option 1](#option-1-basic-auth-recommended) + [HTTPS](#serving-over-https) |
-| Stable LAN IPs and you'd rather not type a password | IP Allowlist | [Option 2](#option-2-ip-allowlist) |
-| You want a password from your Tailnet / containers TOO | Disable Option 4 + use Option 1 | [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default) + [Option 1](#option-1-basic-auth-recommended) |
-| You really, really don't want a password and your whole LAN is trusted | Private-network bypass | [Option 3](#option-3-private-network-bypass-no-password) |
+| Your situation                                                         | Pick this                           | Section                                                                                                                        |
+| ---------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Tailscale, ZeroTier-on-100.64/10, or another VPN you control           | **Already works** — no setup needed | [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default)                                                |
+| Docker / Podman container, accessing from the same host                | **Already works** — no setup needed | [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default)                                                |
+| Phone, tablet, or laptop on your home Wi-Fi                            | **Basic Auth**                      | [Option 1](#option-1-basic-auth-recommended)                                                                                   |
+| Public-internet exposure (custom domain, port forwarding)              | **Basic Auth + HTTPS**              | [Option 1](#option-1-basic-auth-recommended) + [HTTPS](#serving-over-https)                                                    |
+| Stable LAN IPs and you'd rather not type a password                    | IP Allowlist                        | [Option 2](#option-2-ip-allowlist)                                                                                             |
+| You want a password from your Tailnet / containers TOO                 | Disable Option 4 + use Option 1     | [Option 4](#option-4-tailscale-or-docker-bypass-interface-scoped-on-by-default) + [Option 1](#option-1-basic-auth-recommended) |
+| You really, really don't want a password and your whole LAN is trusted | Private-network bypass              | [Option 3](#option-3-private-network-bypass-no-password)                                                                       |
 
 Basic Auth is the most flexible choice — works from any IP, no per-device setup, and the browser remembers it. The IP Allowlist is handy when your client devices have stable IPs (Tailscale, static LAN leases) and you'd rather not type a password.
 
@@ -40,7 +40,7 @@ Edit it with any text editor. **Most security settings — Basic Auth credential
 - **Docker Compose** — `docker compose down && docker compose up -d`. You can also pass the variables in `docker-compose.yml` under `environment:` instead of using `.env`.
 - **Termux (Android)** — Ctrl+C to stop, then `./start-termux.sh` again.
 
-If you're running on a LAN or remote box and other devices still can't reach the server *at all* (different error than 403), make sure the server is binding to all interfaces with `HOST=0.0.0.0`. The shell launchers do this for you; `pnpm start` does not.
+If you're running on a LAN or remote box and other devices still can't reach the server _at all_ (different error than 403), make sure the server is binding to all interfaces with `HOST=0.0.0.0`. The shell launchers do this for you; `pnpm start` does not.
 
 ## Option 1: Basic Auth (recommended)
 
@@ -116,7 +116,7 @@ There is also `ALLOW_UNAUTHENTICATED_REMOTE=true` for unauthenticated public-int
 
 ## Option 4: Tailscale or Docker bypass (interface-scoped, on by default)
 
-Two interface-scoped flags let traffic from a Tailnet or a Docker bridge skip both the IP allowlist *and* Basic Auth, the same way loopback does. **Both flags default to `true`**, so a fresh Marinara install reachable over Tailscale or from your Docker containers Just Works without any `.env` setup.
+Two interface-scoped flags let traffic from a Tailnet or a Docker bridge skip both the IP allowlist _and_ Basic Auth, the same way loopback does. **Both flags default to `true`**, so a fresh Marinara install reachable over Tailscale or from your Docker containers Just Works without any `.env` setup.
 
 ```env
 # These are the defaults — listed here so you can see how to override them.
@@ -152,7 +152,7 @@ For sensitive deployments, consider Tailscale or Cloudflare Access — they avoi
 
 The server watches `.env` for changes and applies most updates within a couple of seconds — no restart needed. That includes `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` / `BASIC_AUTH_REALM`, `IP_ALLOWLIST` / `IP_ALLOWLIST_ENABLED`, `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK`, `ALLOW_UNAUTHENTICATED_REMOTE`, `TRUSTED_PRIVATE_NETWORKS`, `ADMIN_SECRET`, `CSRF_TRUSTED_ORIGINS`, `LOG_LEVEL`, and the various `*_LOCAL_URLS_ENABLED` / privileged-feature flags.
 
-Changes to these still need a restart because they're bound at startup: `PORT`, `HOST`, `SSL_CERT`, `SSL_KEY`, `DATA_DIR`, `STORAGE_BACKEND`, `FILE_STORAGE_DIR`, `DATABASE_URL`, `ENCRYPTION_KEY`, `TZ`, `AUTO_OPEN_BROWSER`, `AUTO_CREATE_DEFAULT_CONNECTION`. The server logs a warning when one of these changes so you don't wonder why it didn't take effect. (Note: `CORS_ORIGINS` *is* hot-reloadable for adding/removing origins; only switching between an explicit list and `*` still needs a restart.)
+Changes to these still need a restart because they're bound at startup: `PORT`, `HOST`, `SSL_CERT`, `SSL_KEY`, `DATA_DIR`, `STORAGE_BACKEND`, `FILE_STORAGE_DIR`, `DATABASE_URL`, `ENCRYPTION_KEY`, `TZ`, `AUTO_OPEN_BROWSER`, `AUTO_CREATE_DEFAULT_CONNECTION`. The server logs a warning when one of these changes so you don't wonder why it didn't take effect. (Note: `CORS_ORIGINS` _is_ hot-reloadable for adding/removing origins; only switching between an explicit list and `*` still needs a restart.)
 
 ## Verifying it works
 

@@ -30,6 +30,7 @@ import {
   Volume2,
   VolumeX,
   Loader2,
+  Wand2,
 } from "lucide-react";
 import { cn, copyToClipboard, getAvatarCropStyle, type AvatarCrop } from "../../lib/utils";
 import { findNamedMapValue } from "../../lib/game-character-name-match";
@@ -257,6 +258,33 @@ type GameSideLine = PartyDialogueLine & {
 };
 
 const EMPTY_GAME_SIDE_LINES: GameSideLine[] = [];
+const MAX_SIDE_LINES_PER_SEGMENT = 4;
+
+function distributeSideLinesAcrossSegments(map: Map<number, GameSideLine[]>, segmentCount: number) {
+  if (segmentCount <= 0 || map.size === 0) return map;
+
+  const distributed = new Map<number, GameSideLine[]>();
+  let carry: GameSideLine[] = [];
+
+  for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
+    const current = map.get(segmentIndex) ?? EMPTY_GAME_SIDE_LINES;
+    const combined = carry.length > 0 ? [...carry, ...current] : current;
+    if (combined.length === 0) {
+      carry = [];
+      continue;
+    }
+
+    distributed.set(segmentIndex, combined.slice(0, MAX_SIDE_LINES_PER_SEGMENT));
+    carry = combined.slice(MAX_SIDE_LINES_PER_SEGMENT);
+  }
+
+  if (carry.length > 0) {
+    const lastSegmentIndex = segmentCount - 1;
+    distributed.set(lastSegmentIndex, [...(distributed.get(lastSegmentIndex) ?? []), ...carry]);
+  }
+
+  return distributed;
+}
 
 function isCombatResultMessage(message: NarrationMessage): boolean {
   return message.role === "user" && /\[combat_result\]/i.test(message.content || "");
@@ -350,6 +378,10 @@ interface GameNarrationProps {
   inventoryCount?: number;
   /** Open the standard delete-message flow for a backing chat message. */
   onDeleteMessage?: (messageId: string) => void;
+  /** Whether the global multi-delete bar is active. */
+  multiSelectMode?: boolean;
+  /** Chat message ids selected for global multi-delete. */
+  selectedMessageIds?: Set<string>;
   /** Hide a single non-user segment from logs/history and future game generations. */
   onDeleteSegment?: (messageId: string, segmentIndex: number) => void;
   /** Edit the backing content of a user-authored message. */
@@ -371,6 +403,10 @@ interface GameNarrationProps {
   }) => void;
   /** Upload or replace a tracked NPC portrait. */
   onNpcPortraitClick?: (npcName: string) => void;
+  /** Generate or replace a tracked NPC portrait through the image provider. */
+  onNpcPortraitGenerate?: (npcName: string) => void;
+  npcPortraitGenerationEnabled?: boolean;
+  generatingNpcPortraitNames?: Set<string>;
   /** Pause auto-play while a blocking game overlay is open. */
   autoPlayBlocked?: boolean;
   /** Pause voice-over while a blocking game overlay is open. Defaults to autoPlayBlocked. */
@@ -836,6 +872,8 @@ export function GameNarration({
   onOpenInventory,
   inventoryCount,
   onDeleteMessage,
+  multiSelectMode = false,
+  selectedMessageIds,
   onDeleteSegment,
   onEditMessage,
   onEditSegment,
@@ -844,6 +882,9 @@ export function GameNarration({
   assetsGenerating,
   onReadable,
   onNpcPortraitClick,
+  onNpcPortraitGenerate,
+  npcPortraitGenerationEnabled = false,
+  generatingNpcPortraitNames,
   autoPlayBlocked,
   voicePlaybackBlocked,
   gameVoiceVolume = 1,
@@ -1035,6 +1076,29 @@ export function GameNarration({
       onNpcPortraitClick(speaker);
     },
     [onNpcPortraitClick, uploadableNpcNames],
+  );
+
+  const canGenerateNpcPortrait = useCallback(
+    (speaker?: string | null) => {
+      return npcPortraitGenerationEnabled && !!onNpcPortraitGenerate && canUploadNpcPortrait(speaker);
+    },
+    [canUploadNpcPortrait, npcPortraitGenerationEnabled, onNpcPortraitGenerate],
+  );
+
+  const triggerNpcPortraitGenerate = useCallback(
+    (speaker?: string | null) => {
+      if (!speaker || !canGenerateNpcPortrait(speaker)) return;
+      onNpcPortraitGenerate?.(speaker);
+    },
+    [canGenerateNpcPortrait, onNpcPortraitGenerate],
+  );
+
+  const isNpcPortraitGenerating = useCallback(
+    (speaker?: string | null) => {
+      const normalized = speaker?.trim().toLowerCase();
+      return !!normalized && !!generatingNpcPortraitNames?.has(normalized);
+    },
+    [generatingNpcPortraitNames],
   );
 
   const latestAssistant = useMemo(() => {
@@ -1499,7 +1563,7 @@ export function GameNarration({
       }
     }
 
-    return map;
+    return distributeSideLinesAcrossSegments(map, segments.length);
   }, [
     latestAssistant,
     macroCharacters,
@@ -1520,7 +1584,7 @@ export function GameNarration({
   const activeTranslatedText = activeSourceMessageId ? translations[activeSourceMessageId] : undefined;
   const activeIsTranslating = activeSourceMessageId ? !!translating[activeSourceMessageId] : false;
   const activeCopyKey = active ? `active:${active.id}` : null;
-  const activeCopyText = active ? active.readableContent ?? stripGmTagsKeepReadables(active.content) : "";
+  const activeCopyText = active ? (active.readableContent ?? stripGmTagsKeepReadables(active.content)) : "";
   const gameVoiceEnabled = Boolean(ttsConfig?.enabled && ttsConfig.autoplayGame);
   const gameVoiceConfigSignature = useMemo(() => buildVoiceConfigSignature(ttsConfig), [ttsConfig]);
   const normalizedGameVoiceVolume = Math.max(0, Math.min(1, gameVoiceVolume));
@@ -3014,7 +3078,7 @@ export function GameNarration({
 
         {/* Side remarks — small floating box shown with the dialogue they follow */}
         {activeSideLines.length > 0 && doneTyping && (
-          <div className="relative z-20 mb-2 flex w-full flex-col space-y-1.5">
+          <div className="relative z-20 mb-2 flex max-h-[min(16rem,38vh)] w-full flex-col space-y-1.5 overflow-y-auto pr-1">
             {activeSideLines.map((line, i) => {
               const expressionAvatar =
                 line.type === "side" || line.type === "extra"
@@ -3110,35 +3174,57 @@ export function GameNarration({
               {/* VN-style dialogue: avatar left, text right, name top-left */}
               {(() => {
                 const activeCanUploadPortrait = canUploadNpcPortrait(active.speaker);
+                const activeCanGeneratePortrait = canGenerateNpcPortrait(active.speaker);
+                const activePortraitGenerating = isNpcPortraitGenerating(active.speaker);
                 return (
                   <div className="flex min-w-0 gap-3 max-[420px]:gap-2" style={gameAvatarScaleStyle}>
                     {/* Left: Speaker avatar with reaction indicator */}
                     <div className="relative flex shrink-0 flex-col items-center gap-1">
                       {activeCanUploadPortrait ? (
-                        <button
-                          type="button"
-                          onClick={() => triggerNpcPortraitUpload(active.speaker)}
-                          className="rounded-xl transition-transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-white/30"
-                          title="Upload or replace NPC portrait"
-                        >
-                          {activeAvatar ? (
-                            <CroppedAvatar
-                              src={activeAvatar.url}
-                              alt={active.speaker || ""}
-                              crop={activeAvatar.crop}
-                              className={cn(GAME_DIALOGUE_AVATAR_CLASS, "transition-colors hover:border-white/30")}
-                            />
-                          ) : (
-                            <img
-                              src="/npc-silhouette.svg"
-                              alt={active.speaker || "?"}
-                              className={cn(
-                                GAME_DIALOGUE_AVATAR_CLASS,
-                                "object-cover transition-colors hover:border-white/30",
+                        <div className="group/avatar relative">
+                          <button
+                            type="button"
+                            onClick={() => triggerNpcPortraitUpload(active.speaker)}
+                            className="rounded-xl transition-transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-white/30"
+                            title="Upload or replace NPC portrait"
+                          >
+                            {activeAvatar ? (
+                              <CroppedAvatar
+                                src={activeAvatar.url}
+                                alt={active.speaker || ""}
+                                crop={activeAvatar.crop}
+                                className={cn(GAME_DIALOGUE_AVATAR_CLASS, "transition-colors hover:border-white/30")}
+                              />
+                            ) : (
+                              <img
+                                src="/npc-silhouette.svg"
+                                alt={active.speaker || "?"}
+                                className={cn(
+                                  GAME_DIALOGUE_AVATAR_CLASS,
+                                  "object-cover transition-colors hover:border-white/30",
+                                )}
+                              />
+                            )}
+                          </button>
+                          {activeCanGeneratePortrait && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                triggerNpcPortraitGenerate(active.speaker);
+                              }}
+                              disabled={activePortraitGenerating}
+                              className="absolute right-0.5 top-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-[var(--primary)] opacity-0 shadow-lg ring-1 ring-white/15 transition-opacity hover:bg-black/85 disabled:cursor-wait group-hover/avatar:opacity-100 max-md:opacity-100"
+                              title="Generate NPC portrait"
+                            >
+                              {activePortraitGenerating ? (
+                                <Loader2 size="0.75rem" className="animate-spin" />
+                              ) : (
+                                <Wand2 size="0.75rem" />
                               )}
-                            />
+                            </button>
                           )}
-                        </button>
+                        </div>
                       ) : activeAvatar ? (
                         <CroppedAvatar
                           src={activeAvatar.url}
@@ -3234,15 +3320,15 @@ export function GameNarration({
                         </div>
                         {/* Edit button */}
                         {activeCanEditSegment && (
-                            <button
-                              type="button"
-                              onClick={() => setEditingContent(active.content)}
-                              className="absolute right-1.5 top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60"
-                              title="Edit"
-                            >
-                              <Pencil size={11} />
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => setEditingContent(active.content)}
+                            className="absolute right-1.5 top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60"
+                            title="Edit"
+                          >
+                            <Pencil size={11} />
+                          </button>
+                        )}
                         {editingContent !== null && (
                           <button
                             type="button"
@@ -3359,15 +3445,15 @@ export function GameNarration({
                 )}
                 {/* Edit button */}
                 {activeCanEditSegment && (
-                    <button
-                      type="button"
-                      onClick={() => setEditingContent(active.content)}
-                      className="absolute right-1.5 top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60"
-                      title="Edit"
-                    >
-                      <Pencil size={11} />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setEditingContent(active.content)}
+                    className="absolute right-1.5 top-1.5 rounded p-1 text-[var(--muted-foreground)]/40 transition-colors hover:bg-[var(--muted)]/30 hover:text-[var(--muted-foreground)] dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60"
+                    title="Edit"
+                  >
+                    <Pencil size={11} />
+                  </button>
+                )}
                 {editingContent !== null && (
                   <button
                     type="button"
@@ -3700,6 +3786,8 @@ export function GameNarration({
                         sourceMessageId !== "party-chat";
                       const isEditingThis =
                         editingLogSeg?.messageId === sourceMessageId && editingLogSeg?.segIndex === sourceSegmentIndex;
+                      const isSelectedForDeletion =
+                        multiSelectMode && !!sourceMessageId && selectedMessageIds?.has(sourceMessageId) === true;
                       const showDeleteButton = canDeleteMessage || canDeleteThisSegment;
                       const copyKey =
                         sourceMessageId && hasSourceSegmentIndex
@@ -3895,6 +3983,8 @@ export function GameNarration({
                       if (seg.type === "dialogue") {
                         const logAvatar = seg.speaker ? findNamedMapValue(speakerAvatarInfos, seg.speaker) : null;
                         const canUploadLogPortrait = canUploadNpcPortrait(seg.speaker);
+                        const canGenerateLogPortrait = canGenerateNpcPortrait(seg.speaker);
+                        const logPortraitGenerating = isNpcPortraitGenerating(seg.speaker);
                         return (
                           <div
                             key={seg.id}
@@ -3909,30 +3999,51 @@ export function GameNarration({
                                     ? "border-sky-400/10 bg-sky-950/15"
                                     : "border-white/5 bg-black/20",
                               isActiveSeg && "ring-1 ring-[var(--primary)]/40",
+                              isSelectedForDeletion && "bg-[var(--destructive)]/10 ring-2 ring-[var(--destructive)]/55",
                               jumpRowClasses,
                             )}
                           >
                             {actionButtons}
                             {canUploadLogPortrait ? (
-                              <button
-                                type="button"
-                                onClick={() => triggerNpcPortraitUpload(seg.speaker)}
-                                className="shrink-0 rounded-lg transition-transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-white/20"
-                                title="Upload or replace NPC portrait"
-                              >
-                                {logAvatar ? (
-                                  <CroppedAvatar
-                                    src={logAvatar.url}
-                                    alt={seg.speaker || ""}
-                                    crop={logAvatar.crop}
-                                    className="h-8 w-8 rounded-lg border border-white/10 transition-colors hover:border-white/25"
-                                  />
-                                ) : (
-                                  <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-[var(--accent)] text-[0.5rem] font-bold transition-colors hover:border-white/25">
-                                    {(seg.speaker || "?")[0]}
-                                  </div>
+                              <div className="group/log-avatar relative shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => triggerNpcPortraitUpload(seg.speaker)}
+                                  className="rounded-lg transition-transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-white/20"
+                                  title="Upload or replace NPC portrait"
+                                >
+                                  {logAvatar ? (
+                                    <CroppedAvatar
+                                      src={logAvatar.url}
+                                      alt={seg.speaker || ""}
+                                      crop={logAvatar.crop}
+                                      className="h-8 w-8 rounded-lg border border-white/10 transition-colors hover:border-white/25"
+                                    />
+                                  ) : (
+                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-[var(--accent)] text-[0.5rem] font-bold transition-colors hover:border-white/25">
+                                      {(seg.speaker || "?")[0]}
+                                    </div>
+                                  )}
+                                </button>
+                                {canGenerateLogPortrait && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      triggerNpcPortraitGenerate(seg.speaker);
+                                    }}
+                                    disabled={logPortraitGenerating}
+                                    className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-black/75 text-[var(--primary)] opacity-0 ring-1 ring-white/15 transition-opacity disabled:cursor-wait group-hover/log-avatar:opacity-100 max-md:opacity-100"
+                                    title="Generate NPC portrait"
+                                  >
+                                    {logPortraitGenerating ? (
+                                      <Loader2 size="0.6rem" className="animate-spin" />
+                                    ) : (
+                                      <Wand2 size="0.6rem" />
+                                    )}
+                                  </button>
                                 )}
-                              </button>
+                              </div>
                             ) : logAvatar ? (
                               <CroppedAvatar
                                 src={logAvatar.url}
@@ -3989,6 +4100,7 @@ export function GameNarration({
                             className={cn(
                               "group/logseg relative rounded-lg border border-cyan-400/15 bg-cyan-950/15 px-3 py-2",
                               isActiveSeg && "ring-1 ring-[var(--primary)]/40",
+                              isSelectedForDeletion && "bg-[var(--destructive)]/10 ring-2 ring-[var(--destructive)]/55",
                               jumpRowClasses,
                             )}
                           >
@@ -4014,6 +4126,7 @@ export function GameNarration({
                             className={cn(
                               "group/logseg relative rounded-lg border border-amber-400/15 bg-amber-950/15 px-3 py-2",
                               isActiveSeg && "ring-1 ring-[var(--primary)]/40",
+                              isSelectedForDeletion && "bg-[var(--destructive)]/10 ring-2 ring-[var(--destructive)]/55",
                               jumpRowClasses,
                             )}
                           >
@@ -4044,6 +4157,7 @@ export function GameNarration({
                           className={cn(
                             "group/logseg relative rounded-lg border border-white/5 bg-black/20 px-3 py-2",
                             isActiveSeg && "ring-1 ring-[var(--primary)]/40",
+                            isSelectedForDeletion && "bg-[var(--destructive)]/10 ring-2 ring-[var(--destructive)]/55",
                             jumpRowClasses,
                           )}
                         >

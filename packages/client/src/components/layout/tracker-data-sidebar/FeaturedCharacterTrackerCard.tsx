@@ -1,5 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, HeartPulse, ImagePlus, Minimize2, Shirt, X } from "lucide-react";
+import {
+  Brain,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Eye,
+  HeartPulse,
+  ImagePlus,
+  Minimize2,
+  Shirt,
+  X,
+} from "lucide-react";
 import type { CharacterStat, PresentCharacter } from "@marinara-engine/shared";
 import type { TrackerPanelSide } from "../../../stores/ui.store";
 import { useCharacterSprites, type SpriteInfo } from "../../../hooks/use-characters";
@@ -97,7 +109,9 @@ function FeaturedCharacterPortrait({
       aria-expanded={thoughtsOpen}
       className={cn(
         "relative z-[1] flex h-5 min-h-5 w-full items-center justify-center bg-transparent text-[var(--tracker-profile-display-solid)]/72 transition-all hover:bg-[var(--primary)]/12 hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--primary)] active:scale-95",
-        thoughtControlSide === "left" ? "border-r border-[var(--tracker-profile-dialogue-border)]" : "border-l border-[var(--tracker-profile-dialogue-border)]",
+        thoughtControlSide === "left"
+          ? "border-r border-[var(--tracker-profile-dialogue-border)]"
+          : "border-l border-[var(--tracker-profile-dialogue-border)]",
         thoughtsOpen && "bg-[var(--primary)]/16 text-[var(--primary)]",
       )}
     >
@@ -566,9 +580,7 @@ export function FeaturedCharacterTrackerCard({
       const availableHeight = portraitNode.getBoundingClientRect().height - statCoreNode.getBoundingClientRect().height;
       const requiredHeight = featuredFieldCount * 20 + 10;
       const nextFieldsInStatColumn = availableHeight >= requiredHeight;
-      setFieldsInStatColumn((previous) =>
-        previous === nextFieldsInStatColumn ? previous : nextFieldsInStatColumn,
-      );
+      setFieldsInStatColumn((previous) => (previous === nextFieldsInStatColumn ? previous : nextFieldsInStatColumn));
     };
 
     updatePlacement();
@@ -822,4 +834,3 @@ export function FeaturedCharacterTrackerCard({
     </article>
   );
 }
-

@@ -179,9 +179,10 @@ export function csrfProtectionHook(request: FastifyRequest, reply: FastifyReply,
     reply.status(403).send({
       error: "Cross-site unsafe requests are not allowed",
       origin: offender,
-      hint: origin || referer
-        ? appendOriginHint(offender)
-        : "Browser did not send an Origin or Referer header — Marinara cannot verify this is a same-origin request.",
+      hint:
+        origin || referer
+          ? appendOriginHint(offender)
+          : "Browser did not send an Origin or Referer header — Marinara cannot verify this is a same-origin request.",
     });
     return;
   }

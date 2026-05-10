@@ -239,6 +239,7 @@ export function ConversationInput({
   const [statusMenuPos, setStatusMenuPos] = useState<{ left: number; top: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const gifButtonRef = useRef<HTMLButtonElement>(null);
   const statusButtonRef = useRef<HTMLButtonElement>(null);
@@ -310,8 +311,13 @@ export function ConversationInput({
   const prevChatIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (prevChatIdRef.current !== activeChatId) {
-      if (prevChatIdRef.current && textareaRef.current?.value) {
-        setInputDraft(prevChatIdRef.current, textareaRef.current.value);
+      if (prevChatIdRef.current && textareaRef.current) {
+        const prevText = textareaRef.current.value;
+        if (prevText.trim()) {
+          setInputDraft(prevChatIdRef.current, prevText);
+        } else {
+          clearInputDraft(prevChatIdRef.current);
+        }
       }
       prevChatIdRef.current = activeChatId;
       if (textareaRef.current) {
@@ -322,18 +328,42 @@ export function ConversationInput({
         textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
       }
     }
-  }, [activeChatId, setInputDraft, syncInputState]);
+  }, [activeChatId, setInputDraft, clearInputDraft, syncInputState]);
 
   // Save draft on unmount
   useEffect(() => {
     const el = textareaRef.current;
     const chatId = activeChatId;
     return () => {
-      if (chatId && el?.value) {
-        useChatStore.getState().setInputDraft(chatId, el.value);
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+      if (chatId && el) {
+        const text = el.value;
+        if (text.trim()) {
+          useChatStore.getState().setInputDraft(chatId, text);
+        } else {
+          useChatStore.getState().clearInputDraft(chatId);
+        }
       }
     };
   }, [activeChatId]);
+
+  // Flush immediately when the page is being closed or discarded.
+  useEffect(() => {
+    const flushDraft = () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+      const chatId = useChatStore.getState().activeChatId;
+      const text = textareaRef.current?.value ?? "";
+      if (!chatId) return;
+      if (text.trim()) {
+        useChatStore.getState().setInputDraft(chatId, text);
+      } else {
+        useChatStore.getState().clearInputDraft(chatId);
+      }
+    };
+    window.addEventListener("pagehide", flushDraft);
+    return () => window.removeEventListener("pagehide", flushDraft);
+  }, []);
 
   const handleFileUpload = useCallback(async (files: FileList | File[] | null) => {
     if (!files) return;
@@ -457,11 +487,12 @@ export function ConversationInput({
       const cursorPos = before.length + name.length + 2; // +2 for @ and space
       el.selectionStart = el.selectionEnd = cursorPos;
       syncInputState(el.value);
+      if (activeChatId) setInputDraft(activeChatId, el.value);
       setMentionQuery(null);
       setMentionCompletions([]);
       el.focus();
     },
-    [mentionStartPos, syncInputState],
+    [activeChatId, mentionStartPos, setInputDraft, syncInputState],
   );
 
   const handleSend = useCallback(async () => {
@@ -725,6 +756,7 @@ export function ConversationInput({
           if (cmd && textareaRef.current) {
             textareaRef.current.value = `/${cmd.name} `;
             syncInputState(textareaRef.current.value);
+            if (activeChatId) setInputDraft(activeChatId, textareaRef.current.value);
             setCompletions([]);
           }
           return;
@@ -743,12 +775,14 @@ export function ConversationInput({
     },
     [
       completions,
+      activeChatId,
       selectedCompletion,
       mentionCompletions,
       selectedMention,
       insertMention,
       enterToSend,
       handleSend,
+      setInputDraft,
       syncInputState,
     ],
   );
@@ -764,6 +798,19 @@ export function ConversationInput({
       el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }, 150);
     syncInputState(el.value);
+
+    if (activeChatId) {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+      const chatId = activeChatId;
+      const draft = el.value;
+      draftTimerRef.current = setTimeout(() => {
+        if (draft.trim()) {
+          setInputDraft(chatId, draft);
+        } else {
+          clearInputDraft(chatId);
+        }
+      }, 300);
+    }
 
     // Slash completions
     if (el.value.startsWith("/")) {
@@ -796,7 +843,7 @@ export function ConversationInput({
       setMentionQuery(null);
       setMentionCompletions([]);
     }
-  }, [characterNames, syncInputState]);
+  }, [activeChatId, characterNames, clearInputDraft, setInputDraft, syncInputState]);
 
   useEffect(() => {
     if (hasInput && feedback) setFeedback(null);
@@ -812,9 +859,10 @@ export function ConversationInput({
       el.value = value.slice(0, start) + emoji + value.slice(end);
       el.selectionStart = el.selectionEnd = start + emoji.length;
       syncInputState(el.value);
+      if (activeChatId) setInputDraft(activeChatId, el.value);
       el.focus();
     },
-    [syncInputState],
+    [activeChatId, setInputDraft, syncInputState],
   );
 
   const handleGifSelect = useCallback(
@@ -1069,6 +1117,7 @@ export function ConversationInput({
                 if (textareaRef.current) {
                   textareaRef.current.value = `/${cmd.name} `;
                   syncInputState(textareaRef.current.value);
+                  if (activeChatId) setInputDraft(activeChatId, textareaRef.current.value);
                   setCompletions([]);
                   textareaRef.current.focus();
                 }

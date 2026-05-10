@@ -12,3 +12,4 @@ export {
   type PromptDepthEntry,
 } from "./macro-context.js";
 export { mergeAdjacentMessages, squashLeadingSystemMessages } from "./merger.js";
+export { getCharacterDescriptionWithExtensions } from "./character-description-extensions.js";

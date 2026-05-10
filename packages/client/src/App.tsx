@@ -8,6 +8,7 @@ import { AppShell } from "./components/layout/AppShell";
 import { CustomThemeInjector } from "./components/layout/CustomThemeInjector";
 import { ModelDownloadModal } from "./components/modals/ModelDownloadModal";
 import { AppDialogRenderer } from "./components/ui/AppDialogRenderer";
+import { ChibiProfessorMariEasterEgg } from "./components/ui/ChibiProfessorMariEasterEgg";
 import { Toaster } from "sonner";
 import { useUIStore } from "./stores/ui.store";
 import { useSidecarStore } from "./stores/sidecar.store";
@@ -262,6 +263,7 @@ export function App() {
   return (
     <>
       <CustomThemeInjector />
+      <ChibiProfessorMariEasterEgg />
       <AppShell />
       {!isLite && <ModelDownloadModal open={showDownloadModal} onClose={() => setShowDownloadModal(false)} />}
       {hasModalOpen && (

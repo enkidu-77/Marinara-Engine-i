@@ -222,10 +222,7 @@ function evaluateSchedule(schedule: LorebookSchedule | null, gameState: GameStat
 /**
  * Check timing state (sticky/cooldown/delay).
  */
-function checkTiming(
-  entry: LorebookEntry,
-  timingState: EntryTimingState | undefined,
-): boolean {
+function checkTiming(entry: LorebookEntry, timingState: EntryTimingState | undefined): boolean {
   if (!timingState) return !(entry.delay !== null && entry.delay > 0);
 
   // Delay: must wait N messages before first activation

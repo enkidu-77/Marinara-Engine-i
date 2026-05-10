@@ -12,22 +12,29 @@ const DRAFTS_KEY = "marinara-input-drafts";
 
 type NotificationAvatarCrop = { zoom: number; offsetX: number; offsetY: number } | null;
 
-/** Read drafts from sessionStorage (survives refreshes within the same tab). */
+/** Read drafts from localStorage so typed input survives reloads, tab closes, and app restarts. */
 function loadDrafts(): Map<string, string> {
   try {
-    const raw = sessionStorage.getItem(DRAFTS_KEY);
+    const raw = localStorage.getItem(DRAFTS_KEY);
     if (raw) return new Map(JSON.parse(raw));
+    const legacyRaw = sessionStorage.getItem(DRAFTS_KEY);
+    if (legacyRaw) {
+      localStorage.setItem(DRAFTS_KEY, legacyRaw);
+      sessionStorage.removeItem(DRAFTS_KEY);
+      return new Map(JSON.parse(legacyRaw));
+    }
   } catch {
     /* ignore */
   }
   return new Map();
 }
 
-/** Write drafts to sessionStorage. */
+/** Write drafts to localStorage. */
 function saveDrafts(m: Map<string, string>) {
   try {
-    if (m.size === 0) sessionStorage.removeItem(DRAFTS_KEY);
-    else sessionStorage.setItem(DRAFTS_KEY, JSON.stringify([...m]));
+    if (m.size === 0) localStorage.removeItem(DRAFTS_KEY);
+    else localStorage.setItem(DRAFTS_KEY, JSON.stringify([...m]));
+    sessionStorage.removeItem(DRAFTS_KEY);
   } catch {
     /* ignore */
   }
@@ -535,6 +542,7 @@ export const useChatStore = create<ChatState>()(
       });
       try {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(DRAFTS_KEY);
         sessionStorage.removeItem(DRAFTS_KEY);
       } catch {
         /* ignore */

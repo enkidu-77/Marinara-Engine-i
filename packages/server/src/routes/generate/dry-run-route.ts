@@ -22,6 +22,7 @@ import {
   assemblePrompt,
   buildPromptMacroContext,
   collectCharacterDepthPromptEntries,
+  getCharacterDescriptionWithExtensions,
   type AssemblerInput,
 } from "../../services/prompt/index.js";
 import { mergeAdjacentMessages } from "../../services/prompt/merger.js";
@@ -561,8 +562,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
 
     // Resolve connection (allow override; otherwise use chat connection)
     // Extensions may send connectionId like presetId (number or `{id}`); accept it.
-    const impersonateConnectionOverride =
-      impersonate ? asNonEmptyString(body.impersonateConnectionId) : null;
+    const impersonateConnectionOverride = impersonate ? asNonEmptyString(body.impersonateConnectionId) : null;
     const fallbackConnectionId = asNonEmptyString(body.connectionId) || ((chat.connectionId as string | null) ?? null);
     let connId = impersonateConnectionOverride || fallbackConnectionId;
 
@@ -967,7 +967,6 @@ export async function registerDryRunRoute(app: FastifyInstance) {
           try {
             const data = JSON.parse(row.data) as Record<string, unknown>;
             const name = typeof data.name === "string" ? data.name : "Character";
-            const desc = typeof data.description === "string" ? data.description : "";
             const personality = typeof data.personality === "string" ? data.personality : "";
             const scenario = typeof data.scenario === "string" ? data.scenario : "";
             const mesExample = typeof data.mes_example === "string" ? data.mes_example : "";
@@ -975,6 +974,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
               data.extensions && typeof data.extensions === "object"
                 ? (data.extensions as Record<string, unknown>)
                 : {};
+            const desc = getCharacterDescriptionWithExtensions({ ...data, extensions } as any);
             const characterMacroContext = {
               ...promptMacroContext,
               char: name,
@@ -1031,16 +1031,16 @@ export async function registerDryRunRoute(app: FastifyInstance) {
               tokenBudget: lorebookTokenBudget,
               chatEmbedding: null,
               entryStateOverrides:
-                ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
-                typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+                (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+                typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object"
                   ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
                       string,
                       { ephemeral?: number | null; enabled?: boolean }
                     >)
                   : undefined,
               entryTimingStates:
-                ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
-                typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+                (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+                typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object"
                   ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
                       string,
                       LorebookEntryTimingState
@@ -1231,16 +1231,16 @@ export async function registerDryRunRoute(app: FastifyInstance) {
             : [],
           chatEmbedding: null,
           entryStateOverrides:
-            ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
-            typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+            (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+            typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object"
               ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
                   string,
                   { ephemeral?: number | null; enabled?: boolean }
                 >)
               : undefined,
           entryTimingStates:
-            ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
-            typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+            (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+            typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object"
               ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
                   string,
                   LorebookEntryTimingState
@@ -1328,16 +1328,16 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         tokenBudget: lorebookTokenBudget,
         chatEmbedding: null,
         entryStateOverrides:
-          ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
-          typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+          (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+          typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object"
             ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
                 string,
                 { ephemeral?: number | null; enabled?: boolean }
               >)
             : undefined,
         entryTimingStates:
-          ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
-          typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+          (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+          typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object"
             ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
                 string,
                 LorebookEntryTimingState

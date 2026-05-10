@@ -753,7 +753,7 @@ function GeneralSettings() {
             label="Expose image prompts before sending"
             checked={reviewImagePromptsBeforeSend}
             onChange={setReviewImagePromptsBeforeSend}
-            help="When Game mode needs generated backgrounds, illustrations, or NPC portraits, it shows one grouped prompt review window before sending requests to the image provider."
+            help="Shows generated image prompts for review before sending Game assets, character or persona avatars, and sprite generations to the image provider."
           />
 
           <ImageDimensionRow
@@ -940,6 +940,10 @@ function AppearanceSettings() {
   const setChatFontOpacity = useUIStore((s) => s.setChatFontOpacity);
   const roleplayAvatarStyle = useUIStore((s) => s.roleplayAvatarStyle);
   const setRoleplayAvatarStyle = useUIStore((s) => s.setRoleplayAvatarStyle);
+  const roleplayAvatarScale = useUIStore((s) => s.roleplayAvatarScale);
+  const setRoleplayAvatarScale = useUIStore((s) => s.setRoleplayAvatarScale);
+  const roleplaySpriteScale = useUIStore((s) => s.roleplaySpriteScale);
+  const setRoleplaySpriteScale = useUIStore((s) => s.setRoleplaySpriteScale);
   const gameDialogueDisplayMode = useUIStore((s) => s.gameDialogueDisplayMode);
   const setGameDialogueDisplayMode = useUIStore((s) => s.setGameDialogueDisplayMode);
   const gameAvatarScale = useUIStore((s) => s.gameAvatarScale);
@@ -1342,9 +1346,81 @@ function AppearanceSettings() {
             </button>
           ))}
         </div>
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/45 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex h-20 w-full shrink-0 items-end justify-center gap-3 overflow-hidden rounded-md bg-black/30 ring-1 ring-[var(--border)]/70 sm:w-28">
+              <div
+                className={cn(
+                  "mb-2 border border-white/20 bg-gradient-to-b from-rose-300/85 via-fuchsia-300/65 to-slate-900/90 shadow-lg transition-all",
+                  roleplayAvatarStyle === "circles"
+                    ? "rounded-full"
+                    : roleplayAvatarStyle === "rectangles"
+                      ? "rounded-xl"
+                      : "rounded-md",
+                )}
+                style={{
+                  width: `${
+                    roleplayAvatarStyle === "panel"
+                      ? Math.min(5.5, 2.2 * roleplayAvatarScale)
+                      : Math.min(5.5, (roleplayAvatarStyle === "rectangles" ? 2.15 : 2) * roleplayAvatarScale)
+                  }rem`,
+                  height: `${
+                    roleplayAvatarStyle === "circles"
+                      ? Math.min(5.5, 2 * roleplayAvatarScale)
+                      : Math.min(6, (roleplayAvatarStyle === "rectangles" ? 2.7 : 3.4) * roleplayAvatarScale)
+                  }rem`,
+                }}
+              />
+              <div
+                className="mb-1 rounded-full border border-white/20 bg-gradient-to-b from-violet-200/85 via-purple-200/70 to-slate-900/95 shadow-lg transition-all"
+                style={{
+                  width: `${Math.min(2.1, 0.85 * roleplaySpriteScale)}rem`,
+                  height: `${Math.min(4.7, 3.2 * roleplaySpriteScale)}rem`,
+                }}
+              />
+            </div>
+            <div className="grid min-w-0 flex-1 gap-3">
+              <label className="flex min-w-0 flex-col gap-1">
+                <span className="text-[0.6875rem] font-medium text-[var(--foreground)]">Message avatar scale</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={0.75}
+                    max={2.5}
+                    step={0.05}
+                    value={roleplayAvatarScale}
+                    onChange={(e) => setRoleplayAvatarScale(Number(e.target.value))}
+                    className="min-w-0 flex-1 accent-[var(--primary)]"
+                  />
+                  <span className="w-12 text-right text-xs tabular-nums text-[var(--muted-foreground)]">
+                    {Math.round(roleplayAvatarScale * 100)}%
+                  </span>
+                </div>
+              </label>
+              <label className="flex min-w-0 flex-col gap-1">
+                <span className="text-[0.6875rem] font-medium text-[var(--foreground)]">Default sprite scale</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={1.75}
+                    step={0.05}
+                    value={roleplaySpriteScale}
+                    onChange={(e) => setRoleplaySpriteScale(Number(e.target.value))}
+                    className="min-w-0 flex-1 accent-[var(--primary)]"
+                  />
+                  <span className="w-12 text-right text-xs tabular-nums text-[var(--muted-foreground)]">
+                    {Math.round(roleplaySpriteScale * 100)}%
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
         <p className="text-[0.625rem] text-[var(--muted-foreground)]">
           Rectangles keep the compact side slot but give portraits a bit more vertical room. The larger panel crops
           portraits from the top on short messages and fades them back into the bubble background on taller ones.
+          Per-chat sprite sizing still overrides the default sprite scale here.
         </p>
       </div>
 

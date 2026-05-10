@@ -62,6 +62,7 @@ type OpenAIProviderKind =
   | "mistral"
   | "cohere"
   | "custom"
+  | "openai-chatgpt"
   | "local-sidecar";
 
 /**
@@ -75,6 +76,7 @@ export class OpenAIProvider extends BaseLLMProvider {
     defaultOpenrouterProvider?: string | null,
     maxTokensOverride?: number | null,
     private readonly providerKind: OpenAIProviderKind = "openai",
+    private readonly extraHeaders?: Record<string, string>,
   ) {
     super(baseUrl, apiKey, defaultMaxContext, defaultOpenrouterProvider, maxTokensOverride);
   }
@@ -327,6 +329,7 @@ export class OpenAIProvider extends BaseLLMProvider {
     const h: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${this.apiKey}`,
+      ...(this.extraHeaders ?? {}),
     };
     if (!this.isGenericCustomProvider() && this.baseUrl.includes("openrouter.ai")) {
       h["HTTP-Referer"] = "https://github.com/Pasta-Devs/Marinara-Engine";
@@ -504,6 +507,7 @@ export class OpenAIProvider extends BaseLLMProvider {
 
   /** Check if a model requires or benefits from the Responses API instead of Chat Completions */
   private useResponsesAPI(model: string, options?: Pick<ChatOptions, "captureReasoning">): boolean {
+    if (this.providerKind === "openai-chatgpt") return true;
     if (this.isGpt55Model(model)) return true;
     if (this.isGenericCustomProvider()) return false;
     const m = model.toLowerCase();

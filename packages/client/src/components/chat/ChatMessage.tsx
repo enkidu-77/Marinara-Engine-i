@@ -625,6 +625,7 @@ export const ChatMessage = memo(function ChatMessage({
     chatFontColor,
     chatFontOpacity,
     roleplayAvatarStyle,
+    roleplayAvatarScale,
     textStrokeWidth,
     textStrokeColor,
     showModelName,
@@ -639,6 +640,7 @@ export const ChatMessage = memo(function ChatMessage({
       chatFontColor: s.chatFontColor,
       chatFontOpacity: s.chatFontOpacity,
       roleplayAvatarStyle: s.roleplayAvatarStyle,
+      roleplayAvatarScale: s.roleplayAvatarScale,
       textStrokeWidth: s.textStrokeWidth,
       textStrokeColor: s.textStrokeColor,
       showModelName: s.showModelName,
@@ -672,6 +674,10 @@ export const ChatMessage = memo(function ChatMessage({
       ...textStrokeStyle,
     }),
     [chatFontSize, chatFontColor, textStrokeStyle],
+  );
+  const roleplayAvatarScaleStyle = useMemo<React.CSSProperties>(
+    () => ({ "--roleplay-avatar-scale": roleplayAvatarScale }) as React.CSSProperties,
+    [roleplayAvatarScale],
   );
 
   // Compute message bubble background with user-controlled opacity.
@@ -1122,8 +1128,15 @@ export const ChatMessage = memo(function ChatMessage({
   }, [message.id, message.activeSwipeIndex, swipeCount, onSetActiveSwipe]);
 
   const useCompactRectangleAvatar = isRoleplay && roleplayAvatarStyle === "rectangles";
-  const compactAvatarFrameClass = useCompactRectangleAvatar ? "h-14 w-11 rounded-xl" : "h-10 w-10 rounded-full";
-  const compactAvatarSpacerClass = useCompactRectangleAvatar ? "w-11" : "w-10";
+  const compactAvatarFrameClass = useCompactRectangleAvatar
+    ? "h-[calc(3.5rem*var(--roleplay-avatar-scale))] w-[calc(2.75rem*var(--roleplay-avatar-scale))] rounded-xl"
+    : "h-[calc(2.5rem*var(--roleplay-avatar-scale))] w-[calc(2.5rem*var(--roleplay-avatar-scale))] rounded-full";
+  const compactAvatarSpacerClass = useCompactRectangleAvatar
+    ? "w-[calc(2.75rem*var(--roleplay-avatar-scale))]"
+    : "w-[calc(2.5rem*var(--roleplay-avatar-scale))]";
+  const compactAvatarIconSize = useCompactRectangleAvatar
+    ? `${Math.max(1, Math.min(1.75, 1.125 * roleplayAvatarScale))}rem`
+    : `${Math.max(0.875, Math.min(1.5, roleplayAvatarScale))}rem`;
   const showRoleplayAvatarPanel = isRoleplay && roleplayAvatarStyle === "panel" && !isGrouped;
   const roleplayAvatarPanelTail = showRoleplayAvatarPanel ? (
     isMergedGroup && mergedAvatars.length > 0 ? (
@@ -1313,6 +1326,7 @@ export const ChatMessage = memo(function ChatMessage({
           data-message-id={message.id}
           data-message-role={message.role}
           onClick={handleMobileTap}
+          style={roleplayAvatarScaleStyle}
         >
           {/* Multi-select checkbox */}
           {multiSelectMode && (
@@ -1393,9 +1407,9 @@ export const ChatMessage = memo(function ChatMessage({
                   )}
                 >
                   {isUser ? (
-                    <User size={useCompactRectangleAvatar ? "1.125rem" : "1rem"} className="text-white" />
+                    <User size={compactAvatarIconSize} className="text-white" />
                   ) : (
-                    <Bot size={useCompactRectangleAvatar ? "1.125rem" : "1rem"} className="text-white" />
+                    <Bot size={compactAvatarIconSize} className="text-white" />
                   )}
                 </div>
               )}
@@ -1475,11 +1489,11 @@ export const ChatMessage = memo(function ChatMessage({
                 <div className={cn("flex min-h-full items-stretch", isUser && "flex-row-reverse")}>
                   <div
                     className={cn(
-                      "relative flex w-[4.75rem] shrink-0 items-start self-stretch overflow-hidden md:w-[5.25rem]",
+                      "relative flex w-[calc(4.75rem*var(--roleplay-avatar-scale))] shrink-0 items-start self-stretch overflow-hidden md:w-[calc(5.25rem*var(--roleplay-avatar-scale))]",
                       isUser ? "border-l border-white/8" : "border-r border-white/8",
                     )}
                   >
-                    <div className="rpg-avatar-panel-stack relative h-full max-h-44 w-full overflow-hidden">
+                    <div className="rpg-avatar-panel-stack relative h-full max-h-[calc(11rem*var(--roleplay-avatar-scale))] w-full overflow-hidden">
                       {isMergedGroup && mergedAvatars.length > 0 ? (
                         <button
                           type="button"

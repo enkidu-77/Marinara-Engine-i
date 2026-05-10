@@ -36,10 +36,7 @@ export const lorebookCharacterLinks = sqliteTable(
     createdAt: text("created_at").notNull(),
   },
   (table) => ({
-    lorebookCharacterUnique: uniqueIndex("uniq_lorebook_character_links_pair").on(
-      table.lorebookId,
-      table.characterId,
-    ),
+    lorebookCharacterUnique: uniqueIndex("uniq_lorebook_character_links_pair").on(table.lorebookId, table.characterId),
   }),
 );
 

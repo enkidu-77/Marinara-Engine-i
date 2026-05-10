@@ -162,15 +162,7 @@ function main() {
     console.log("  [OK] Skipping torch install because BACKGROUNDREMOVER_SKIP_TORCH=1");
   }
 
-  run(py, [
-    "-m",
-    "pip",
-    "install",
-    "--only-binary=:all:",
-    "numpy<2",
-    "numba==0.60.0",
-    "llvmlite==0.43.0",
-  ]);
+  run(py, ["-m", "pip", "install", "--only-binary=:all:", "numpy<2", "numba==0.60.0", "llvmlite==0.43.0"]);
   run(py, ["-m", "pip", "install", "--upgrade", "backgroundremover"]);
   run(py, ["-c", "import backgroundremover; print('backgroundremover import ok')"]);
 

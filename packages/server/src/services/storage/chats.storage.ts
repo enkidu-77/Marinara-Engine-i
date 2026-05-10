@@ -104,12 +104,8 @@ function parseMessageCursor(before?: string): { createdAt: string; rowid: number
 }
 
 async function invalidateMemoryChunksFrom(db: DB, chatId: string, createdAt: string) {
-  await db
-    .delete(memoryChunks)
-    .where(and(eq(memoryChunks.chatId, chatId), gt(memoryChunks.lastMessageAt, createdAt)));
-  await db
-    .delete(memoryChunks)
-    .where(and(eq(memoryChunks.chatId, chatId), eq(memoryChunks.lastMessageAt, createdAt)));
+  await db.delete(memoryChunks).where(and(eq(memoryChunks.chatId, chatId), gt(memoryChunks.lastMessageAt, createdAt)));
+  await db.delete(memoryChunks).where(and(eq(memoryChunks.chatId, chatId), eq(memoryChunks.lastMessageAt, createdAt)));
 }
 
 /** Create the chat storage facade used by routes and importers. */

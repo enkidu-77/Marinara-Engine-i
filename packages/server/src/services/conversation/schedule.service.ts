@@ -165,12 +165,13 @@ export async function generateCharacterSchedule(
     `Follow this exact structure for all 7 days. Do NOT use ellipsis, comments, or placeholders.`,
   ].join("\n");
 
+  const scheduleMaxTokens = provider.maxTokensOverrideValue ?? 8192;
   const result = await provider.chatComplete(
     [
       { role: "system", content: systemPrompt },
       { role: "user", content: "Generate the schedule now." },
     ],
-    { model, temperature: 0.8, maxTokens: 8192 },
+    { model, temperature: 0.8, maxTokens: scheduleMaxTokens },
   );
 
   const content = result.content ?? "";

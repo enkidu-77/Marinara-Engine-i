@@ -40,11 +40,12 @@ import { parseCharacterDisplayData } from "../../lib/character-display";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { useGameStateStore } from "../../stores/game-state.store";
 import { toast } from "sonner";
-import { BookOpen, HelpCircle, MessageSquare, Theater } from "lucide-react";
+import { BookOpen, Check, HelpCircle, MessageSquare, Theater, X } from "lucide-react";
 import type { SpritePlacement, SpriteSide } from "@marinara-engine/shared";
 import { useUIStore } from "../../stores/ui.store";
 import { useAgentStore } from "../../stores/agent.store";
 import { cn } from "../../lib/utils";
+import { Modal } from "../ui/Modal";
 import { useEncounter } from "../../hooks/use-encounter";
 import { useScene } from "../../hooks/use-scene";
 import { useEncounterStore } from "../../stores/encounter.store";
@@ -91,6 +92,17 @@ const shouldIgnoreIntuitiveSwipeTarget = (target: EventTarget | null): boolean =
   );
 };
 
+type AgentInjectionReviewItem = {
+  agentType: string;
+  agentName: string;
+  text: string;
+};
+
+type AgentInjectionReviewRequest = {
+  chatId: string;
+  injections: AgentInjectionReviewItem[];
+};
+
 const ChatConversationSurface = lazy(async () => {
   const module = await import("./ChatConversationSurface");
   return { default: module.ChatConversationSurface };
@@ -135,6 +147,8 @@ export function ChatArea() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [spriteArrangeMode, setSpriteArrangeMode] = useState(false);
+  const [agentInjectionReview, setAgentInjectionReview] = useState<AgentInjectionReviewRequest | null>(null);
+  const [agentInjectionDrafts, setAgentInjectionDrafts] = useState<Record<string, string>>({});
 
   // Delete dialog & multi-select state
   const [deleteDialogMessageId, setDeleteDialogMessageId] = useState<string | null>(null);
@@ -202,6 +216,37 @@ export function ChatArea() {
   const pendingNewChatMode = useChatStore((s) => s.pendingNewChatMode);
   const failedAgentTypes = useAgentStore((s) => s.failedAgentTypes);
   const agentProcessing = useAgentStore((s) => s.isProcessing);
+
+  useEffect(() => {
+    const handleReviewRequest = (event: Event) => {
+      const detail = (event as CustomEvent<AgentInjectionReviewRequest>).detail;
+      if (!detail?.chatId || !Array.isArray(detail.injections)) return;
+      if (detail.chatId !== useChatStore.getState().activeChatId) return;
+      setAgentInjectionReview(detail);
+      setAgentInjectionDrafts(
+        Object.fromEntries(detail.injections.map((injection) => [injection.agentType, injection.text])),
+      );
+    };
+    window.addEventListener("marinara:agent-injection-review", handleReviewRequest);
+    return () => window.removeEventListener("marinara:agent-injection-review", handleReviewRequest);
+  }, []);
+
+  const handleContinueAgentInjectionReview = useCallback(() => {
+    if (!agentInjectionReview) return;
+    const overrides = agentInjectionReview.injections.map((injection) => ({
+      agentType: injection.agentType,
+      text: agentInjectionDrafts[injection.agentType] ?? injection.text,
+    }));
+    const chatId = agentInjectionReview.chatId;
+    setAgentInjectionReview(null);
+    setAgentInjectionDrafts({});
+    void generate({ chatId, connectionId: null, agentInjectionOverrides: overrides });
+  }, [agentInjectionDrafts, agentInjectionReview, generate]);
+
+  const handleCloseAgentInjectionReview = useCallback(() => {
+    setAgentInjectionReview(null);
+    setAgentInjectionDrafts({});
+  }, []);
 
   const handleQuickStart = useCallback(
     (mode: "conversation" | "roleplay" | "game") => {
@@ -336,6 +381,7 @@ export function ChatArea() {
   const { startEncounter } = useEncounter();
   const { concludeScene, abandonScene, forkScene, isForking } = useScene();
   const encounterActive = useEncounterStore((s) => s.active || s.showConfigModal);
+  const roleplaySpriteScale = useUIStore((s) => s.roleplaySpriteScale);
 
   // Sprite sidebar settings from chat metadata
   const chatMeta = useMemo(() => {
@@ -345,7 +391,7 @@ export function ChatArea() {
   }, [chat]);
   const spriteCharacterIds: string[] = Array.isArray(chatMeta.spriteCharacterIds) ? chatMeta.spriteCharacterIds : [];
   const spritePosition: SpriteSide = chatMeta.spritePosition === "right" ? "right" : "left";
-  const spriteScale = normalizeSpriteDisplayValue(chatMeta.spriteScale, 1, 0.5, 1.75);
+  const spriteScale = normalizeSpriteDisplayValue(chatMeta.spriteScale, roleplaySpriteScale, 0.5, 1.75);
   const spriteOpacity = normalizeSpriteDisplayValue(chatMeta.spriteOpacity, 1, 0.15, 1);
   const spritePlacements = useMemo(
     () => normalizeSpritePlacements(chatMeta.spritePlacements),
@@ -449,7 +495,10 @@ export function ChatArea() {
     const savedFilename = (chatMeta.background as string | null | undefined) ?? null;
     const restoredBackground = restoredChatBackgroundRef.current;
 
-    if (restoredBackground.isSyncing && (restoredBackground.chatId !== chat.id || chatBackground !== restoredBackground.url)) {
+    if (
+      restoredBackground.isSyncing &&
+      (restoredBackground.chatId !== chat.id || chatBackground !== restoredBackground.url)
+    ) {
       return;
     }
     if (restoredBackground.isSyncing) {
@@ -504,30 +553,41 @@ export function ChatArea() {
     };
   }, []);
 
+  const persistSpriteExpressions = useCallback(
+    (expressions: Record<string, string>) => {
+      if (!chat?.id) return;
+      updateMeta.mutate({ id: chat.id, spriteExpressions: expressions });
+      // Also persist to the last assistant message's extra so it's per-swipe
+      if (messages?.length) {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const m = messages[i]!;
+          if (m.role === "assistant") {
+            updateMessageExtra.mutate({
+              messageId: m.id,
+              extra: { spriteExpressions: expressions },
+            });
+            break;
+          }
+        }
+      }
+    },
+    [chat?.id, updateMeta, messages, updateMessageExtra],
+  );
+
   const handleExpressionChange = useCallback(
-    (characterId: string, expression: string) => {
+    (characterId: string, expression: string, options?: { immediate?: boolean }) => {
       if (!chat?.id) return;
       pendingExpressions.current = { ...pendingExpressions.current, [characterId]: expression };
       if (expressionSaveTimer.current) clearTimeout(expressionSaveTimer.current);
+      if (options?.immediate) {
+        persistSpriteExpressions(pendingExpressions.current);
+        return;
+      }
       expressionSaveTimer.current = setTimeout(() => {
-        updateMeta.mutate({ id: chat!.id, spriteExpressions: pendingExpressions.current });
-        // Also persist to the last assistant message's extra so it's per-swipe
-        if (messages?.length) {
-          for (let i = messages.length - 1; i >= 0; i--) {
-            const m = messages[i]!;
-            if (m.role === "assistant") {
-              updateMessageExtra.mutate({
-                messageId: m.id,
-                extra: { spriteExpressions: pendingExpressions.current },
-              });
-              break;
-            }
-          }
-        }
+        persistSpriteExpressions(pendingExpressions.current);
       }, 1000);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [chat?.id, updateMeta, messages, updateMessageExtra],
+    [chat?.id, persistSpriteExpressions],
   );
 
   const handleSpritePlacementChange = useCallback(
@@ -1532,6 +1592,8 @@ export function ChatArea() {
             chatBackground={chatBackground}
             onOpenSettings={() => setSettingsOpen(true)}
             onDeleteMessage={handleDelete}
+            multiSelectMode={multiSelectMode}
+            selectedMessageIds={selectedMessageIds}
           />
 
           <ChatCommonOverlays
@@ -1769,6 +1831,15 @@ export function ChatArea() {
           isGrouped={isGrouped}
         />
       </Suspense>
+      {agentInjectionReview && (
+        <AgentInjectionReviewModal
+          request={agentInjectionReview}
+          drafts={agentInjectionDrafts}
+          onDraftChange={(agentType, text) => setAgentInjectionDrafts((current) => ({ ...current, [agentType]: text }))}
+          onContinue={handleContinueAgentInjectionReview}
+          onClose={handleCloseAgentInjectionReview}
+        />
+      )}
       {pendingNewChatMode && (
         <NewChatConnectionGate
           mode={pendingNewChatMode}
@@ -1790,6 +1861,67 @@ function TypingIndicator() {
         <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--muted-foreground)]/60 [animation-delay:300ms]" />
       </div>
     </div>
+  );
+}
+
+function AgentInjectionReviewModal({
+  request,
+  drafts,
+  onDraftChange,
+  onContinue,
+  onClose,
+}: {
+  request: AgentInjectionReviewRequest;
+  drafts: Record<string, string>;
+  onDraftChange: (agentType: string, text: string) => void;
+  onContinue: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal open onClose={onClose} title="Writer Agent Review" width="max-w-3xl">
+      <div className="flex flex-col gap-3">
+        <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">
+          Edit the writer guidance before the main reply starts.
+        </p>
+        <div className="flex max-h-[55dvh] flex-col gap-2 overflow-y-auto pr-1">
+          {request.injections.map((injection) => (
+            <div key={injection.agentType} className="rounded-lg border border-[var(--border)] bg-[var(--card)]/60">
+              <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-semibold text-[var(--foreground)]">{injection.agentName}</div>
+                  <div className="truncate text-[0.625rem] text-[var(--muted-foreground)]">{injection.agentType}</div>
+                </div>
+              </div>
+              <textarea
+                value={drafts[injection.agentType] ?? injection.text}
+                onChange={(event) => onDraftChange(injection.agentType, event.target.value)}
+                rows={6}
+                className="min-h-32 w-full resize-y rounded-b-lg border-0 bg-[var(--secondary)]/35 px-3 py-2 font-mono text-xs leading-relaxed text-[var(--foreground)] outline-none focus:ring-1 focus:ring-[var(--ring)]"
+                spellCheck={false}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+          >
+            <X size="0.875rem" />
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={onContinue}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-medium text-[var(--primary-foreground)] transition-opacity hover:opacity-90"
+          >
+            <Check size="0.875rem" />
+            Continue
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

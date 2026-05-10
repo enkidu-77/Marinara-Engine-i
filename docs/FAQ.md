@@ -16,7 +16,7 @@ The shell launchers (`start.sh`, `start.bat`, `start-termux.sh`) already bind to
 
 ## 2. Configure access control
 
-Loopback (`127.0.0.1`) works without a password, but other devices on your LAN now require authentication by default. Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` in `.env`, then restart Marinara. For privileged actions from that browser, also set `ADMIN_SECRET` and save it in **Settings -> Advanced -> Admin Access**.
+Loopback (`127.0.0.1`) works without a password, ordinary LAN clients require authentication by default, and Tailscale plus Docker bridge clients are trusted by default for private installs. Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` in `.env`, then restart Marinara if you want LAN users to sign in. Set `BYPASS_AUTH_TAILSCALE=false` or `BYPASS_AUTH_DOCKER=false` if you want those clients to sign in too. For privileged actions from that browser, also set `ADMIN_SECRET` and save it in **Settings -> Advanced -> Admin Access**.
 
 You can restore the old unauthenticated LAN behavior with `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK=true`, but only do this on a network you fully trust. For a step-by-step walkthrough covering Basic Auth, IP Allowlist, and the private-network bypass, see [Remote Access — Setting Up Basic Auth or an IP Allowlist](REMOTE_ACCESS.md).
 
@@ -41,7 +41,7 @@ For example: `http://192.168.1.42:7860`
 
 ## 5. (Optional) Install the PWA
 
-Most mobile browsers will offer an **"Add to Home Screen"** or **"Install App"** prompt, giving you a more native app experience without browser chrome.
+Most mobile browsers will offer an **"Add to Home Screen"** or **"Install App"** prompt, giving you a more native app experience without browser chrome. On iPhone and iPad, see the [iOS / iPadOS PWA Guide](installation/ios-pwa.md).
 
 ### Not on the same network?
 
@@ -50,7 +50,7 @@ Tools like [Tailscale](https://tailscale.com/) give each device a stable IP addr
 ### Still not connecting?
 
 - Verify both devices are on the same Wi-Fi network.
-- Confirm `HOST=0.0.0.0` and Basic Auth credentials are set on the server.
+- Confirm `HOST=0.0.0.0` and, for ordinary LAN access, Basic Auth credentials are set on the server.
 - Check that no firewall is blocking the configured port (default `7860`).
 - See the [Troubleshooting](TROUBLESHOOTING.md#app-not-loading-on-mobile--another-device) page for more help.
 

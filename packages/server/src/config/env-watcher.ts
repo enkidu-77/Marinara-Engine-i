@@ -41,12 +41,7 @@ const RESTART_REQUIRED_KEYS = new Set<string>([
 ]);
 
 // Keys whose values must be masked when logged.
-const SENSITIVE_KEYS = new Set<string>([
-  "BASIC_AUTH_PASS",
-  "ADMIN_SECRET",
-  "ENCRYPTION_KEY",
-  "GIPHY_API_KEY",
-]);
+const SENSITIVE_KEYS = new Set<string>(["BASIC_AUTH_PASS", "ADMIN_SECRET", "ENCRYPTION_KEY", "GIPHY_API_KEY"]);
 
 function maskValue(key: string, value: string | undefined): string {
   if (value === undefined) return "<unset>";

@@ -168,7 +168,7 @@ interface GameCombatUIProps {
   /** Enemy combatants. */
   enemies: Combatant[];
   /** Player inventory items available during combat. */
-  inventoryItems?: Array<{ name: string; quantity: number; description?: string }>;
+  inventoryItems?: Array<{ name: string; quantity: number }>;
   /** Called when combat ends (victory, defeat, or flee). Receives a summary for GM narration. */
   onCombatEnd: (outcome: "victory" | "defeat" | "flee", summary: CombatSummary) => void;
   /** Called after a combat item successfully resolves so the used item can be consumed. */
@@ -1260,18 +1260,11 @@ export function GameCombatUI({
                     )}
                   >
                     <div className="flex items-center gap-1">
-                      <span
-                        className={cn(
-                          "text-[0.6rem] font-bold",
-                          isEnemyLine ? "text-red-200" : "text-sky-200",
-                        )}
-                      >
+                      <span className={cn("text-[0.6rem] font-bold", isEnemyLine ? "text-red-200" : "text-sky-200")}>
                         {line.character}
                       </span>
                     </div>
-                    <p className="mt-0.5 break-words text-xs leading-snug [overflow-wrap:anywhere]">
-                      {line.content}
-                    </p>
+                    <p className="mt-0.5 break-words text-xs leading-snug [overflow-wrap:anywhere]">{line.content}</p>
                   </div>
                 );
               })}
@@ -1309,9 +1302,7 @@ export function GameCombatUI({
         <div className="relative z-30 shrink-0 border-t border-white/10 bg-gradient-to-t from-black/95 to-black/85 backdrop-blur-md">
           {/* Drawer toggle bar */}
           <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-white/5 px-1.5 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {combatControlsSlot && (
-              <div className="flex shrink-0 items-center gap-1">{combatControlsSlot}</div>
-            )}
+            {combatControlsSlot && <div className="flex shrink-0 items-center gap-1">{combatControlsSlot}</div>}
             <button
               type="button"
               onClick={() => setOpenDrawer((d) => (d === "party" ? null : "party"))}
@@ -1511,7 +1502,9 @@ export function GameCombatUI({
                           className="rounded-lg border border-green-400/20 bg-green-500/10 px-3 py-2 text-left text-xs text-white/85 transition-all hover:border-green-400/40 hover:bg-green-500/15"
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="min-w-0 truncate font-semibold text-white/90">{item.name}</span>
+                            <span className="min-w-0 flex-1 whitespace-normal break-words font-semibold leading-tight text-white/90 [overflow-wrap:anywhere]">
+                              {item.name}
+                            </span>
                             {item.quantity > 1 && (
                               <span className="shrink-0 rounded-full bg-white/10 px-1.5 text-[0.55rem] tabular-nums text-white/60">
                                 x{item.quantity}
@@ -1519,7 +1512,7 @@ export function GameCombatUI({
                             )}
                           </div>
                           <div className="mt-0.5 line-clamp-2 text-[0.6rem] text-white/45">
-                            {itemEffect?.description || item.description || "Use on the active party member."}
+                            {itemEffect?.description || "Use on the active party member."}
                           </div>
                         </button>
                       );
@@ -1548,9 +1541,7 @@ export function GameCombatUI({
               <div className="flex flex-col gap-2 p-2">
                 <div className="flex items-center gap-2">
                   <Zap size={13} className="text-violet-300" />
-                  <span className="text-[0.65rem] text-white/60">
-                    Describe what you attempt; the GM resolves it.
-                  </span>
+                  <span className="text-[0.65rem] text-white/60">Describe what you attempt; the GM resolves it.</span>
                 </div>
                 <textarea
                   value={customInstruction}
@@ -1733,9 +1724,7 @@ export function GameCombatUI({
                   ))}
                 </div>
               )}
-              {openDrawer === "mechanics" && (
-                <CombatMechanicsPanel mechanics={combatMechanics} round={round} />
-              )}
+              {openDrawer === "mechanics" && <CombatMechanicsPanel mechanics={combatMechanics} round={round} />}
               {openDrawer === "cues" && (
                 <CombatDialoguePanel lines={visibleCombatDialogue} voiceableSpeakers={voicedCombatSpeakerSet} />
               )}
@@ -2049,7 +2038,9 @@ export function GameCombatUI({
                       className="rounded-lg border border-green-400/20 bg-green-500/10 px-3 py-2 text-left text-xs text-white/80 transition-all hover:border-green-400/40 hover:bg-green-500/15"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="min-w-0 truncate font-semibold text-white/90">{item.name}</span>
+                        <span className="min-w-0 flex-1 whitespace-normal break-words font-semibold leading-tight text-white/90 [overflow-wrap:anywhere]">
+                          {item.name}
+                        </span>
                         {item.quantity > 1 && (
                           <span className="shrink-0 rounded-full bg-white/10 px-1.5 py-0.5 text-[0.6rem] tabular-nums text-white/60">
                             x{item.quantity}
@@ -2057,7 +2048,7 @@ export function GameCombatUI({
                         )}
                       </div>
                       <div className="mt-0.5 line-clamp-2 text-[0.65rem] text-white/45">
-                        {itemEffect?.description || item.description || "Use on the active party member."}
+                        {itemEffect?.description || "Use on the active party member."}
                       </div>
                     </button>
                   );
@@ -2627,10 +2618,7 @@ function MobileCombatantChip({
       <div className="min-w-0 flex-1 text-left">
         <div className="flex items-center gap-1">
           <span
-            className={cn(
-              "min-w-0 truncate text-[0.65rem] font-semibold",
-              isKo ? "text-white/30" : "text-white/90",
-            )}
+            className={cn("min-w-0 truncate text-[0.65rem] font-semibold", isKo ? "text-white/30" : "text-white/90")}
           >
             {combatant.name}
           </span>
@@ -2646,9 +2634,7 @@ function MobileCombatantChip({
               style={{ width: `${hpPercent}%` }}
             />
           </div>
-          <span className="shrink-0 text-[0.5rem] tabular-nums text-white/55">
-            {combatant.hp}
-          </span>
+          <span className="shrink-0 text-[0.5rem] tabular-nums text-white/55">{combatant.hp}</span>
         </div>
         {combatant.statusEffects && combatant.statusEffects.length > 0 && (
           <div className="mt-0.5 flex gap-0.5 overflow-hidden">

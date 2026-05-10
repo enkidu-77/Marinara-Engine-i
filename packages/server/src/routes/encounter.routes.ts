@@ -52,6 +52,7 @@ async function resolveConnection(
   // Claude (Subscription) uses the local Claude Agent SDK and has no HTTP
   // endpoint — return a sentinel so the gate passes. The provider ignores it.
   if (!baseUrl && conn.provider === "claude_subscription") baseUrl = "claude-agent-sdk://local";
+  if (!baseUrl && conn.provider === "openai_chatgpt") baseUrl = "openai-chatgpt://codex-auth";
   if (!baseUrl) throw new Error("No base URL configured for this connection");
 
   return { conn, baseUrl };
@@ -130,10 +131,7 @@ async function buildCharacterContext(chars: ReturnType<typeof createCharactersSt
  * persona ends up named "User" in combat because the encounter prompt's
  * `${personaName}` placeholder defaulted to that string.
  */
-async function buildPersonaContext(
-  chars: ReturnType<typeof createCharactersStorage>,
-  chatPersonaId: string | null,
-) {
+async function buildPersonaContext(chars: ReturnType<typeof createCharactersStorage>, chatPersonaId: string | null) {
   const allPersonas = await chars.listPersonas();
   const persona =
     (chatPersonaId ? allPersonas.find((p) => p.id === chatPersonaId) : null) ??
@@ -237,9 +235,7 @@ async function buildGameStateContext(
       ? (chatMeta.gameCharacterCards as Array<Record<string, unknown>>)
       : [];
     const playerCard = cards[0];
-    const rpgStats = playerCard?.rpgStats as
-      | { attributes?: Array<{ name: string; value: number }> }
-      | undefined;
+    const rpgStats = playerCard?.rpgStats as { attributes?: Array<{ name: string; value: number }> } | undefined;
     const mapped = mapSheetAttributesToRPG(rpgStats?.attributes);
     const ordered: Array<keyof typeof mapped> = ["str", "dex", "con", "int", "wis", "cha"];
     const present = ordered.filter((k) => mapped[k] != null);

@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { MODEL_LISTS, createConnectionSchema, inferImageSource } from "@marinara-engine/shared";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
+import { fetchOpenAIChatGPTModels, getOpenAIChatGPTAuth } from "../services/llm/openai-chatgpt-auth.js";
 import { resolveConnectionImageDefaults } from "../services/image/image-generation-defaults.js";
 import { isImageLocalUrlsEnabled, isProviderLocalUrlsEnabled } from "../config/runtime-config.js";
 import { normalizeLoopbackUrl, safeFetch } from "../utils/security.js";
@@ -20,8 +21,7 @@ function localUrlPolicyForProvider(provider: string, imageSource: string) {
     provider === "image_generation" && (imageSource === "comfyui" || imageSource === "automatic1111");
   const isImage = provider === "image_generation";
   return {
-    allowLocal:
-      isLocalImageBackend || (isImage && isImageLocalUrlsEnabled()) ? true : isProviderLocalUrlsEnabled(),
+    allowLocal: isLocalImageBackend || (isImage && isImageLocalUrlsEnabled()) ? true : isProviderLocalUrlsEnabled(),
     allowLoopback: true,
     allowMdns: provider !== "image_generation" || isLocalImageBackend || isImageLocalUrlsEnabled(),
     allowedProtocols: ["https:", "http:"],
@@ -148,6 +148,17 @@ export async function connectionsRoutes(app: FastifyInstance) {
         };
       }
 
+      if (conn.provider === "openai_chatgpt") {
+        const auth = await getOpenAIChatGPTAuth();
+        const detail = auth.planType ? ` (${auth.planType})` : "";
+        return {
+          success: true,
+          message: `ChatGPT login found via Codex auth${detail}. Requests will use the local ChatGPT session.`,
+          latencyMs: Date.now() - start,
+          modelName: conn.model,
+        };
+      }
+
       // Simple models list fetch to verify the key works
       const { PROVIDERS } = await import("@marinara-engine/shared");
       const provider = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
@@ -230,6 +241,17 @@ export async function connectionsRoutes(app: FastifyInstance) {
         const { MODEL_LISTS } = await import("@marinara-engine/shared");
         const models = MODEL_LISTS.claude_subscription.map((m) => ({ id: m.id, name: m.name }));
         return { models };
+      }
+
+      if (conn.provider === "openai_chatgpt") {
+        try {
+          const models = await fetchOpenAIChatGPTModels();
+          if (models.length > 0) return { models };
+        } catch {
+          // Fall through to the curated list so the selector remains usable
+          // before the host has run `codex login`.
+        }
+        return { models: MODEL_LISTS.openai_chatgpt.map((m) => ({ id: m.id, name: m.name })) };
       }
 
       const { PROVIDERS } = await import("@marinara-engine/shared");
@@ -384,6 +406,31 @@ export async function connectionsRoutes(app: FastifyInstance) {
         return {
           models: data.map((m) => ({ id: m.id ?? "", name: m.name ?? m.id ?? "" })).filter((m) => m.id),
         };
+      }
+
+      if (conn.provider === "image_generation" && imageSource === "openrouter") {
+        const modelsUrl = `${baseUrl}/models?output_modalities=image`;
+        const res = await safeFetch(modelsUrl, {
+          headers,
+          policy: localUrlPolicyForProvider(conn.provider, imageSource),
+          maxResponseBytes: 5 * 1024 * 1024,
+        });
+        if (!res.ok) {
+          const body = await res.text();
+          return reply.status(502).send({
+            error: `OpenRouter returned ${res.status}: ${sanitizeProviderBody(body)}`,
+          });
+        }
+        const text = await res.text();
+        let json: Record<string, unknown>;
+        try {
+          json = JSON.parse(text) as Record<string, unknown>;
+        } catch {
+          return reply.status(502).send({
+            error: `Failed to fetch models: ${sanitizeProviderBody(text)}`,
+          });
+        }
+        return { models: normalizeModelsResponse("openrouter", json) };
       }
 
       let modelsUrl = `${baseUrl}${provider?.modelsEndpoint ?? "/models"}`;
@@ -583,9 +630,9 @@ export async function connectionsRoutes(app: FastifyInstance) {
     const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
     const baseUrl = (conn.baseUrl || providerDef?.defaultBaseUrl || "").replace(/\/+$/, "");
 
-    // Claude (Subscription) is HTTP-less — the SDK manages the endpoint, so
-    // skip the baseUrl precondition. Every other provider still requires one.
-    if (!baseUrl && conn.provider !== "claude_subscription") {
+    // Local subscription/session providers manage their own endpoint, so skip
+    // the baseUrl precondition. Every HTTP provider still requires one.
+    if (!baseUrl && conn.provider !== "claude_subscription" && conn.provider !== "openai_chatgpt") {
       return reply.status(400).send({ error: "No base URL configured" });
     }
 

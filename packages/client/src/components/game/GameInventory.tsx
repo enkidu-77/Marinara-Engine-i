@@ -5,7 +5,6 @@ import { cn } from "../../lib/utils";
 
 export interface InventoryItem {
   name: string;
-  description?: string;
   quantity: number;
 }
 
@@ -189,7 +188,7 @@ export function GameInventory({
                     title={item ? (item.quantity > 1 ? `${item.name} ×${item.quantity}` : item.name) : undefined}
                     aria-label={item ? (item.quantity > 1 ? `${item.name} x${item.quantity}` : item.name) : undefined}
                     className={cn(
-                      "group relative flex aspect-square flex-col items-center justify-center rounded border transition-all",
+                      "group relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded border transition-all",
                       item
                         ? selectedItem === item.name
                           ? "border-amber-500/50 bg-amber-500/10 shadow-[inset_0_0_12px_rgba(245,158,11,0.08)]"
@@ -202,9 +201,9 @@ export function GameInventory({
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-gradient-to-b from-white/8 to-white/[0.02] text-sm font-bold text-amber-400/80 ring-1 ring-white/8">
                           {item.name.charAt(0).toUpperCase()}
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="truncate text-[0.75rem] font-medium leading-tight text-white/80">
+                        <div className="mt-1 flex w-full min-w-0 flex-1 flex-col items-center justify-center px-1">
+                          <div className="flex min-w-0 flex-col items-center gap-0.5">
+                            <span className="w-full whitespace-normal break-words text-center text-[0.58rem] font-medium leading-tight text-white/80 [overflow-wrap:anywhere]">
                               {item.name}
                             </span>
                             {item.quantity > 1 && (
@@ -213,11 +212,6 @@ export function GameInventory({
                               </span>
                             )}
                           </div>
-                          {item.description && (
-                            <p className="mt-0.5 line-clamp-2 text-[0.65rem] leading-snug text-white/45">
-                              {item.description}
-                            </p>
-                          )}
                         </div>
                       </>
                     )}
@@ -238,8 +232,8 @@ export function GameInventory({
         {(selectedItem || onAddItem) && (
           <div className="border-t border-white/8 bg-white/[0.02] px-4 py-2.5">
             {selectedItem ? (
-              <div className="mb-2 text-[0.7rem] font-medium text-white/60">
-                {selectedInventoryItem?.description || selectedItem}
+              <div className="mb-2 whitespace-normal break-words text-[0.7rem] font-medium text-white/60 [overflow-wrap:anywhere]">
+                {selectedItem}
               </div>
             ) : (
               <div className="mb-2 text-[0.7rem] font-medium text-white/45">Add a new item, then rename it.</div>

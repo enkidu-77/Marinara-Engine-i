@@ -25,6 +25,17 @@ export const PROVIDERS: Record<APIProvider, ProviderDefinition> = {
     usesAuthHeader: true,
     apiKeyHeader: null,
   },
+  openai_chatgpt: {
+    id: "openai_chatgpt",
+    name: "OpenAI (ChatGPT)",
+    // No user-entered endpoint or API key. Marinara reads the local Codex
+    // ChatGPT login and routes through ChatGPT's Codex backend.
+    defaultBaseUrl: "",
+    modelsEndpoint: "",
+    supportsStreaming: true,
+    usesAuthHeader: false,
+    apiKeyHeader: null,
+  },
   anthropic: {
     id: "anthropic",
     name: "Anthropic",

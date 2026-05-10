@@ -69,6 +69,7 @@ export interface ImageGenResult {
 const EXPLICIT_IMAGE_SOURCES = new Set([
   "openai",
   "nanogpt",
+  "openrouter",
   "pollinations",
   "stability",
   "togetherai",
@@ -124,6 +125,8 @@ export async function generateImage(
       return generateOpenAI(normalizedBaseUrl, apiKey, scopedRequest);
     case "nanogpt":
       return generateNanoGPT(normalizedBaseUrl, apiKey, scopedRequest);
+    case "openrouter":
+      return generateOpenRouter(normalizedBaseUrl, apiKey, scopedRequest);
     case "pollinations":
       return generatePollinations(scopedRequest);
     case "stability":
@@ -353,13 +356,14 @@ function openAIReferenceImages(request: ImageGenRequest): string[] {
     : request.referenceImage
       ? [request.referenceImage]
       : [];
-  return references.map((reference) => reference.trim()).filter(Boolean).slice(0, 16);
+  return references
+    .map((reference) => reference.trim())
+    .filter(Boolean)
+    .slice(0, 16);
 }
 
 function decodeReferenceImage(reference: string): { base64: string; mimeType: string; ext: string } {
-  const dataUrlMatch = reference
-    .trim()
-    .match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,([\s\S]+)$/i);
+  const dataUrlMatch = reference.trim().match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,([\s\S]+)$/i);
   if (dataUrlMatch) {
     const mimeType = dataUrlMatch[1]!.toLowerCase().replace("image/jpg", "image/jpeg");
     const base64 = dataUrlMatch[2]!.replace(/\s+/g, "");
@@ -966,11 +970,7 @@ function injectPngTextChunk(png: Buffer, keyword: string, text: string): Buffer 
 }
 
 function buildPngInternationalTextData(keyword: string, text: string): Buffer {
-  return Buffer.concat([
-    Buffer.from(keyword, "latin1"),
-    Buffer.from([0, 0, 0, 0, 0]),
-    Buffer.from(text, "utf8"),
-  ]);
+  return Buffer.concat([Buffer.from(keyword, "latin1"), Buffer.from([0, 0, 0, 0, 0]), Buffer.from(text, "utf8")]);
 }
 
 function buildPngChunk(type: string, data: Buffer): Buffer {
@@ -1056,6 +1056,134 @@ function extractFirstFileFromZip(zip: Uint8Array): Uint8Array | null {
   return null;
 }
 
+function chatCompletionsUrl(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  try {
+    const url = new URL(trimmed);
+    const path = url.pathname.replace(/\/+$/, "");
+    if (!path.endsWith("/chat/completions")) {
+      url.pathname =
+        path.endsWith("/v1") || path.endsWith("/api/v1") ? `${path}/chat/completions` : `${path}/chat/completions`;
+    }
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return `${trimmed}/chat/completions`;
+  }
+}
+
+function buildChatImageMessageContent(request: ImageGenRequest): string | Array<Record<string, unknown>> {
+  const refImages = request.referenceImages ?? (request.referenceImage ? [request.referenceImage] : []);
+  const prompt = request.negativePrompt
+    ? `${request.prompt}\n\nAvoid in the image: ${request.negativePrompt}`
+    : request.prompt;
+  if (refImages.length > 0) {
+    const parts: Array<Record<string, unknown>> = refImages.map((b64) => ({
+      type: "image_url",
+      image_url: { url: `data:image/png;base64,${b64}` },
+    }));
+    parts.push({ type: "text", text: prompt });
+    return parts;
+  }
+  return prompt;
+}
+
+function extractImageUrlFromMessage(message: unknown): string | null {
+  if (!message || typeof message !== "object") return null;
+  const record = message as Record<string, unknown>;
+  const images = Array.isArray(record.images) ? record.images : [];
+  for (const image of images) {
+    if (!image || typeof image !== "object") continue;
+    const imageRecord = image as Record<string, unknown>;
+    const snake = imageRecord.image_url;
+    if (snake && typeof snake === "object" && typeof (snake as Record<string, unknown>).url === "string") {
+      return (snake as { url: string }).url;
+    }
+    const camel = imageRecord.imageUrl;
+    if (camel && typeof camel === "object" && typeof (camel as Record<string, unknown>).url === "string") {
+      return (camel as { url: string }).url;
+    }
+    if (typeof imageRecord.url === "string") return imageRecord.url;
+  }
+
+  const content = typeof record.content === "string" ? record.content : "";
+  const mdMatch = content.match(/!\[[^\]]*\]\(([^)]+)\)/);
+  const dataUrlMatch = content.match(/data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+/i);
+  return mdMatch?.[1] ?? dataUrlMatch?.[0] ?? content.match(/https?:\/\/\S+\.(png|jpg|jpeg|webp|gif)/i)?.[0] ?? null;
+}
+
+function openRouterAspectRatio(width?: number, height?: number): string | null {
+  if (!width || !height) return null;
+  const ratio = width / Math.max(1, height);
+  const candidates = [
+    ["21:9", 21 / 9],
+    ["16:9", 16 / 9],
+    ["3:2", 3 / 2],
+    ["5:4", 5 / 4],
+    ["4:3", 4 / 3],
+    ["1:1", 1],
+    ["3:4", 3 / 4],
+    ["4:5", 4 / 5],
+    ["2:3", 2 / 3],
+    ["9:16", 9 / 16],
+  ] as const;
+  return candidates.reduce((best, candidate) =>
+    Math.abs(candidate[1] - ratio) < Math.abs(best[1] - ratio) ? candidate : best,
+  )[0];
+}
+
+function openRouterModalities(model?: string): string[] {
+  const lower = model?.trim().toLowerCase() ?? "";
+  if (lower.startsWith("black-forest-labs/") || lower.startsWith("sourceful/") || lower.startsWith("recraft/")) {
+    return ["image"];
+  }
+  return ["image", "text"];
+}
+
+async function generateOpenRouter(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
+  const body: Record<string, unknown> = {
+    model: request.model || "google/gemini-2.5-flash-image",
+    messages: [{ role: "user", content: buildChatImageMessageContent(request) }],
+    modalities: openRouterModalities(request.model),
+    stream: false,
+  };
+  const aspectRatio = openRouterAspectRatio(request.width, request.height);
+  if (aspectRatio) body.image_config = { aspect_ratio: aspectRatio };
+
+  const resp = await imageFetch(
+    chatCompletionsUrl(baseUrl),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
+    },
+    { allowLocal: request.allowLocalUrls },
+  );
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "Unknown error");
+    throw new Error(`OpenRouter image generation failed (${resp.status}): ${sanitizeErrorText(errText)}`);
+  }
+
+  const data = (await resp.json()) as { choices?: Array<{ message?: unknown }> };
+  const message = data.choices?.[0]?.message;
+  const imageUrl = extractImageUrlFromMessage(message);
+  if (!imageUrl) {
+    const content =
+      message && typeof message === "object" && typeof (message as Record<string, unknown>).content === "string"
+        ? ((message as Record<string, string>).content ?? "")
+        : "";
+    throw new Error(`No image data in OpenRouter response: ${content.slice(0, 200)}`);
+  }
+
+  return downloadImageUrl(imageUrl, request.allowLocalUrls);
+}
+
 /**
  * Generate an image via an OpenAI-compatible chat completions endpoint.
  * Some proxies (LinkAPI, etc.) expose image models through /chat/completions
@@ -1066,21 +1194,8 @@ async function generateViaChatCompletions(
   apiKey: string,
   request: ImageGenRequest,
 ): Promise<ImageGenResult> {
-  const url = `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
-
-  // Build multimodal content parts: reference images first, then the text prompt
-  const refImages = request.referenceImages ?? (request.referenceImage ? [request.referenceImage] : []);
-  let messageContent: string | Array<Record<string, unknown>>;
-  if (refImages.length > 0) {
-    const parts: Array<Record<string, unknown>> = refImages.map((b64) => ({
-      type: "image_url",
-      image_url: { url: `data:image/png;base64,${b64}` },
-    }));
-    parts.push({ type: "text", text: request.prompt });
-    messageContent = parts;
-  } else {
-    messageContent = request.prompt;
-  }
+  const url = chatCompletionsUrl(baseUrl);
+  const messageContent = buildChatImageMessageContent(request);
 
   const resp = await imageFetch(
     url,
@@ -1107,16 +1222,16 @@ async function generateViaChatCompletions(
   }
 
   const data = (await resp.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{ message?: unknown }>;
   };
-  const content = data.choices?.[0]?.message?.content ?? "";
-
-  // Extract image URL from markdown, inline data URLs, or plain https:// URLs.
-  const mdMatch = content.match(/!\[[^\]]*\]\(([^)]+)\)/);
-  const dataUrlMatch = content.match(/data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+/i);
-  const imageUrl = mdMatch?.[1] ?? dataUrlMatch?.[0] ?? content.match(/https?:\/\/\S+\.(png|jpg|jpeg|webp|gif)/i)?.[0];
+  const message = data.choices?.[0]?.message;
+  const imageUrl = extractImageUrlFromMessage(message);
 
   if (!imageUrl) {
+    const content =
+      message && typeof message === "object" && typeof (message as Record<string, unknown>).content === "string"
+        ? ((message as Record<string, string>).content ?? "")
+        : "";
     throw new Error(`No image URL found in proxy response: ${content.slice(0, 200)}`);
   }
 

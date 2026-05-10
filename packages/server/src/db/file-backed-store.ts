@@ -1042,10 +1042,7 @@ class FileTableStore {
     const counts: Record<string, number> = {};
     for (const table of FILE_BACKED_TABLES) {
       const meta = getMeta(table);
-      const { value: rows, recoveredFromBackup } = parseJsonFile<Row[]>(
-        tableFilePath(this.rootDir, table),
-        [],
-      );
+      const { value: rows, recoveredFromBackup } = parseJsonFile<Row[]>(tableFilePath(this.rootDir, table), []);
       const normalized = (Array.isArray(rows) ? rows : []).map((row) => normalizeRow(meta, row));
       this.tables.set(table, normalized);
       counts[table] = normalized.length;

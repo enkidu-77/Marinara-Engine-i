@@ -457,6 +457,7 @@ export function useGenerate() {
       mentionedCharacterNames?: string[];
       forCharacterId?: string;
       generationGuide?: string;
+      agentInjectionOverrides?: Array<{ agentType: string; text: string }>;
       impersonatePresetId?: string;
       impersonateConnectionId?: string;
       impersonateBlockAgents?: boolean;
@@ -784,6 +785,15 @@ export function useGenerate() {
 
             case "agent_warning": {
               showAgentWarning(event.data);
+              break;
+            }
+
+            case "agent_injection_review": {
+              window.dispatchEvent(
+                new CustomEvent("marinara:agent-injection-review", {
+                  detail: event.data,
+                }),
+              );
               break;
             }
 

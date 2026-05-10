@@ -18,6 +18,7 @@ import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { extractLeadingThinkingBlocks } from "../services/llm/inline-thinking.js";
 import { fitMessagesToContext, type ChatMessage, type ChatOptions } from "../services/llm/base-provider.js";
 import { isDiceNotation, rollDice } from "../services/game/dice.service.js";
+import { parseGameJsonish } from "../services/game/jsonish.js";
 import { validateTransition } from "../services/game/state-machine.service.js";
 import {
   buildSetupPrompt,
@@ -28,7 +29,7 @@ import {
   type GmPromptContext,
 } from "../services/game/gm-prompts.js";
 import { buildPartySystemPrompt } from "../services/game/party-prompts.js";
-import { buildPromptMacroContext } from "../services/prompt/index.js";
+import { buildPromptMacroContext, getCharacterDescriptionWithExtensions } from "../services/prompt/index.js";
 import { listPartySprites, readPreferredFullBodySpriteBase64 } from "../services/game/sprite.service.js";
 import {
   buildSceneAnalyzerSystemPrompt,
@@ -1225,6 +1226,7 @@ async function resolveConnection(
   // Claude (Subscription) uses the local Claude Agent SDK and has no HTTP
   // endpoint — return a sentinel so the gate passes. The provider ignores it.
   if (!baseUrl && conn.provider === "claude_subscription") baseUrl = "claude-agent-sdk://local";
+  if (!baseUrl && conn.provider === "openai_chatgpt") baseUrl = "openai-chatgpt://codex-auth";
   if (!baseUrl) throw new Error("No base URL configured for this connection");
 
   return { conn, baseUrl, defaultGenerationParameters: parseStoredGenerationParameters(conn.defaultParameters) };
@@ -1556,84 +1558,7 @@ function fitSessionConclusionMessages(args: {
 }
 
 function parseJSON(raw: string): unknown {
-  // Sanitise control characters that LLMs sometimes emit inside JSON string
-  // values (literal newlines, tabs, etc.) by replacing them with their
-  // escaped equivalents.  We only touch chars inside *string* regions to
-  // avoid corrupting the structural whitespace between keys/values.
-  function sanitise(src: string): string {
-    let out = "";
-    let inStr = false;
-    let esc = false;
-    for (let i = 0; i < src.length; i++) {
-      const ch = src[i]!;
-      if (esc) {
-        out += ch;
-        esc = false;
-        continue;
-      }
-      if (ch === "\\" && inStr) {
-        out += ch;
-        esc = true;
-        continue;
-      }
-      if (ch === '"') {
-        inStr = !inStr;
-        out += ch;
-        continue;
-      }
-      if (inStr) {
-        const code = ch.charCodeAt(0);
-        if (code < 0x20) {
-          // Replace control chars with their JSON escape
-          if (ch === "\n") {
-            out += "\\n";
-          } else if (ch === "\r") {
-            out += "\\r";
-          } else if (ch === "\t") {
-            out += "\\t";
-          } else {
-            out += "\\u" + code.toString(16).padStart(4, "0");
-          }
-          continue;
-        }
-      }
-      out += ch;
-    }
-    return out;
-  }
-
-  // Try parsing the whole string first (most reliable)
-  try {
-    return JSON.parse(raw.trim());
-  } catch {
-    // Fall through to extraction
-  }
-
-  let cleaned = raw
-    .trim()
-    .replace(/^```(?:json|markdown)?\s*\n?/i, "")
-    .replace(/\n?```\s*$/i, "");
-
-  // Try again after stripping code fences
-  try {
-    return JSON.parse(cleaned.trim());
-  } catch {
-    // Fall through to sanitisation
-  }
-
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start !== -1 && end > start) {
-    cleaned = cleaned.slice(start, end + 1);
-  }
-
-  // Sanitise control characters inside string values and retry
-  try {
-    return JSON.parse(sanitise(cleaned));
-  } catch {
-    // Fall through — last resort
-  }
-  return JSON.parse(cleaned);
+  return parseGameJsonish(raw);
 }
 
 type GameLorebookKeeperEntry = {
@@ -3115,7 +3040,8 @@ export async function gameRoutes(app: FastifyInstance) {
         const data = typeof gmChar.data === "string" ? JSON.parse(gmChar.data) : gmChar.data;
         const parts = [`Name: ${data.name}`];
         if (data.personality) parts.push(`Personality: ${data.personality}`);
-        if (data.description) parts.push(`Description: ${data.description}`);
+        const description = getCharacterDescriptionWithExtensions(data);
+        if (description) parts.push(`Description: ${description}`);
         const gmBackstory = data.extensions?.backstory || data.backstory;
         const gmAppearance = data.extensions?.appearance || data.appearance;
         if (gmBackstory) parts.push(`Backstory: ${gmBackstory}`);
@@ -3154,7 +3080,8 @@ export async function gameRoutes(app: FastifyInstance) {
           partyNames.push(data.name.trim());
         }
         if (data.personality) parts.push(`Personality: ${data.personality}`);
-        if (data.description) parts.push(`Description: ${data.description}`);
+        const description = getCharacterDescriptionWithExtensions(data);
+        if (description) parts.push(`Description: ${description}`);
         const pcBackstory = data.extensions?.backstory || data.backstory;
         const pcAppearance = data.extensions?.appearance || data.appearance;
         if (pcBackstory) parts.push(`Backstory: ${pcBackstory}`);
@@ -5638,10 +5565,11 @@ export async function gameRoutes(app: FastifyInstance) {
         const charRow = await chars.getById(charId);
         if (!charRow) continue;
         const charData = typeof charRow.data === "string" ? JSON.parse(charRow.data) : charRow.data;
+        const description = getCharacterDescriptionWithExtensions(charData);
         const card = [
           `Name: ${charData.name}`,
           charData.personality ? `Personality: ${charData.personality}` : null,
-          charData.description ? `Description: ${charData.description}` : null,
+          description ? `Description: ${description}` : null,
           charData.extensions?.backstory || charData.backstory
             ? `Backstory: ${charData.extensions?.backstory || charData.backstory}`
             : null,
@@ -6497,11 +6425,12 @@ export async function gameRoutes(app: FastifyInstance) {
       .array(
         z.object({
           name: z.string().min(1).max(200),
-          description: z.string().min(1).max(1000),
+          description: z.string().max(1000),
         }),
       )
       .max(10)
       .optional(),
+    forceNpcAvatarNames: z.array(z.string().min(1).max(200)).max(10).optional(),
     illustration: z
       .object({
         segment: z.number().int().min(0).max(500).optional(),
@@ -6666,6 +6595,9 @@ export async function gameRoutes(app: FastifyInstance) {
     }
 
     if (input.npcsNeedingAvatars?.length) {
+      const forceNpcAvatarNames = new Set(
+        (input.forceNpcAvatarNames ?? []).map((name) => normalizeJournalMatch(name)).filter(Boolean),
+      );
       const currentNpcs = (meta.gameNpcs as GameNpc[]) ?? [];
       const existingNpcAvatarByName = new Map<string, string>();
       for (const currentNpc of currentNpcs) {
@@ -6698,8 +6630,10 @@ export async function gameRoutes(app: FastifyInstance) {
       }
 
       for (const npc of input.npcsNeedingAvatars) {
-        if (existingNpcAvatarByName.get(normalizeJournalMatch(npc.name))) continue;
-        if (findCharAvatarFuzzy(npc.name, charAvatarByName)) continue;
+        const normalizedNpcName = normalizeJournalMatch(npc.name);
+        const forceNpcAvatar = forceNpcAvatarNames.has(normalizedNpcName);
+        if (!forceNpcAvatar && existingNpcAvatarByName.get(normalizedNpcName)) continue;
+        if (!forceNpcAvatar && findCharAvatarFuzzy(npc.name, charAvatarByName)) continue;
 
         const prompt = await buildNpcPortraitImagePrompt({
           chatId: input.chatId,
@@ -6961,6 +6895,9 @@ export async function gameRoutes(app: FastifyInstance) {
 
     // ── Generate NPC avatars ──
     if (input.npcsNeedingAvatars?.length) {
+      const forceNpcAvatarNames = new Set(
+        (input.forceNpcAvatarNames ?? []).map((name) => normalizeJournalMatch(name)).filter(Boolean),
+      );
       const latestChat = await chats.getById(input.chatId);
       const latestMeta = latestChat ? parseMeta(latestChat.metadata) : meta;
       const currentNpcs = (latestMeta.gameNpcs as GameNpc[]) ?? [];
@@ -6996,15 +6933,17 @@ export async function gameRoutes(app: FastifyInstance) {
       }
 
       for (const npc of input.npcsNeedingAvatars) {
+        const normalizedNpcName = normalizeJournalMatch(npc.name);
+        const forceNpcAvatar = forceNpcAvatarNames.has(normalizedNpcName);
         const existingAvatarUrl = existingNpcAvatarByName.get(normalizeJournalMatch(npc.name));
-        if (existingAvatarUrl) {
+        if (!forceNpcAvatar && existingAvatarUrl) {
           logger.info('[game/generate-assets] NPC avatar exists, skipping generation: "%s"', npc.name);
           generatedNpcAvatars.push({ name: npc.name, avatarUrl: existingAvatarUrl });
           continue;
         }
 
         const libAvatar = findCharAvatarFuzzy(npc.name, charAvatarByName);
-        if (libAvatar) {
+        if (!forceNpcAvatar && libAvatar) {
           generatedNpcAvatars.push({ name: npc.name, avatarUrl: libAvatar });
           continue;
         }
@@ -7024,9 +6963,13 @@ export async function gameRoutes(app: FastifyInstance) {
           promptOverridesStorage: createPromptOverridesStorage(app.db),
           size: portraitSize,
           promptOverride: promptOverrideById.get(gameImagePromptReviewId("portrait", npc.name)),
+          force: forceNpcAvatar,
         });
         if (avatarUrl) {
-          generatedNpcAvatars.push({ name: npc.name, avatarUrl });
+          generatedNpcAvatars.push({
+            name: npc.name,
+            avatarUrl: forceNpcAvatar ? `${avatarUrl.split("?")[0]}?v=${Date.now()}` : avatarUrl,
+          });
         }
       }
 

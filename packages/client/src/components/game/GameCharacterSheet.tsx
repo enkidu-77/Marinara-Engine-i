@@ -940,8 +940,10 @@ export function GameCharacterSheet({
                     key={`${item.name}-${item.location ?? "bag"}`}
                     className="flex items-center justify-between rounded-lg bg-[var(--secondary)] px-2.5 py-1.5 text-xs"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="text-[var(--foreground)]/80">{item.name}</span>
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                      <span className="min-w-0 whitespace-normal break-words text-[var(--foreground)]/80 [overflow-wrap:anywhere]">
+                        {item.name}
+                      </span>
                       {item.location && (
                         <span className="rounded bg-[var(--primary)]/10 px-1.5 py-0.5 text-[0.5625rem] text-[var(--muted-foreground)]">
                           {item.location}

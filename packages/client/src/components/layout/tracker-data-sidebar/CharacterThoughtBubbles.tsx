@@ -190,10 +190,7 @@ export function ExternalThoughtBubble({
       const left = Math.round(Math.max(viewportMargin, Math.min(maxLeft, desiredLeft)));
       const top = Math.round(Math.max(viewportMargin, Math.min(maxTop, desiredTop)));
       setPosition((current) =>
-        current?.left === left &&
-        current.top === top &&
-        current.width === width &&
-        current.outsideSide === outsideSide
+        current?.left === left && current.top === top && current.width === width && current.outsideSide === outsideSide
           ? current
           : { left, top, width, outsideSide },
       );
@@ -224,4 +221,3 @@ export function ExternalThoughtBubble({
     document.body,
   );
 }
-

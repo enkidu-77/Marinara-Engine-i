@@ -44,11 +44,12 @@ import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { resolveConnectionImageDefaults } from "../services/image/image-generation-defaults.js";
 import { loadImageGenerationUserSettings } from "../services/image/image-generation-settings.js";
 import { extractLeadingThinkingBlocks } from "../services/llm/inline-thinking.js";
-import { resolveSpotifyCredentials } from "../services/spotify/spotify.service.js";
+import { resolveSpotifyCredentials, spotifyHasScope } from "../services/spotify/spotify.service.js";
 import {
   assemblePrompt,
   buildPromptMacroContext,
   collectCharacterDepthPromptEntries,
+  getCharacterDescriptionWithExtensions,
   type AssemblerInput,
 } from "../services/prompt/index.js";
 import { mergeAdjacentMessages } from "../services/prompt/merger.js";
@@ -86,6 +87,7 @@ import {
   type UpdateCharacterCommand,
   type UpdatePersonaCommand,
   type CreateLorebookCommand,
+  type UpdateLorebookCommand,
   type CreateChatCommand,
   type NavigateCommand,
   type FetchCommand,
@@ -567,6 +569,15 @@ function formatAgentInjections(injections: AgentInjection[], wrapFormat: string)
   }
   return parts.join("\n\n");
 }
+
+const REVIEWABLE_WRITER_AGENT_TYPES = new Set(
+  BUILT_IN_AGENTS.filter(
+    (agent) =>
+      agent.category === "writer" &&
+      agent.phase === "pre_generation" &&
+      !["knowledge-retrieval", "knowledge-router"].includes(agent.id),
+  ).map((agent) => agent.id),
+);
 
 function normalizeChatTopP(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
@@ -1059,6 +1070,7 @@ export async function generateRoutes(app: FastifyInstance) {
         providerMetadata?: Record<string, unknown>;
       }> = mappedMessages;
       let conversationCommandsReminder: string | null = null;
+      const conversationCommandsEnabled = chatMode === "conversation" && chatMeta.characterCommands !== false;
       let temperature = 1;
       let maxTokens = 4096;
       let topP: number | undefined = 1;
@@ -1806,8 +1818,7 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         // ── Character Commands: build a commands block if any features are enabled ──
-        const enableCharCommands = chatMeta.characterCommands !== false; // on by default for conversation mode
-        if (enableCharCommands) {
+        if (conversationCommandsEnabled) {
           // Discover other chats this character is in (for cross_post targets + memory targets)
           const allChatsForCrossPost = await chats.list();
           const crossPostTargets: string[] = [];
@@ -1844,13 +1855,18 @@ export async function generateRoutes(app: FastifyInstance) {
           // Check if selfie is enabled for this chat (user picked an image gen connection)
           const hasImageGen = !!chatMeta.imageGenConnectionId;
           let conversationSpotifyCommandsAvailable = false;
-          if (chatMode === "conversation" && chatMeta.conversationSpotifyCommandsEnabled === true) {
+          if (chatMode === "conversation") {
             try {
               const spotifyCredentials = await resolveSpotifyCredentials(agentsStore, { refreshSkewMs: 60_000 });
-              if ("accessToken" in spotifyCredentials) {
+              if (
+                "accessToken" in spotifyCredentials &&
+                spotifyHasScope(spotifyCredentials.scopes, "user-modify-playback-state")
+              ) {
                 conversationSpotifyCommandsAvailable = true;
               } else {
-                logger.debug("[spotify/conversation] Song commands disabled: %s", spotifyCredentials.error);
+                const spotifyReason =
+                  "error" in spotifyCredentials ? spotifyCredentials.error : "missing user-modify-playback-state scope";
+                logger.debug("[spotify/conversation] Song command unavailable: %s", spotifyReason);
               }
             } catch (err) {
               logger.debug(err, "[spotify/conversation] Failed to check Spotify command availability");
@@ -2657,13 +2673,18 @@ export async function generateRoutes(app: FastifyInstance) {
       // Build ResolvedAgent array — each agent gets its own provider/model or falls back to chat connection
       const resolvedAgents: ResolvedAgent[] = [];
       // Cache per-connection providers so agents sharing the same connection batch together
-      const agentProviderCache = new Map<string, { provider: BaseLLMProvider; model: string }>();
+      const chatConnectionMaxParallelJobs = Number(conn.maxParallelJobs) || 1;
+      const agentProviderCache = new Map<
+        string,
+        { provider: BaseLLMProvider; model: string; maxParallelJobs: number }
+      >();
       const localSidecarAvailableForTrackers =
         sidecarModelService.getConfig().useForTrackers && sidecarModelService.getConfiguredModelRef() !== null;
       if (localSidecarAvailableForTrackers) {
         agentProviderCache.set(LOCAL_SIDECAR_CONNECTION_ID, {
           provider: getLocalSidecarProvider(),
           model: LOCAL_SIDECAR_MODEL,
+          maxParallelJobs: 1,
         });
       }
 
@@ -2682,6 +2703,7 @@ export async function generateRoutes(app: FastifyInstance) {
               defaultAgentConn.maxTokensOverride,
             ),
             model: defaultAgentConn.model,
+            maxParallelJobs: Number(defaultAgentConn.maxParallelJobs) || 1,
           });
         }
       }
@@ -2695,6 +2717,7 @@ export async function generateRoutes(app: FastifyInstance) {
         const settings = cfg.settings ? JSON.parse(cfg.settings as string) : {};
         let agentProvider = provider;
         let agentModel = conn.model;
+        let agentMaxParallelJobs = chatConnectionMaxParallelJobs;
 
         // Resolve connection: per-agent override > default-for-agents > chat connection
         const effectiveConnectionId = resolveAgentConnectionId({
@@ -2720,6 +2743,7 @@ export async function generateRoutes(app: FastifyInstance) {
           if (cached) {
             agentProvider = cached.provider;
             agentModel = cached.model;
+            agentMaxParallelJobs = cached.maxParallelJobs;
           } else {
             const agentConn = await connections.getWithKey(effectiveConnectionId);
             if (agentConn) {
@@ -2734,7 +2758,12 @@ export async function generateRoutes(app: FastifyInstance) {
                   agentConn.maxTokensOverride,
                 );
                 agentModel = agentConn.model;
-                agentProviderCache.set(effectiveConnectionId, { provider: agentProvider, model: agentModel });
+                agentMaxParallelJobs = Number(agentConn.maxParallelJobs) || 1;
+                agentProviderCache.set(effectiveConnectionId, {
+                  provider: agentProvider,
+                  model: agentModel,
+                  maxParallelJobs: agentMaxParallelJobs,
+                });
               }
             }
           }
@@ -2750,6 +2779,7 @@ export async function generateRoutes(app: FastifyInstance) {
           settings,
           provider: agentProvider,
           model: agentModel,
+          maxParallelJobs: agentMaxParallelJobs,
         });
       }
       if (skippedLocalSidecarAgents.length > 0) {
@@ -2787,6 +2817,7 @@ export async function generateRoutes(app: FastifyInstance) {
           settings: builtInSettings,
           provider: builtInCached?.provider ?? provider,
           model: builtInCached?.model ?? conn.model,
+          maxParallelJobs: builtInCached?.maxParallelJobs ?? chatConnectionMaxParallelJobs,
         });
       }
 
@@ -2867,10 +2898,11 @@ export async function generateRoutes(app: FastifyInstance) {
           if (chatMode !== "conversation" && charData.extensions?.isBuiltInAssistant) {
             scenario = scenario.replace(/<assistant_capabilities>[\s\S]*?<\/assistant_capabilities>/gi, "").trim();
           }
+          const description = getCharacterDescriptionWithExtensions(charData);
           charInfo.push({
             id: cid,
             name: charData.name ?? "Unknown",
-            description: charData.description ?? "",
+            description,
             personality: charData.personality ?? "",
             scenario,
             creatorNotes: charData.creator_notes ?? "",
@@ -4391,7 +4423,12 @@ export async function generateRoutes(app: FastifyInstance) {
       const resolveTools = enableChatTools || enableAgentTools;
       let toolDefs: LLMToolDefinition[] | undefined;
       const allToolDefs: LLMToolDefinition[] = [];
-      const agentOnlyToolNames = new Set(["read_chat_summary", "append_chat_summary"]);
+      const agentOnlyToolNames = new Set([
+        "read_chat_summary",
+        "append_chat_summary",
+        "read_chat_variable",
+        "write_chat_variable",
+      ]);
       const customToolDefs: Array<{
         name: string;
         executionType: string;
@@ -4630,13 +4667,17 @@ export async function generateRoutes(app: FastifyInstance) {
       // prose-guardian) which improve writing quality and should run every time.
       // On regens, reuse cached injections from the first generation to save tokens.
       // Post-gen agents still run after every response.
-      let contextInjections: AgentInjection[] = [];
+      const reviewedAgentInjections: AgentInjection[] = input.agentInjectionOverrides
+        .map((entry) => ({ agentType: entry.agentType.trim(), text: entry.text }))
+        .filter((entry) => entry.agentType && entry.text.trim().length > 0);
+      const reviewedAgentTypes = new Set(reviewedAgentInjections.map((entry) => entry.agentType));
+      let contextInjections: AgentInjection[] = reviewedAgentInjections;
       // Static-injection agents don't need LLM calls — they inject prompt text directly
       const STATIC_INJECTION_AGENTS = new Set(["html"]);
       const SEPARATE_INJECTION_AGENTS = new Set(["knowledge-retrieval", "knowledge-router"]);
       const EXCLUDED_FROM_PIPELINE = new Set(["html", "knowledge-retrieval", "knowledge-router"]);
       const hasPreGenAgents = resolvedAgents.some(
-        (a) => a.phase === "pre_generation" && !EXCLUDED_FROM_PIPELINE.has(a.type),
+        (a) => a.phase === "pre_generation" && !EXCLUDED_FROM_PIPELINE.has(a.type) && !reviewedAgentTypes.has(a.type),
       );
 
       // ── Run pre-gen agents, knowledge retrieval, and knowledge router in parallel when possible ──
@@ -4650,7 +4691,7 @@ export async function generateRoutes(app: FastifyInstance) {
         knowledgeRouterEntries.length > 0 &&
         !input.regenerateMessageId
       );
-      const shouldRunPreGen = hasPreGenAgents && !input.regenerateMessageId;
+      const shouldRunPreGen = (hasPreGenAgents || reviewedAgentInjections.length > 0) && !input.regenerateMessageId;
 
       // Helper: wrap a separate-injection agent's text and append it to the last
       // user message. Used by both knowledge-retrieval and knowledge-router on
@@ -4686,7 +4727,7 @@ export async function generateRoutes(app: FastifyInstance) {
         sendProgress("agents");
 
         // Build the pre-gen promise
-        const preGenPromise = shouldRunPreGen
+        const preGenPromise = hasPreGenAgents
           ? (async () => {
               reply.raw.write(
                 `data: ${JSON.stringify({ type: "agent_start", data: { phase: "pre_generation" } })}\n\n`,
@@ -4702,7 +4743,9 @@ export async function generateRoutes(app: FastifyInstance) {
                 );
               }
               const _tAgents = Date.now();
-              const injections = await pipeline.preGenerate((t) => !EXCLUDED_FROM_PIPELINE.has(t));
+              const injections = await pipeline.preGenerate(
+                (t) => !EXCLUDED_FROM_PIPELINE.has(t) && !reviewedAgentTypes.has(t),
+              );
               logger.debug(`[timing] Pre-gen agents: ${Date.now() - _tAgents}ms`);
               return injections;
             })()
@@ -4809,7 +4852,7 @@ export async function generateRoutes(app: FastifyInstance) {
 
         // Run all three in parallel
         const [preGenResult, krResult, routerResult] = await Promise.all([preGenPromise, krPromise, krRouterPromise]);
-        contextInjections = preGenResult;
+        contextInjections = [...reviewedAgentInjections, ...preGenResult];
 
         // ── Failure gate: only block generation if a critical pre-gen agent failed ──
         // The secret-plot-driver shapes narrative direction — generating without
@@ -4851,6 +4894,30 @@ export async function generateRoutes(app: FastifyInstance) {
         if (nonCriticalFailed.length > 0) {
           const failedNames = nonCriticalFailed.map((r) => r.agentType).join(", ");
           logger.warn(`[pre-gen] Non-critical agent(s) failed (${failedNames}) — continuing generation`);
+        }
+
+        const shouldReviewWriterAgentOutputs =
+          (chatMode === "roleplay" || chatMode === "visual_novel") &&
+          chatMeta.reviewWriterAgentOutputs === true &&
+          reviewedAgentInjections.length === 0 &&
+          !input.regenerateMessageId;
+        const reviewableWriterInjections = contextInjections.filter((entry) =>
+          REVIEWABLE_WRITER_AGENT_TYPES.has(entry.agentType),
+        );
+        if (shouldReviewWriterAgentOutputs && reviewableWriterInjections.length > 0) {
+          const agentNames = new Map(resolvedAgents.map((agent) => [agent.type, agent.name] as const));
+          sendSseEvent(reply, {
+            type: "agent_injection_review",
+            data: {
+              chatId: input.chatId,
+              injections: reviewableWriterInjections.map((entry) => ({
+                agentType: entry.agentType,
+                agentName: agentNames.get(entry.agentType) ?? entry.agentType,
+                text: entry.text,
+              })),
+            },
+          });
+          return;
         }
 
         // ── Secret Plot Driver: persist fresh state + build injection ──
@@ -5674,6 +5741,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   presencePenalty: presencePenalty || undefined,
                   tools: toolDefs,
                   enableCaching: conn.enableCaching === "true",
+                  cachingAtDepth: conn.cachingAtDepth ?? 5,
                   enableThinking,
                   captureReasoning,
                   reasoningEffort: resolvedEffort ?? undefined,
@@ -5814,6 +5882,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   frequencyPenalty: frequencyPenalty || undefined,
                   presencePenalty: presencePenalty || undefined,
                   enableCaching: conn.enableCaching === "true",
+                  cachingAtDepth: conn.cachingAtDepth ?? 5,
                   enableThinking,
                   captureReasoning,
                   reasoningEffort: resolvedEffort ?? undefined,
@@ -5861,6 +5930,7 @@ export async function generateRoutes(app: FastifyInstance) {
               presencePenalty: presencePenalty || undefined,
               stream: input.streaming,
               enableCaching: conn.enableCaching === "true",
+              cachingAtDepth: conn.cachingAtDepth ?? 5,
               enableThinking,
               captureReasoning,
               reasoningEffort: resolvedEffort ?? undefined,
@@ -5965,7 +6035,7 @@ export async function generateRoutes(app: FastifyInstance) {
             providerThinking = "";
             contentReplaced = true;
           }
-          if (chatMode === "conversation" && !input.impersonate) {
+          if (conversationCommandsEnabled && !input.impersonate) {
             const parsed = parseCharacterCommands(fullResponse);
             if (parsed.commands.length > 0) {
               parsedCommands = parsed.commands;
@@ -7613,6 +7683,7 @@ export async function generateRoutes(app: FastifyInstance) {
           "update_character",
           "update_persona",
           "create_lorebook",
+          "update_lorebook",
           "create_chat",
           "navigate",
           "fetch",
@@ -8014,8 +8085,8 @@ export async function generateRoutes(app: FastifyInstance) {
               if (command.type === "spotify") {
                 // ── Spotify: play a selected track on the user's active Spotify player ──
                 const spotifyCmd = command as SpotifyCommand;
-                if (chatMode !== "conversation" || chatMeta.conversationSpotifyCommandsEnabled !== true) {
-                  logger.debug("[spotify/conversation] Ignored song command because it is disabled for this chat");
+                if (chatMode !== "conversation") {
+                  logger.debug("[spotify/conversation] Ignored song command outside conversation mode");
                   continue;
                 }
                 try {
@@ -8344,6 +8415,7 @@ export async function generateRoutes(app: FastifyInstance) {
                       },
                       backstory: ccCmd.backstory ?? "",
                       appearance: ccCmd.appearance ?? "",
+                      altDescriptions: [],
                     },
                     character_book: null,
                   };
@@ -8530,6 +8602,114 @@ export async function generateRoutes(app: FastifyInstance) {
                   }
                 } catch (err) {
                   logger.error(err, "[commands] Create lorebook failed");
+                }
+              }
+
+              if (command.type === "update_lorebook") {
+                const ulCmd = command as UpdateLorebookCommand;
+                try {
+                  const allLorebooks = await lorebooksStore.list();
+                  const targetLorebook = (allLorebooks as any[]).find((lb: any) => {
+                    if (lb.id === ulCmd.name) return true;
+                    return lb.name?.toLowerCase() === ulCmd.name.toLowerCase();
+                  });
+
+                  if (!targetLorebook) {
+                    logger.warn('[commands] Update lorebook: "%s" not found', ulCmd.name);
+                  } else {
+                    const category =
+                      ulCmd.category === "character" ||
+                      ulCmd.category === "world" ||
+                      ulCmd.category === "npc" ||
+                      ulCmd.category === "spellbook" ||
+                      ulCmd.category === "uncategorized"
+                        ? ulCmd.category
+                        : undefined;
+                    const lorebookUpdates: Record<string, unknown> = {};
+                    if (ulCmd.newName !== undefined && ulCmd.newName.trim()) lorebookUpdates.name = ulCmd.newName;
+                    if (ulCmd.description !== undefined) lorebookUpdates.description = ulCmd.description;
+                    if (category !== undefined) lorebookUpdates.category = category;
+                    if (ulCmd.tags !== undefined) lorebookUpdates.tags = ulCmd.tags;
+                    if (Object.keys(lorebookUpdates).length > 0) {
+                      await lorebooksStore.update(targetLorebook.id, lorebookUpdates as any);
+                    }
+
+                    const existingEntries = (await lorebooksStore.listEntries(targetLorebook.id)) as any[];
+                    const existingByName = new Map(
+                      existingEntries.map((entry) => [
+                        String(entry.name ?? "")
+                          .trim()
+                          .toLowerCase(),
+                        entry,
+                      ]),
+                    );
+                    let updatedEntryCount = 0;
+                    let createdEntryCount = 0;
+
+                    for (const entry of ulCmd.entries ?? []) {
+                      const matchName = (entry.matchName || entry.name).trim().toLowerCase();
+                      const existingEntry = existingByName.get(matchName);
+                      if (existingEntry) {
+                        const entryUpdates: Record<string, unknown> = {};
+                        if (entry.name !== undefined) entryUpdates.name = entry.name;
+                        if (entry.content !== undefined) entryUpdates.content = entry.content;
+                        if (entry.description !== undefined) entryUpdates.description = entry.description;
+                        if (entry.keys !== undefined) entryUpdates.keys = entry.keys;
+                        if (entry.secondaryKeys !== undefined) entryUpdates.secondaryKeys = entry.secondaryKeys;
+                        if (entry.tag !== undefined) entryUpdates.tag = entry.tag;
+                        if (entry.constant !== undefined) entryUpdates.constant = entry.constant;
+                        if (entry.selective !== undefined) entryUpdates.selective = entry.selective;
+                        if (Object.keys(entryUpdates).length > 0) {
+                          const updatedEntry = await lorebooksStore.updateEntry(existingEntry.id, entryUpdates as any);
+                          if (updatedEntry) {
+                            updatedEntryCount += 1;
+                            existingByName.delete(matchName);
+                            existingByName.set(entry.name.trim().toLowerCase(), updatedEntry);
+                          }
+                        }
+                      } else {
+                        const createdEntry = await lorebooksStore.createEntry({
+                          lorebookId: targetLorebook.id,
+                          name: entry.name,
+                          content: entry.content ?? "",
+                          description: entry.description ?? "",
+                          keys: entry.keys ?? [],
+                          secondaryKeys: entry.secondaryKeys ?? [],
+                          tag: entry.tag ?? "",
+                          constant: entry.constant ?? false,
+                          selective: entry.selective ?? false,
+                          enabled: true,
+                        });
+                        if (createdEntry) {
+                          createdEntryCount += 1;
+                          existingByName.set(entry.name.trim().toLowerCase(), createdEntry);
+                        }
+                      }
+                    }
+
+                    const finalName = ulCmd.newName?.trim() || targetLorebook.name || ulCmd.name;
+                    reply.raw.write(
+                      `data: ${JSON.stringify({
+                        type: "assistant_action",
+                        data: {
+                          action: "lorebook_updated",
+                          id: targetLorebook.id,
+                          name: finalName,
+                          updatedEntryCount,
+                          createdEntryCount,
+                        },
+                      })}\n\n`,
+                    );
+                    logger.info(
+                      '[commands] Assistant updated lorebook: "%s" (%s), entries updated=%d created=%d',
+                      finalName,
+                      targetLorebook.id,
+                      updatedEntryCount,
+                      createdEntryCount,
+                    );
+                  }
+                } catch (err) {
+                  logger.error(err, "[commands] Update lorebook failed");
                 }
               }
 

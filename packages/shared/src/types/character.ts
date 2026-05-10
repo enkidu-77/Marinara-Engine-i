@@ -1,6 +1,7 @@
 // ──────────────────────────────────────────────
 // Character Card V2 Types (compatible with ST / Chub)
 // ──────────────────────────────────────────────
+import type { AltDescription } from "./persona";
 
 /** Full Character Card V2 envelope. */
 export interface CharacterCardV2 {
@@ -38,6 +39,8 @@ export interface CharacterExtensions {
   backstory: string;
   /** Marinara Engine extension: physical appearance description */
   appearance: string;
+  /** Marinara Engine: toggleable additions appended to the main character description */
+  altDescriptions?: AltDescription[];
   /** Marinara Engine: Name display color/gradient (CSS value, e.g. "linear-gradient(90deg, #ff6b6b, #ffd93d)" or "#ff6b6b") */
   nameColor?: string;
   /** Marinara Engine: Dialogue highlight color — text in quotation marks is bold + colored with this */

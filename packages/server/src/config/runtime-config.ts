@@ -56,10 +56,7 @@ function ensureEnvFileExists(envPath: string) {
     // masking the real "couldn't write .env" error. setImmediate runs after
     // both modules finish evaluating so the diagnostic survives intact.
     setImmediate(() => {
-      sharedLogger.warn(
-        { err, envPath },
-        "[runtime-config] Could not auto-create .env file; continuing without it",
-      );
+      sharedLogger.warn({ err, envPath }, "[runtime-config] Could not auto-create .env file; continuing without it");
     });
   }
 }

@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Sparkles } from "lucide-react";
 import {
   type GameState,
@@ -45,10 +39,7 @@ import {
   parseMetadataRecord,
   type TrackerProfileColors,
 } from "./tracker-data-sidebar.helpers";
-import {
-  EmptySection,
-  SectionIconButton,
-} from "./tracker-data-sidebar.controls";
+import { EmptySection, SectionIconButton } from "./tracker-data-sidebar.controls";
 import { WorldStatePanel } from "./WorldStatePanel";
 import { PersonaInventoryPanel } from "./PersonaTrackerPanel";
 import { CharacterTrackerPanel } from "./CharacterTrackerPanel";

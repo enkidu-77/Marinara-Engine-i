@@ -251,9 +251,7 @@ export function ChoiceSelectionModal({
                             )}
                           >
                             <div className="min-w-0 flex-1">
-                              <span className={cn("text-xs font-medium", isOn && "text-purple-400")}>
-                                {opt.label}
-                              </span>
+                              <span className={cn("text-xs font-medium", isOn && "text-purple-400")}>{opt.label}</span>
                               {opt.value && (
                                 <p className="mt-0.5 line-clamp-2 text-[0.625rem] text-[var(--muted-foreground)]">
                                   {opt.value.slice(0, 150)}

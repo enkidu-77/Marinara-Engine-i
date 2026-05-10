@@ -6,9 +6,10 @@
 // all assembled from committed snapshots, no LLM.
 // ──────────────────────────────────────────────
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { X, MapPin, Swords, ScrollText, Package, Users, PenLine, BookOpen, Trash2 } from "lucide-react";
+import { X, MapPin, Swords, ScrollText, Package, Users, PenLine, BookOpen, Trash2, Loader2, Wand2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { api } from "../../lib/api-client";
+import { applyInlineMarkdown, renderMarkdownBlocks } from "../../lib/markdown";
 import { AnimatedText } from "./AnimatedText";
 
 import type { GameNpc } from "@marinara-engine/shared";
@@ -49,6 +50,9 @@ interface GameJournalProps {
   npcs?: GameNpc[];
   onClose: () => void;
   onNpcPortraitClick?: (npcName: string) => void;
+  onNpcPortraitGenerate?: (npcName: string) => void;
+  npcPortraitGenerationEnabled?: boolean;
+  generatingNpcPortraitNames?: Set<string>;
   onNpcRemove?: (npcName: string) => Promise<void> | void;
 }
 
@@ -137,9 +141,14 @@ function isDuplicateInventoryEntry(
   return Math.abs(leftTime - rightTime) <= 10_000;
 }
 
-function dedupeAdjacentInventoryEntries<T extends { item: string; action: string; quantity: number; timestamp: string }>(
-  items: T[],
-): T[] {
+function JournalMarkdown({ text, className }: { text: string; className?: string }) {
+  const rendered = useMemo(() => renderMarkdownBlocks(text, applyInlineMarkdown, "game-journal"), [text]);
+  return <div className={cn("mari-message-content whitespace-pre-wrap", className)}>{rendered}</div>;
+}
+
+function dedupeAdjacentInventoryEntries<
+  T extends { item: string; action: string; quantity: number; timestamp: string },
+>(items: T[]): T[] {
   const deduped: T[] = [];
   for (const item of items) {
     const previous = deduped[deduped.length - 1];
@@ -149,7 +158,16 @@ function dedupeAdjacentInventoryEntries<T extends { item: string; action: string
   return deduped;
 }
 
-export function GameJournal({ chatId, npcs, onClose, onNpcPortraitClick, onNpcRemove }: GameJournalProps) {
+export function GameJournal({
+  chatId,
+  npcs,
+  onClose,
+  onNpcPortraitClick,
+  onNpcPortraitGenerate,
+  npcPortraitGenerationEnabled = false,
+  generatingNpcPortraitNames,
+  onNpcRemove,
+}: GameJournalProps) {
   const [journal, setJournal] = useState<Journal | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("all");
   const [playerNotes, setPlayerNotes] = useState("");
@@ -286,6 +304,9 @@ export function GameJournal({ chatId, npcs, onClose, onNpcPortraitClick, onNpcRe
             npcLog={journal.npcLog}
             npcs={journalNpcs}
             onNpcPortraitClick={onNpcPortraitClick}
+            onNpcPortraitGenerate={onNpcPortraitGenerate}
+            npcPortraitGenerationEnabled={npcPortraitGenerationEnabled}
+            generatingNpcPortraitNames={generatingNpcPortraitNames}
             onNpcRemove={onNpcRemove ? handleRemoveNpc : undefined}
             removingNpcName={removingNpcName}
           />
@@ -336,12 +357,18 @@ function NpcsView({
   npcLog,
   npcs,
   onNpcPortraitClick,
+  onNpcPortraitGenerate,
+  npcPortraitGenerationEnabled,
+  generatingNpcPortraitNames,
   onNpcRemove,
   removingNpcName,
 }: {
   npcLog: Array<{ npcName: string; interactions: string[] }>;
   npcs?: GameNpc[];
   onNpcPortraitClick?: (npcName: string) => void;
+  onNpcPortraitGenerate?: (npcName: string) => void;
+  npcPortraitGenerationEnabled?: boolean;
+  generatingNpcPortraitNames?: Set<string>;
   onNpcRemove?: (npcName: string) => void;
   removingNpcName?: string | null;
 }) {
@@ -382,6 +409,8 @@ function NpcsView({
         const rep = reputationLabel(entry.npc.reputation);
         const showReputation = entry.npc.reputation !== 0;
         const canUploadPortrait = !!onNpcPortraitClick;
+        const canGeneratePortrait = !!onNpcPortraitGenerate && npcPortraitGenerationEnabled === true;
+        const portraitGenerating = generatingNpcPortraitNames?.has(entry.npc.name.trim().toLowerCase()) ?? false;
         const isRemoving = removingNpcName
           ? normalizeNpcName(cleanNpcDisplayName(removingNpcName)) === normalizeNpcName(name)
           : false;
@@ -389,24 +418,44 @@ function NpcsView({
           <div key={normalizeNpcName(name)} className="rounded-lg border border-white/5 bg-white/3 px-3 py-2">
             <div className="flex items-center gap-2">
               {canUploadPortrait ? (
-                <button
-                  type="button"
-                  onClick={() => onNpcPortraitClick?.(entry.npc.name)}
-                  className="shrink-0 rounded-full transition-transform hover:scale-[1.05] focus:outline-none focus:ring-2 focus:ring-white/20"
-                  title="Upload or replace NPC portrait"
-                >
-                  {entry.npc.avatarUrl ? (
-                    <img
-                      src={entry.npc.avatarUrl}
-                      alt={name}
-                      className="h-6 w-6 rounded-full object-cover ring-1 ring-white/10 transition-colors hover:ring-white/25"
-                    />
-                  ) : (
-                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-[0.6rem] font-semibold text-white/60 ring-1 ring-white/10 transition-colors hover:ring-white/25">
-                      {name[0]?.toUpperCase() ?? "?"}
-                    </div>
+                <div className="group/journal-avatar relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onNpcPortraitClick?.(entry.npc.name)}
+                    className="rounded-full transition-transform hover:scale-[1.05] focus:outline-none focus:ring-2 focus:ring-white/20"
+                    title="Upload or replace NPC portrait"
+                  >
+                    {entry.npc.avatarUrl ? (
+                      <img
+                        src={entry.npc.avatarUrl}
+                        alt={name}
+                        className="h-6 w-6 rounded-full object-cover ring-1 ring-white/10 transition-colors hover:ring-white/25"
+                      />
+                    ) : (
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-[0.6rem] font-semibold text-white/60 ring-1 ring-white/10 transition-colors hover:ring-white/25">
+                        {name[0]?.toUpperCase() ?? "?"}
+                      </div>
+                    )}
+                  </button>
+                  {canGeneratePortrait && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onNpcPortraitGenerate?.(entry.npc.name);
+                      }}
+                      disabled={portraitGenerating}
+                      className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-black/75 text-[var(--primary)] opacity-0 ring-1 ring-white/15 transition-opacity disabled:cursor-wait group-hover/journal-avatar:opacity-100 max-md:opacity-100"
+                      title="Generate NPC portrait"
+                    >
+                      {portraitGenerating ? (
+                        <Loader2 size="0.6rem" className="animate-spin" />
+                      ) : (
+                        <Wand2 size="0.6rem" />
+                      )}
+                    </button>
                   )}
-                </button>
+                </div>
               ) : entry.npc.avatarUrl ? (
                 <img src={entry.npc.avatarUrl} alt={name} className="h-6 w-6 shrink-0 rounded-full object-cover" />
               ) : (
@@ -524,7 +573,7 @@ function LibraryView({ entries }: { entries: JournalEntry[] }) {
               </span>
               <span className="ml-auto text-[0.5625rem] text-white/30">{entry.timestamp}</span>
             </div>
-            <div className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-white/70">{text}</div>
+            <JournalMarkdown text={text} className="mt-1.5 text-xs leading-relaxed text-white/70" />
           </div>
         );
       })}
@@ -545,13 +594,22 @@ function NotesView({ notes, onChange, saved }: { notes: string; onChange: (text:
           {saved ? "Saved" : "Saving..."}
         </span>
       </div>
-      <textarea
-        value={notes}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Write your notes here... track clues, plans, NPC names, theories — anything you want to remember."
-        className="flex-1 resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-xs leading-relaxed text-white/80 outline-none placeholder:text-white/25 focus:border-white/20"
-        spellCheck={false}
-      />
+      <div className="grid min-h-0 flex-1 gap-2 md:grid-cols-2">
+        <textarea
+          value={notes}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Write your notes here... track clues, plans, NPC names, theories — anything you want to remember."
+          className="min-h-44 resize-none rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-xs leading-relaxed text-white/80 outline-none placeholder:text-white/25 focus:border-white/20 md:min-h-0"
+          spellCheck={false}
+        />
+        <div className="min-h-44 overflow-auto rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 md:min-h-0">
+          {notes.trim() ? (
+            <JournalMarkdown text={notes} className="text-xs leading-relaxed text-white/75" />
+          ) : (
+            <div className="text-xs text-white/30">Nothing written yet.</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

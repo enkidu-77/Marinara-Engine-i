@@ -241,7 +241,8 @@ export function useCleanupSavedSprites() {
       expressions?: string[];
       cleanupStrength?: number;
       engine?: SpriteCleanupEngine;
-    }) => api.post<SpriteCleanupResult>(`/sprites/${characterId}/cleanup-saved`, { expressions, cleanupStrength, engine }),
+    }) =>
+      api.post<SpriteCleanupResult>(`/sprites/${characterId}/cleanup-saved`, { expressions, cleanupStrength, engine }),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: spriteKeys.list(variables.characterId) });
     },

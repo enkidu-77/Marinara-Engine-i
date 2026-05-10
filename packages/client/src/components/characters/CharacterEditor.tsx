@@ -34,8 +34,10 @@ import {
 import { useUIStore } from "../../stores/ui.store";
 import { lorebookKeys, useLorebook } from "../../hooks/use-lorebooks";
 import { useStartChatFromCharacter } from "../../hooks/use-start-chat-from-character";
+import { useConnections } from "../../hooks/use-connections";
 import { showConfirmDialog } from "../../lib/app-dialogs";
 import { SpriteGenerationModal } from "../ui/SpriteGenerationModal";
+import { AvatarGenerationModal } from "../ui/AvatarGenerationModal";
 import {
   ArrowLeft,
   Save,
@@ -73,7 +75,7 @@ import {
   History,
   RotateCcw,
 } from "lucide-react";
-import { cn, getAvatarCropStyle } from "../../lib/utils";
+import { cn, generateClientId, getAvatarCropStyle } from "../../lib/utils";
 import { extractColorsFromImage } from "../../lib/avatar-color-extraction";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { api } from "../../lib/api-client";
@@ -104,12 +106,41 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
+interface AltDescriptionEntry {
+  id: string;
+  label: string;
+  content: string;
+  active: boolean;
+}
+
 interface ParsedCharacter {
   id: string;
   data: string;
   comment: string;
   avatarPath: string | null;
   spriteFolderPath: string | null;
+}
+
+function normalizeAltDescriptions(value: unknown): AltDescriptionEntry[] {
+  const raw = (() => {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== "string" || !value.trim()) return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })();
+
+  return raw
+    .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+    .map((entry, index) => ({
+      id: typeof entry.id === "string" && entry.id.trim() ? entry.id : `extension-${index}`,
+      label: typeof entry.label === "string" ? entry.label : "Extension",
+      content: typeof entry.content === "string" ? entry.content : "",
+      active: entry.active !== false,
+    }));
 }
 
 export function CharacterEditor() {
@@ -123,6 +154,7 @@ export function CharacterEditor() {
   const createPersona = useCreatePersona();
   const uploadPersonaAvatar = useUploadPersonaAvatar();
   const { startChatFromCharacter, isStartingChat } = useStartChatFromCharacter();
+  const { data: connectionsList } = useConnections();
 
   const [activeTab, setActiveTab] = useState<TabId>("metadata");
   const [formData, setFormData] = useState<CharacterData | null>(null);
@@ -135,9 +167,13 @@ export function CharacterEditor() {
   }, [dirty, setEditorDirty]);
   const [saving, setSaving] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [avatarGeneratorOpen, setAvatarGeneratorOpen] = useState(false);
   const [newTag, setNewTag] = useState("");
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageGenerationAvailable =
+    Array.isArray(connectionsList) &&
+    (connectionsList as Array<{ provider?: string }>).some((connection) => connection.provider === "image_generation");
 
   // Parse the character when it loads
   useEffect(() => {
@@ -162,7 +198,7 @@ export function CharacterEditor() {
   const updateExtension = useCallback((key: string, value: unknown) => {
     setFormData((prev) => {
       if (!prev) return prev;
-      return { ...prev, extensions: { ...prev.extensions, [key]: value } };
+      return { ...prev, extensions: { ...(prev.extensions ?? {}), [key]: value } };
     });
     setDirty(true);
   }, []);
@@ -201,6 +237,16 @@ export function CharacterEditor() {
     };
     reader.readAsDataURL(file);
   };
+
+  const handleGeneratedAvatar = useCallback(
+    async (avatarDataUrl: string) => {
+      if (!characterId) return;
+      setAvatarPreview(avatarDataUrl);
+      await uploadAvatar.mutateAsync({ id: characterId, avatar: avatarDataUrl });
+      toast.success("Character avatar generated.");
+    },
+    [characterId, uploadAvatar],
+  );
 
   const handleDelete = async () => {
     if (!characterId) return;
@@ -460,6 +506,17 @@ export function CharacterEditor() {
           void api.download(`/characters/${characterId}/export?format=${format}`);
         }}
       />
+      <AvatarGenerationModal
+        open={avatarGeneratorOpen}
+        title="Generate Character Avatar"
+        entityName={formData.name}
+        defaultAppearance={
+          ((formData.extensions.appearance as string | undefined) || formData.description || formData.personality) ?? ""
+        }
+        defaultAvatarUrl={avatarPreview}
+        onClose={() => setAvatarGeneratorOpen(false)}
+        onUseAvatar={handleGeneratedAvatar}
+      />
 
       {/* ── Header ── */}
       <div className="flex flex-wrap items-start gap-3 border-b border-[var(--border)] bg-[var(--card)] px-4 py-3 max-md:gap-2 max-md:px-3">
@@ -492,6 +549,19 @@ export function CharacterEditor() {
             <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
               <Camera size="1rem" className="text-white" />
             </div>
+            {imageGenerationAvailable && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setAvatarGeneratorOpen(true);
+                }}
+                className="absolute right-0.5 top-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--card)]/95 text-[var(--primary)] opacity-0 shadow-md ring-1 ring-[var(--border)] transition-opacity hover:bg-[var(--card)] group-hover:opacity-100 max-md:opacity-100"
+                title="Generate avatar"
+              >
+                <Wand2 size="0.75rem" />
+              </button>
+            )}
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
           </div>
 
@@ -608,13 +678,10 @@ export function CharacterEditor() {
               />
             )}
             {activeTab === "description" && (
-              <TextareaTab
-                title="Description"
-                subtitle="The character's general description. This is sent in every prompt as part of the character's identity."
-                value={formData.description}
-                onChange={(v) => updateField("description", v)}
-                placeholder="Describe who this character is, their role, and their key traits…"
-                rows={12}
+              <CharacterDescriptionTab
+                formData={formData}
+                updateField={updateField}
+                updateExtension={updateExtension}
               />
             )}
             {activeTab === "personality" && (
@@ -692,6 +759,181 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }
     <div className="mb-4">
       <h2 className="text-lg font-bold">{title}</h2>
       {subtitle && <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{subtitle}</p>}
+    </div>
+  );
+}
+
+function CharacterDescriptionTab({
+  formData,
+  updateField,
+  updateExtension,
+}: {
+  formData: CharacterData;
+  updateField: <K extends keyof CharacterData>(key: K, value: CharacterData[K]) => void;
+  updateExtension: (key: string, value: unknown) => void;
+}) {
+  const altDescs = normalizeAltDescriptions(formData.extensions?.altDescriptions);
+  const [expandedField, setExpandedField] = useState<"description" | string | null>(null);
+
+  const updateAltDescs = (next: AltDescriptionEntry[]) => {
+    updateExtension("altDescriptions", next);
+  };
+
+  const addAltDesc = () => {
+    updateAltDescs([...altDescs, { id: generateClientId(), label: "Extension", content: "", active: true }]);
+  };
+
+  const toggleAltDesc = (id: string) => {
+    updateAltDescs(altDescs.map((desc) => (desc.id === id ? { ...desc, active: !desc.active } : desc)));
+  };
+
+  const updateAltDescField = (id: string, field: "label" | "content", value: string) => {
+    updateAltDescs(altDescs.map((desc) => (desc.id === id ? { ...desc, [field]: value } : desc)));
+  };
+
+  const removeAltDesc = (id: string) => {
+    updateAltDescs(altDescs.filter((desc) => desc.id !== id));
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="flex items-start justify-between gap-2 mb-4">
+          <SectionHeader
+            title="Description"
+            subtitle="The character's general description. This is sent in every prompt as part of the character's identity."
+          />
+          <button
+            type="button"
+            onClick={() => setExpandedField("description")}
+            className="mt-0.5 shrink-0 rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+            title="Expand editor"
+          >
+            <Maximize2 size="0.875rem" />
+          </button>
+        </div>
+        <textarea
+          value={formData.description}
+          onChange={(event) => updateField("description", event.target.value)}
+          placeholder="Describe who this character is, their role, and their key traits…"
+          rows={12}
+          className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--secondary)] p-4 text-sm leading-relaxed outline-none transition-colors placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40 focus:ring-1 focus:ring-[var(--primary)]/20"
+        />
+        <p className="mt-1.5 text-right text-[0.625rem] text-[var(--muted-foreground)]">
+          {formData.description.length} characters
+        </p>
+      </div>
+
+      <div>
+        <div className="mb-4 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold">Description Extensions</h3>
+            <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
+              Toggleable additions appended to this character's main description. Use these for situational states,
+              relationships, combat details, or story-phase context.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={addAltDesc}
+            className="flex shrink-0 items-center gap-1 rounded-lg bg-[var(--primary)]/15 px-2.5 py-1 text-[0.6875rem] font-medium text-[var(--primary)] transition-colors hover:bg-[var(--primary)]/25"
+          >
+            <Plus size="0.75rem" />
+            Add
+          </button>
+        </div>
+
+        {altDescs.length === 0 ? (
+          <p className="text-[0.6875rem] italic text-[var(--muted-foreground)]">
+            No description extensions yet. Add one to toggle extra character context on and off.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {altDescs.map((desc) => (
+              <div
+                key={desc.id}
+                className={cn(
+                  "rounded-xl border bg-[var(--card)] p-4 transition-all",
+                  desc.active
+                    ? "border-[var(--primary)]/30 ring-1 ring-[var(--primary)]/10"
+                    : "border-[var(--border)] opacity-60",
+                )}
+              >
+                <div className="mb-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleAltDesc(desc.id)}
+                    className={cn(
+                      "flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 transition-colors",
+                      desc.active ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/30",
+                    )}
+                    title={desc.active ? "Disable extension" : "Enable extension"}
+                  >
+                    <div
+                      className={cn(
+                        "h-4 w-4 rounded-full bg-[var(--primary-foreground)] shadow-sm transition-transform",
+                        desc.active && "translate-x-4",
+                      )}
+                    />
+                  </button>
+                  <input
+                    value={desc.label}
+                    onChange={(event) => updateAltDescField(desc.id, "label", event.target.value)}
+                    className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--input)] px-2.5 py-1 text-xs font-medium outline-none focus:border-[var(--primary)]/40"
+                    placeholder="Label (e.g. Combat Skills)"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeAltDesc(desc.id)}
+                    className="rounded-lg p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
+                    title="Remove extension"
+                  >
+                    <X size="0.75rem" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedField(desc.id)}
+                    className="rounded-lg p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                    title="Expand editor"
+                  >
+                    <Maximize2 size="0.75rem" />
+                  </button>
+                </div>
+                <textarea
+                  value={desc.content}
+                  onChange={(event) => updateAltDescField(desc.id, "content", event.target.value)}
+                  placeholder="Additional description content…"
+                  rows={4}
+                  className="w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-3 text-sm leading-relaxed outline-none transition-colors placeholder:text-[var(--muted-foreground)]/40 focus:border-[var(--primary)]/40 focus:ring-1 focus:ring-[var(--primary)]/20"
+                />
+                <p className="mt-1 text-right text-[0.625rem] text-[var(--muted-foreground)]">
+                  {desc.content.length} characters
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <ExpandedTextarea
+        open={expandedField === "description"}
+        onClose={() => setExpandedField(null)}
+        title="Description"
+        value={formData.description}
+        onChange={(value) => updateField("description", value)}
+        placeholder="Describe who this character is, their role, and their key traits…"
+      />
+      {altDescs.map((desc) => (
+        <ExpandedTextarea
+          key={desc.id}
+          open={expandedField === desc.id}
+          onClose={() => setExpandedField(null)}
+          title={desc.label || "Description Extension"}
+          value={desc.content}
+          onChange={(value) => updateAltDescField(desc.id, "content", value)}
+          placeholder="Additional description content…"
+        />
+      ))}
     </div>
   );
 }

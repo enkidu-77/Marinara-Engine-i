@@ -82,6 +82,74 @@ test("local OpenAI-compatible image generation normalizes localhost URLs", async
   }
 });
 
+test("OpenRouter image generation uses chat completions modalities and image data URLs", async () => {
+  let capturedBody: Record<string, unknown> | null = null;
+  let capturedAuth = "";
+  let port = 0;
+  const server = createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/api/v1/chat/completions") {
+      capturedAuth = Array.isArray(req.headers.authorization)
+        ? req.headers.authorization[0]!
+        : (req.headers.authorization ?? "");
+      let raw = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk) => {
+        raw += chunk;
+      });
+      req.on("end", () => {
+        capturedBody = JSON.parse(raw) as Record<string, unknown>;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Generated.",
+                  images: [{ type: "image_url", image_url: { url: `data:image/png;base64,${PNG_1X1_BASE64}` } }],
+                },
+              },
+            ],
+          }),
+        );
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addressInfo = server.address();
+  assert.ok(addressInfo && typeof addressInfo === "object");
+  port = addressInfo.port;
+
+  try {
+    const result = await generateImage("openrouter", `http://127.0.0.1:${port}/api/v1`, "test-key", "openrouter", {
+      prompt: "sunset over mountains",
+      negativePrompt: "low detail",
+      model: "google/gemini-2.5-flash-image",
+      width: 1344,
+      height: 768,
+      allowLocalUrls: true,
+    });
+
+    assert.equal(result.mimeType, "image/png");
+    assert.equal(result.base64, PNG_1X1_BASE64);
+    assert.equal(capturedAuth, "Bearer test-key");
+    assert.equal(capturedBody?.model, "google/gemini-2.5-flash-image");
+    assert.deepEqual(capturedBody?.modalities, ["image", "text"]);
+    assert.deepEqual(capturedBody?.image_config, { aspect_ratio: "16:9" });
+    const messages = capturedBody?.messages as Array<{ content: string }>;
+    assert.match(messages[0]!.content, /sunset over mountains/);
+    assert.match(messages[0]!.content, /Avoid in the image: low detail/);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+});
+
 test("native NovelAI image generation sends stable request settings and embeds metadata", async () => {
   const imageBytes = Buffer.from(PNG_1X1_BASE64, "base64");
   let capturedBody: Record<string, unknown> | null = null;
@@ -134,21 +202,15 @@ test("native NovelAI image generation sends stable request settings and embeds m
       },
     });
 
-    const result = await generateImage(
-      "novelai",
-      `http://127.0.0.1:${port}/novelai.net`,
-      "test-key",
-      "novelai",
-      {
-        prompt: "cat cafe with 東京 neon",
-        negativePrompt: "lowres, déjà vu",
-        model: "nai-diffusion-4-5-full",
-        width: 640,
-        height: 960,
-        imageDefaults,
-        allowLocalUrls: true,
-      },
-    );
+    const result = await generateImage("novelai", `http://127.0.0.1:${port}/novelai.net`, "test-key", "novelai", {
+      prompt: "cat cafe with 東京 neon",
+      negativePrompt: "lowres, déjà vu",
+      model: "nai-diffusion-4-5-full",
+      width: 640,
+      height: 960,
+      imageDefaults,
+      allowLocalUrls: true,
+    });
 
     const parameters = capturedBody?.parameters as Record<string, unknown>;
     assert.equal(capturedBody?.input, "best quality, cat cafe with 東京 neon");
@@ -211,20 +273,14 @@ test("native NovelAI image generation keeps V3 prompt shape", async () => {
   port = addressInfo.port;
 
   try {
-    await generateImage(
-      "novelai",
-      `http://127.0.0.1:${port}/novelai.net`,
-      "test-key",
-      "novelai",
-      {
-        prompt: "cat cafe",
-        negativePrompt: "lowres",
-        model: "nai-diffusion-3",
-        width: 640,
-        height: 960,
-        allowLocalUrls: true,
-      },
-    );
+    await generateImage("novelai", `http://127.0.0.1:${port}/novelai.net`, "test-key", "novelai", {
+      prompt: "cat cafe",
+      negativePrompt: "lowres",
+      model: "nai-diffusion-3",
+      width: 640,
+      height: 960,
+      allowLocalUrls: true,
+    });
 
     const parameters = capturedBody?.parameters as Record<string, unknown>;
     assert.equal(capturedBody?.input, "cat cafe");

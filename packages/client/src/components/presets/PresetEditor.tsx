@@ -54,6 +54,8 @@ import {
   BookOpen,
   ListChecks,
   Shuffle,
+  ToggleLeft,
+  Copy,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { HelpTooltip } from "../ui/HelpTooltip";
@@ -122,6 +124,20 @@ function reorderIdsByOffset(items: Array<{ id: string }>, index: number, offset:
   if (!moved) return null;
   ids.splice(targetIndex, 0, moved);
   return ids;
+}
+
+function readBoolFlag(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
+function readMarkerConfig(value: unknown) {
+  if (!value) return null;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -248,11 +264,10 @@ export function PresetEditor() {
       if (section.enabled !== "true" && section.enabled !== true) return false;
       if (section.isMarker !== "true" && section.isMarker !== true) return false;
       try {
-        const config = typeof section.markerConfig === "string" ? JSON.parse(section.markerConfig) : section.markerConfig;
+        const config =
+          typeof section.markerConfig === "string" ? JSON.parse(section.markerConfig) : section.markerConfig;
         return (
-          config?.type === "lorebook" ||
-          config?.type === "world_info_before" ||
-          config?.type === "world_info_after"
+          config?.type === "lorebook" || config?.type === "world_info_before" || config?.type === "world_info_after"
         );
       } catch {
         return false;
@@ -806,6 +821,35 @@ function SectionsTab({
     onReorderSections.mutate({ presetId, sectionIds });
   };
 
+  const duplicateSection = async (section: any, idx: number) => {
+    try {
+      const created = await onCreateSection.mutateAsync({
+        presetId,
+        identifier: `${section.identifier ?? "section"}_copy_${Date.now()}`,
+        name: `${section.name ?? "Prompt Block"} Copy`,
+        content: section.content ?? "",
+        role: section.role ?? "system",
+        enabled: readBoolFlag(section.enabled),
+        isMarker: readBoolFlag(section.isMarker),
+        groupId: section.groupId ?? null,
+        markerConfig: readMarkerConfig(section.markerConfig),
+        injectionPosition: section.injectionPosition ?? "ordered",
+        injectionDepth: section.injectionDepth ?? 0,
+        injectionOrder: section.injectionOrder ?? idx * 100,
+        forbidOverrides: readBoolFlag(section.forbidOverrides),
+      });
+      if (created?.id) {
+        const sectionIds = sections.map((s: any) => s.id);
+        sectionIds.splice(idx + 1, 0, created.id);
+        await onReorderSections.mutateAsync({ presetId, sectionIds });
+        setExpandedSections((prev) => new Set(prev).add(created.id));
+      }
+      toast.success(`Duplicated "${section.name}"`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to duplicate prompt block");
+    }
+  };
+
   return (
     <>
       {/* ── Toolbar ── */}
@@ -1086,6 +1130,16 @@ function SectionsTab({
                     </span>
 
                     <div className="flex shrink-0 items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => void duplicateSection(section, idx)}
+                        disabled={onCreateSection.isPending || onReorderSections.isPending}
+                        className="rounded-lg p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:pointer-events-none disabled:opacity-30"
+                        title="Duplicate"
+                        aria-label={`Duplicate ${section.name}`}
+                      >
+                        <Copy size="0.75rem" />
+                      </button>
                       <button
                         onClick={() =>
                           onUpdateSection.mutate({
@@ -1633,90 +1687,90 @@ function VariableCard({
           {opts.length === 1 && !isMultiSelect ? (
             <div className="space-y-1.5 rounded-lg bg-[var(--secondary)] p-2.5 ring-1 ring-[var(--border)]">
               <div className="flex items-center gap-1.5">
-                <Shuffle size="0.75rem" className="text-purple-400" />
+                <ToggleLeft size="0.75rem" className="text-purple-400" />
                 <span className="text-[0.625rem] font-medium text-purple-400">Boolean Toggle</span>
               </div>
               <p className="text-[0.5625rem] text-[var(--muted-foreground)]">
-                This variable has only one option, so it behaves as a Boolean toggle. Users can switch it on or off in the
-                Configure Preset Variables wizard.
+                This variable has only one option, so it behaves as a Boolean toggle. Users can switch it on or off in
+                the Configure Preset Variables wizard.
               </p>
             </div>
           ) : (
-          <div className="space-y-2 rounded-lg bg-[var(--secondary)] p-2.5 ring-1 ring-[var(--border)]">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <ListChecks size="0.75rem" className="text-purple-400" />
-                <span className="text-[0.625rem] font-medium text-[var(--foreground)]">Multi-Select</span>
-              </div>
-              <button
-                onClick={() => update({ multiSelect: !isMultiSelect })}
-                className={cn(
-                  "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full transition-colors",
-                  isMultiSelect ? "bg-purple-400" : "bg-[var(--border)]",
-                )}
-              >
-                <span
-                  className={cn(
-                    "pointer-events-none inline-block h-3 w-3 translate-y-0.5 rounded-full bg-white shadow transition-transform",
-                    isMultiSelect ? "translate-x-3.5" : "translate-x-0.5",
-                  )}
-                />
-              </button>
-            </div>
-            <p className="text-[0.5625rem] text-[var(--muted-foreground)]">
-              Allow users to select multiple options instead of just one.
-            </p>
-
-            {isMultiSelect && (
-              <div className="space-y-2 border-t border-[var(--border)] pt-2">
-                {/* Random Pick Toggle */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Shuffle size="0.75rem" className="text-amber-400" />
-                    <span className="text-[0.625rem] font-medium text-[var(--foreground)]">Random Pick</span>
-                  </div>
-                  <button
-                    onClick={() => update({ randomPick: !isRandomPick })}
-                    className={cn(
-                      "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full transition-colors",
-                      isRandomPick ? "bg-amber-400" : "bg-[var(--border)]",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "pointer-events-none inline-block h-3 w-3 translate-y-0.5 rounded-full bg-white shadow transition-transform",
-                        isRandomPick ? "translate-x-3.5" : "translate-x-0.5",
-                      )}
-                    />
-                  </button>
+            <div className="space-y-2 rounded-lg bg-[var(--secondary)] p-2.5 ring-1 ring-[var(--border)]">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <ListChecks size="0.75rem" className="text-purple-400" />
+                  <span className="text-[0.625rem] font-medium text-[var(--foreground)]">Multi-Select</span>
                 </div>
-                <p className="text-[0.5625rem] text-[var(--muted-foreground)]">
-                  {isRandomPick
-                    ? "One of the user's selected options will be randomly picked each generation."
-                    : "All selected options will be joined together with the separator below."}
-                </p>
-
-                {/* Separator (only shown when not random pick) */}
-                {!isRandomPick && (
-                  <div className="flex items-center gap-2">
-                    <label className="shrink-0 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
-                      Separator
-                    </label>
-                    <input
-                      value={separatorValue}
-                      onFocus={(e) => e.target.select()}
-                      onChange={(e) => update({ separator: e.target.value })}
-                      className="w-20 rounded bg-[var(--background)] px-1.5 py-0.5 text-center font-mono text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-1 focus:ring-purple-400/50"
-                      placeholder=", "
-                    />
-                    <span className="text-[0.5625rem] text-[var(--muted-foreground)]">
-                      e.g. ", " → Romance, Fantasy, Action
-                    </span>
-                  </div>
-                )}
+                <button
+                  onClick={() => update({ multiSelect: !isMultiSelect })}
+                  className={cn(
+                    "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full transition-colors",
+                    isMultiSelect ? "bg-purple-400" : "bg-[var(--border)]",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "pointer-events-none inline-block h-3 w-3 translate-y-0.5 rounded-full bg-white shadow transition-transform",
+                      isMultiSelect ? "translate-x-3.5" : "translate-x-0.5",
+                    )}
+                  />
+                </button>
               </div>
-            )}
-          </div>
+              <p className="text-[0.5625rem] text-[var(--muted-foreground)]">
+                Allow users to select multiple options instead of just one.
+              </p>
+
+              {isMultiSelect && (
+                <div className="space-y-2 border-t border-[var(--border)] pt-2">
+                  {/* Random Pick Toggle */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Shuffle size="0.75rem" className="text-amber-400" />
+                      <span className="text-[0.625rem] font-medium text-[var(--foreground)]">Random Pick</span>
+                    </div>
+                    <button
+                      onClick={() => update({ randomPick: !isRandomPick })}
+                      className={cn(
+                        "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full transition-colors",
+                        isRandomPick ? "bg-amber-400" : "bg-[var(--border)]",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "pointer-events-none inline-block h-3 w-3 translate-y-0.5 rounded-full bg-white shadow transition-transform",
+                          isRandomPick ? "translate-x-3.5" : "translate-x-0.5",
+                        )}
+                      />
+                    </button>
+                  </div>
+                  <p className="text-[0.5625rem] text-[var(--muted-foreground)]">
+                    {isRandomPick
+                      ? "One of the user's selected options will be randomly picked each generation."
+                      : "All selected options will be joined together with the separator below."}
+                  </p>
+
+                  {/* Separator (only shown when not random pick) */}
+                  {!isRandomPick && (
+                    <div className="flex items-center gap-2">
+                      <label className="shrink-0 text-[0.625rem] font-medium text-[var(--muted-foreground)]">
+                        Separator
+                      </label>
+                      <input
+                        value={separatorValue}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => update({ separator: e.target.value })}
+                        className="w-20 rounded bg-[var(--background)] px-1.5 py-0.5 text-center font-mono text-xs ring-1 ring-[var(--border)] focus:outline-none focus:ring-1 focus:ring-purple-400/50"
+                        placeholder=", "
+                      />
+                      <span className="text-[0.5625rem] text-[var(--muted-foreground)]">
+                        e.g. ", " becomes Romance, Fantasy, Action
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           {/* Options */}
@@ -1725,64 +1779,64 @@ function VariableCard({
             {opts.map((opt, oi) => {
               const valueBlank = !opt.value || !opt.value.trim();
               return (
-              <div key={opt.id}>
-                <div
-                  className={cn(
-                    "flex items-center gap-2 rounded-lg px-2.5 py-1.5 ring-1",
-                    valueBlank
-                      ? "bg-[var(--destructive)]/5 ring-[var(--destructive)]/30"
-                      : "bg-[var(--secondary)] ring-[var(--border)]",
-                  )}
-                >
-                  <span className="shrink-0 text-[0.625rem] font-medium text-amber-400">{oi + 1}.</span>
-                  <OptionFieldInput
-                    value={opt.label}
-                    onCommit={(v) => {
-                      const next = [...opts];
-                      next[oi] = { ...next[oi], label: v };
-                      updateOpts(next);
-                    }}
-                    className="flex-1 rounded bg-[var(--background)] px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400/50"
-                    placeholder="Label…"
-                  />
-                  <OptionFieldInput
-                    value={opt.value}
-                    onCommit={(v) => {
-                      const next = [...opts];
-                      next[oi] = { ...next[oi], value: v };
-                      updateOpts(next);
-                    }}
+                <div key={opt.id}>
+                  <div
                     className={cn(
-                      "flex-1 rounded px-1.5 py-0.5 font-mono text-xs focus:outline-none focus:ring-1",
+                      "flex items-center gap-2 rounded-lg px-2.5 py-1.5 ring-1",
                       valueBlank
-                        ? "bg-[var(--destructive)]/10 ring-1 ring-[var(--destructive)]/30 placeholder:text-[var(--destructive)]/40"
-                        : "bg-[var(--background)] focus:ring-amber-400/50",
+                        ? "bg-[var(--destructive)]/5 ring-[var(--destructive)]/30"
+                        : "bg-[var(--secondary)] ring-[var(--border)]",
                     )}
-                    placeholder="Value…"
-                  />
-                  <button
-                    onClick={() => setExpandedOptIdx(oi)}
-                    className="shrink-0 rounded p-0.5 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-                    title="Expand value editor"
                   >
-                    <Maximize2 size="0.625rem" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (opts.length <= 1) return toast.error("A variable needs at least 1 option.");
-                      updateOpts(opts.filter((_, i) => i !== oi));
-                    }}
-                    className="shrink-0 rounded p-0.5 hover:bg-[var(--destructive)]/15"
-                    title="Remove option"
-                  >
-                    <X size="0.625rem" className="text-[var(--destructive)]" />
-                  </button>
+                    <span className="shrink-0 text-[0.625rem] font-medium text-amber-400">{oi + 1}.</span>
+                    <OptionFieldInput
+                      value={opt.label}
+                      onCommit={(v) => {
+                        const next = [...opts];
+                        next[oi] = { ...next[oi], label: v };
+                        updateOpts(next);
+                      }}
+                      className="flex-1 rounded bg-[var(--background)] px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400/50"
+                      placeholder="Label…"
+                    />
+                    <OptionFieldInput
+                      value={opt.value}
+                      onCommit={(v) => {
+                        const next = [...opts];
+                        next[oi] = { ...next[oi], value: v };
+                        updateOpts(next);
+                      }}
+                      className={cn(
+                        "flex-1 rounded px-1.5 py-0.5 font-mono text-xs focus:outline-none focus:ring-1",
+                        valueBlank
+                          ? "bg-[var(--destructive)]/10 ring-1 ring-[var(--destructive)]/30 placeholder:text-[var(--destructive)]/40"
+                          : "bg-[var(--background)] focus:ring-amber-400/50",
+                      )}
+                      placeholder="Value…"
+                    />
+                    <button
+                      onClick={() => setExpandedOptIdx(oi)}
+                      className="shrink-0 rounded p-0.5 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                      title="Expand value editor"
+                    >
+                      <Maximize2 size="0.625rem" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (opts.length <= 1) return toast.error("A variable needs at least 1 option.");
+                        updateOpts(opts.filter((_, i) => i !== oi));
+                      }}
+                      className="shrink-0 rounded p-0.5 hover:bg-[var(--destructive)]/15"
+                      title="Remove option"
+                    >
+                      <X size="0.625rem" className="text-[var(--destructive)]" />
+                    </button>
+                  </div>
+                  {valueBlank && (
+                    <p className="mt-1 pl-6 text-[0.5625rem] text-[var(--destructive)]">Value cannot be empty.</p>
+                  )}
                 </div>
-                {valueBlank && (
-                  <p className="mt-1 pl-6 text-[0.5625rem] text-[var(--destructive)]">Value cannot be empty.</p>
-                )}
-              </div>
-            );
+              );
             })}
             <button
               onClick={() => {

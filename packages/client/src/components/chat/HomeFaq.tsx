@@ -357,7 +357,8 @@ const HOME_FAQ_ITEMS: HomeFaqItem[] = [
     id: "mobile-app",
     category: "Misc",
     question: "Is there a mobile app?",
-    answer: "Not yet. Mobile is still a roadmap item rather than a finished standalone app.",
+    answer:
+      "Not as a standalone app yet. You can install Marinara as a PWA from the browser on phones and tablets while the server runs on your computer, Docker host, or Termux device.",
   },
   {
     id: "tts-support",

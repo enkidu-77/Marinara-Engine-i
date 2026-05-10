@@ -22,6 +22,7 @@ import { createLLMProvider } from "../services/llm/provider-registry.js";
 import { generateMissingConversationSummaries } from "../services/conversation/auto-summary.service.js";
 import { rebuildMemoryChunks } from "../services/memory-recall.js";
 import { wrapContent } from "../services/prompt/format-engine.js";
+import { getCharacterDescriptionWithExtensions } from "../services/prompt/index.js";
 import { newId } from "../utils/id-generator.js";
 import { characters, gameStateSnapshots, memoryChunks } from "../db/schema/index.js";
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -129,7 +130,8 @@ function formatPeekTrackerContextBlock(args: {
     try {
       const stats = typeof snap.playerStats === "string" ? JSON.parse(snap.playerStats) : snap.playerStats;
 
-      if (hasPersonaStats && stats?.status) trackerParts.push(wrapContent(`Status: ${stats.status}`, "Status", wrapFormat));
+      if (hasPersonaStats && stats?.status)
+        trackerParts.push(wrapContent(`Status: ${stats.status}`, "Status", wrapFormat));
 
       if (hasQuest && Array.isArray(stats?.activeQuests) && stats.activeQuests.length > 0) {
         const questLines = stats.activeQuests.map((q: any) => {
@@ -370,6 +372,8 @@ export async function chatsRoutes(app: FastifyInstance) {
       const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
       baseUrl = providerDef?.defaultBaseUrl ?? "";
     }
+    if (!baseUrl && conn.provider === "claude_subscription") baseUrl = "claude-agent-sdk://local";
+    if (!baseUrl && conn.provider === "openai_chatgpt") baseUrl = "openai-chatgpt://codex-auth";
     if (!baseUrl) return reply.status(400).send({ error: "No base URL for this connection" });
 
     const characterIds: string[] = Array.isArray(chat.characterIds)
@@ -1138,24 +1142,24 @@ export async function chatsRoutes(app: FastifyInstance) {
               ? (chatMeta.activeLorebookIds as string[])
               : [],
             entryStateOverrides:
-              ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
-              typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object")
+              (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
+              typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object"
                 ? ((chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) as Record<
                     string,
                     { ephemeral?: number | null; enabled?: boolean }
                   >)
                 : undefined,
             entryTimingStates:
-              ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
-              typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object")
+              (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) &&
+              typeof (chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) === "object"
                 ? ((chatMeta.entryTimingStates ?? chatMeta.lorebookEntryTimingStates) as Record<
                     string,
                     LorebookEntryTimingState
                   >)
                 : undefined,
             generationTriggers:
-              ((chatMeta.generationTriggers ?? chatMeta.lorebookGenerationTriggers) &&
-              Array.isArray(chatMeta.generationTriggers ?? chatMeta.lorebookGenerationTriggers))
+              (chatMeta.generationTriggers ?? chatMeta.lorebookGenerationTriggers) &&
+              Array.isArray(chatMeta.generationTriggers ?? chatMeta.lorebookGenerationTriggers)
                 ? ((chatMeta.generationTriggers ?? chatMeta.lorebookGenerationTriggers) as string[])
                 : undefined,
             lorebookTokenBudget:
@@ -1294,7 +1298,7 @@ export async function chatsRoutes(app: FastifyInstance) {
             if (!charRow) continue;
             const charData = JSON.parse(charRow.data as string);
             const charName = charData.name ?? "Unknown";
-            const charDesc = charData.description ?? "";
+            const charDesc = getCharacterDescriptionWithExtensions(charData);
             const xmlTag = nameToXmlTag(charName);
             const hasCharInfo =
               (charDesc && allContent.includes(charDesc.split("\n")[0]!.trim().slice(0, 80))) ||
@@ -1308,7 +1312,7 @@ export async function chatsRoutes(app: FastifyInstance) {
                 ...promptMacroContext,
                 char: charName,
                 characterFields: {
-                  description: charData.description ?? "",
+                  description: charDesc,
                   personality: charData.personality ?? "",
                   scenario: charData.scenario ?? "",
                   backstory: charData.extensions?.backstory ?? "",
@@ -1827,6 +1831,8 @@ export async function chatsRoutes(app: FastifyInstance) {
         const providerDef = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
         baseUrl = providerDef?.defaultBaseUrl ?? "";
       }
+      if (!baseUrl && conn.provider === "claude_subscription") baseUrl = "claude-agent-sdk://local";
+      if (!baseUrl && conn.provider === "openai_chatgpt") baseUrl = "openai-chatgpt://codex-auth";
       if (!baseUrl) return reply.status(400).send({ error: "No base URL for this connection" });
 
       provider = createLLMProvider(

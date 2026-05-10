@@ -19,7 +19,6 @@ import {
   Wand2,
   ArrowLeft,
   UserRound,
-  Music2,
 } from "lucide-react";
 import { cn, getAvatarCropStyle, type AvatarCrop } from "../../lib/utils";
 import { useConnections } from "../../hooks/use-connections";
@@ -34,7 +33,7 @@ import { api } from "../../lib/api-client";
 import { getCharacterTitle, parseCharacterDisplayData } from "../../lib/character-display";
 import { ChoiceSelectionModal } from "../presets/ChoiceSelectionModal";
 import type { Chat, ChatMode, ChatPreset } from "@marinara-engine/shared";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   CHAT_PARAMETER_DEFAULTS,
   GenerationParametersFields,
@@ -310,14 +309,6 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
   const [scheduleState, setScheduleState] = useState<"idle" | "generating" | "done">("idle");
   const [autonomousEnabled, setAutonomousEnabled] = useState(true);
   const [generateSchedule, setGenerateSchedule] = useState(false);
-  const [spotifyCommandsEnabled, setSpotifyCommandsEnabled] = useState(false);
-  const spotifyConnectionQuery = useQuery({
-    queryKey: ["spotify", "player", "conversation-setup"],
-    queryFn: () => api.get<{ connected: boolean }>("/spotify/player"),
-    staleTime: 60_000,
-    retry: false,
-  });
-  const spotifyConnected = spotifyConnectionQuery.data?.connected === true;
 
   // Track whether the user has manually edited the chat name.
   // If not, auto-rename to match the selected character name(s).
@@ -467,7 +458,6 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
       id: chat.id,
       autonomousMessages: autonomousEnabled,
       conversationSchedulesEnabled: autonomousEnabled && generateSchedule,
-      conversationSpotifyCommandsEnabled: spotifyCommandsEnabled,
       chatParameters: customizeParameters ? generationParameters : null,
       ...(savedPrompt ? { customSystemPrompt: savedPrompt } : {}),
     });
@@ -496,7 +486,6 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
     onFinish,
     autonomousEnabled,
     generateSchedule,
-    spotifyCommandsEnabled,
     updateMeta,
     customizeParameters,
     generationParameters,
@@ -736,46 +725,6 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
                     className={cn(
                       "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
                       autonomousEnabled && "translate-x-3.5",
-                    )}
-                  />
-                </div>
-              </button>
-
-              <button
-                onClick={() => setSpotifyCommandsEnabled((v) => !v)}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-all",
-                  spotifyCommandsEnabled
-                    ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
-                    : "bg-[var(--secondary)] hover:bg-[var(--accent)]",
-                )}
-              >
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <Music2
-                    size="0.875rem"
-                    className={spotifyCommandsEnabled ? "text-[var(--primary)]" : "text-[var(--muted-foreground)]"}
-                  />
-                  <div>
-                    <span className="text-xs font-medium">Spotify Song Commands</span>
-                    <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-                      {spotifyConnected
-                        ? "Let characters play fitting songs on your active Spotify player"
-                        : spotifyConnectionQuery.isFetching
-                          ? "Checking Spotify connection..."
-                          : "Only works after Spotify is connected in Agents"}
-                    </p>
-                  </div>
-                </div>
-                <div
-                  className={cn(
-                    "h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors",
-                    spotifyCommandsEnabled ? "bg-[var(--primary)]" : "bg-[var(--muted-foreground)]/50",
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                      spotifyCommandsEnabled && "translate-x-3.5",
                     )}
                   />
                 </div>

@@ -12,7 +12,7 @@ import {
 import { eq } from "drizzle-orm";
 import { buildSpriteExpressionChoices, listCharacterSprites } from "../../services/game/sprite.service.js";
 import { DATA_DIR } from "../../utils/data-dir.js";
-import type { ResolvedAgent } from "../../services/agents/agent-pipeline.js";
+import { normalizeAgentMaxParallelJobs, type ResolvedAgent } from "../../services/agents/agent-pipeline.js";
 import { executeAgent, executeAgentBatch, normalizeAgentContextSize } from "../../services/agents/agent-executor.js";
 import type { LLMToolDefinition } from "../../services/llm/base-provider.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../../services/llm/local-sidecar.js";
@@ -58,7 +58,7 @@ import {
   normalizeSecretPlotSceneDirections,
   normalizeStringArray,
 } from "./agent-normalizers.js";
-import { executeToolCalls } from "../../services/tools/tool-executor.js";
+import { executeToolCalls, type MetadataPatchInput } from "../../services/tools/tool-executor.js";
 
 type PersonaContext = {
   personaId: string | null;
@@ -92,9 +92,7 @@ function parseSettingsRecord(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
     try {
       const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {};
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
     } catch {
       return {};
     }
@@ -389,8 +387,7 @@ async function buildRetryAgentContext(args: {
         playlistId: typeof chatMeta.gameSpotifyPlaylistId === "string" ? chatMeta.gameSpotifyPlaylistId : null,
         playlistName: typeof chatMeta.gameSpotifyPlaylistName === "string" ? chatMeta.gameSpotifyPlaylistName : null,
         artist: typeof chatMeta.gameSpotifyArtist === "string" ? chatMeta.gameSpotifyArtist : null,
-        note:
-          "This is a manual Spotify DJ retry from game mode. Pick a fresh fitting track now and call spotify_play unless Spotify playback is unavailable; do not keep the current track merely because it still fits.",
+        note: "This is a manual Spotify DJ retry from game mode. Pick a fresh fitting track now and call spotify_play unless Spotify playback is unavailable; do not keep the current track merely because it still fits.",
       };
     }
   }
@@ -441,6 +438,7 @@ async function resolveRetryAgents(args: {
     conn.openrouterProvider,
     conn.maxTokensOverride,
   );
+  const chatConnectionMaxParallelJobs = Number(conn.maxParallelJobs) || 1;
   const resolvedAgents: ResolvedRetryAgent[] = [];
   const skippedLocalSidecarAgents: string[] = [];
   const defaultAgentConnectionAgents: string[] = [];
@@ -460,6 +458,7 @@ async function resolveRetryAgents(args: {
             defaultAgentConn.maxTokensOverride,
           ),
           model: defaultAgentConn.model,
+          maxParallelJobs: Number(defaultAgentConn.maxParallelJobs) || 1,
         };
       })()
     : null;
@@ -469,6 +468,7 @@ async function resolveRetryAgents(args: {
   for (const cfg of enabledConfigs) {
     let agentProvider = provider;
     let agentModel = conn.model;
+    let agentMaxParallelJobs = chatConnectionMaxParallelJobs;
     const effectiveConnectionId = resolveAgentConnectionId({
       requestedConnectionId: cfg.connectionId as string | null,
       defaultAgentConnectionId: defaultAgentConn?.id ?? null,
@@ -491,6 +491,7 @@ async function resolveRetryAgents(args: {
       } else if (defaultAgentConnection && effectiveConnectionId === defaultAgentConnection.connectionId) {
         agentProvider = defaultAgentConnection.provider;
         agentModel = defaultAgentConnection.model;
+        agentMaxParallelJobs = defaultAgentConnection.maxParallelJobs;
         defaultAgentConnectionAgents.push(cfg.name ?? cfg.type);
       } else {
         const agentConn = await conns.getWithKey(effectiveConnectionId);
@@ -506,6 +507,7 @@ async function resolveRetryAgents(args: {
               agentConn.maxTokensOverride,
             );
             agentModel = agentConn.model;
+            agentMaxParallelJobs = Number(agentConn.maxParallelJobs) || 1;
           }
         }
       }
@@ -523,6 +525,7 @@ async function resolveRetryAgents(args: {
         settings: typeof cfg.settings === "string" ? JSON.parse(cfg.settings) : (cfg.settings ?? {}),
         provider: agentProvider,
         model: agentModel,
+        maxParallelJobs: agentMaxParallelJobs,
       },
       agentProvider,
       agentModel,
@@ -533,7 +536,12 @@ async function resolveRetryAgents(args: {
     skippedLocalSidecarAgents.length > 0 ? [buildLocalSidecarUnavailableWarning(skippedLocalSidecarAgents)] : [];
 
   for (const builtIn of builtInFallbackConfigs) {
-    const builtInProvider = defaultAgentConnection ?? { provider, model: conn.model, connectionId: null };
+    const builtInProvider = defaultAgentConnection ?? {
+      provider,
+      model: conn.model,
+      connectionId: null,
+      maxParallelJobs: chatConnectionMaxParallelJobs,
+    };
     if (defaultAgentConnection) {
       defaultAgentConnectionAgents.push(builtIn.name);
     }
@@ -550,6 +558,7 @@ async function resolveRetryAgents(args: {
         settings: getDefaultBuiltInAgentSettings(builtIn.id),
         provider: builtInProvider.provider,
         model: builtInProvider.model,
+        maxParallelJobs: builtInProvider.maxParallelJobs,
       },
       agentProvider: builtInProvider.provider,
       agentModel: builtInProvider.model,
@@ -595,6 +604,68 @@ function toLLMToolDefinition(toolName: string): LLMToolDefinition | null {
       parameters: tool.parameters as unknown as Record<string, unknown>,
     },
   };
+}
+
+const CHAT_METADATA_TOOL_NAMES = new Set([
+  "read_chat_summary",
+  "append_chat_summary",
+  "read_chat_variable",
+  "write_chat_variable",
+]);
+
+async function attachRetryChatMetadataToolContexts(args: {
+  chats: ReturnType<typeof createChatsStorage>;
+  chatId: string;
+  chatMeta: Record<string, unknown>;
+  resolvedAgents: ResolvedRetryAgent[];
+}) {
+  const { chats, chatId, chatMeta, resolvedAgents } = args;
+
+  const updateChatMetadataForTools = async (patchOrUpdater: MetadataPatchInput) => {
+    let emittedPatch: Record<string, unknown> = {};
+    const updatedChat = await chats.patchMetadata(chatId, async (currentMeta) => {
+      const patch = typeof patchOrUpdater === "function" ? await patchOrUpdater({ ...currentMeta }) : patchOrUpdater;
+      emittedPatch = patch;
+      return patch;
+    });
+    const updatedMeta = updatedChat ? parseExtra(updatedChat.metadata) : { ...chatMeta, ...emittedPatch };
+    for (const key of Object.keys(chatMeta)) {
+      if (!(key in updatedMeta)) delete chatMeta[key];
+    }
+    Object.assign(chatMeta, updatedMeta);
+    return updatedMeta;
+  };
+
+  for (const entry of resolvedAgents) {
+    if (entry.resolved.toolContext?.tools.length) continue;
+    const settings = parseSettingsRecord(entry.resolved.settings);
+    const enabledNames = Array.isArray(settings.enabledTools) ? (settings.enabledTools as string[]) : [];
+    const metadataToolNames = enabledNames.filter((name) => CHAT_METADATA_TOOL_NAMES.has(name));
+    if (metadataToolNames.length === 0) continue;
+
+    const tools = metadataToolNames
+      .map((name) => toLLMToolDefinition(name))
+      .filter((tool): tool is LLMToolDefinition => tool !== null);
+    if (tools.length === 0) continue;
+
+    const allowedToolNames = new Set(tools.map((tool) => tool.function.name));
+    entry.resolved.toolContext = {
+      tools,
+      executeToolCall: async (call) => {
+        if (!allowedToolNames.has(call.function.name)) {
+          return JSON.stringify({
+            error: `Tool not allowed for agent ${entry.resolved.type}: ${call.function.name}`,
+            allowed: Array.from(allowedToolNames),
+          });
+        }
+        const results = await executeToolCalls([call], {
+          chatMeta,
+          onUpdateMetadata: updateChatMetadataForTools,
+        });
+        return results[0]?.result ?? "Tool execution failed";
+      },
+    };
+  }
 }
 
 async function attachRetrySpotifyToolContexts(args: {
@@ -996,7 +1067,7 @@ async function executeRetryBatches(
 ) {
   const providerModelGroups = new Map<
     string,
-    { agents: ResolvedRetryAgent[]; provider: any; model: string; context: AgentContext }
+    { agents: ResolvedRetryAgent[]; provider: any; model: string; context: AgentContext; maxParallelJobs: number }
   >();
 
   for (const entry of resolvedAgents) {
@@ -1005,14 +1076,41 @@ async function executeRetryBatches(
     const contextKind = context === preGenerationContext ? "pre_generation" : "default";
     const key = `${retryProviderKey(entry.agentProvider)}::${entry.agentModel}::${contextKind}`;
     if (!providerModelGroups.has(key)) {
-      providerModelGroups.set(key, { agents: [], provider: entry.agentProvider, model: entry.agentModel, context });
+      providerModelGroups.set(key, {
+        agents: [],
+        provider: entry.agentProvider,
+        model: entry.agentModel,
+        context,
+        maxParallelJobs: normalizeAgentMaxParallelJobs(entry.resolved.maxParallelJobs),
+      });
+    } else {
+      const group = providerModelGroups.get(key)!;
+      group.maxParallelJobs = Math.max(
+        group.maxParallelJobs,
+        normalizeAgentMaxParallelJobs(entry.resolved.maxParallelJobs),
+      );
     }
     providerModelGroups.get(key)!.agents.push(entry);
   }
 
+  const jobGroups = [...providerModelGroups.values()].flatMap((group) => {
+    const jobCount = Math.min(normalizeAgentMaxParallelJobs(group.maxParallelJobs), group.agents.length);
+    if (jobCount <= 1) return [group];
+    const chunks = Array.from({ length: jobCount }, () => [] as ResolvedRetryAgent[]);
+    for (let index = 0; index < group.agents.length; index++) {
+      chunks[index % jobCount]!.push(group.agents[index]!);
+    }
+    return chunks
+      .filter((agents) => agents.length > 0)
+      .map((agents) => ({
+        ...group,
+        agents,
+      }));
+  });
+
   const results: AgentResult[] = [];
   const groupSettled = await Promise.allSettled(
-    [...providerModelGroups.values()].map(async (group) => {
+    jobGroups.map(async (group) => {
       const toolAgents = group.agents.filter((agent) => agent.resolved.toolContext?.tools.length);
       const batchAgents = group.agents.filter((agent) => !agent.resolved.toolContext?.tools.length);
       const groupResults: AgentResult[] = [];
@@ -1821,6 +1919,7 @@ export async function registerRetryAgentsRoute(app: FastifyInstance) {
         agentsStore,
       });
       await attachRetrySpotifyToolContexts({ agentsStore, resolvedAgents });
+      await attachRetryChatMetadataToolContexts({ chats, chatId, chatMeta, resolvedAgents });
       const cyoaAgentWillRun = resolvedAgents.some((e) => e.resolved.type === "cyoa");
       const agentContext = await buildRetryAgentContext({
         cyoaAgentWillRun,
