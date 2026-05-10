@@ -37,7 +37,7 @@ import {
   RotateCcw,
   Crop,
 } from "lucide-react";
-import { cn, generateClientId } from "../../lib/utils";
+import { cn, generateClientId, getAvatarCropStyle, type AvatarCrop } from "../../lib/utils";
 import { showAlertDialog, showConfirmDialog } from "../../lib/app-dialogs";
 import { extractColorsFromImage } from "../../lib/avatar-color-extraction";
 import { HelpTooltip } from "../ui/HelpTooltip";
@@ -57,6 +57,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { SpriteGenerationModal } from "../ui/SpriteGenerationModal";
 import { AvatarGenerationModal } from "../ui/AvatarGenerationModal";
+import { AvatarCropWidget } from "../ui/AvatarCropWidget";
 import { SpriteFrameEditor } from "../ui/SpriteFrameEditor";
 import { SpriteWandCleanupEditor } from "../ui/SpriteWandCleanupEditor";
 import { ExportFormatDialog, type ExportFormatChoice } from "../ui/ExportFormatDialog";
@@ -97,6 +98,8 @@ interface PersonaFormData {
   personaStats: string;
   altDescriptions: AltDescriptionEntry[];
   tags: string[];
+  /** Avatar zoom + position (parsed from the persona row's JSON-encoded `avatarCrop`). */
+  avatarCrop: AvatarCrop | null;
 }
 
 interface PersonaRow {
@@ -109,6 +112,8 @@ interface PersonaRow {
   backstory: string;
   appearance: string;
   avatarPath: string | null;
+  /** JSON-encoded AvatarCrop, or empty string when unset. */
+  avatarCrop?: string;
   isActive: string | boolean;
   nameColor?: string;
   dialogueColor?: string;
@@ -167,6 +172,32 @@ export function PersonaEditor() {
       /* ignore */
     }
 
+    let parsedAvatarCrop: AvatarCrop | null = null;
+    try {
+      const raw = rawPersona.avatarCrop;
+      if (raw) {
+        const obj = JSON.parse(raw);
+        // Defensive: only accept the expected shape so a malformed cell can't
+        // break the editor with NaN transforms.
+        if (
+          obj &&
+          typeof obj === "object" &&
+          typeof obj.zoom === "number" &&
+          typeof obj.offsetX === "number" &&
+          typeof obj.offsetY === "number"
+        ) {
+          parsedAvatarCrop = {
+            zoom: obj.zoom,
+            offsetX: obj.offsetX,
+            offsetY: obj.offsetY,
+            ...(obj.fullImage ? { fullImage: true } : {}),
+          };
+        }
+      }
+    } catch {
+      /* ignore — empty / malformed crop just stays null */
+    }
+
     setFormData({
       name: rawPersona.name,
       comment: rawPersona.comment ?? "",
@@ -187,6 +218,7 @@ export function PersonaEditor() {
           return [];
         }
       })(),
+      avatarCrop: parsedAvatarCrop,
     });
     setAvatarPreview(rawPersona.avatarPath);
     setDirty(false);
@@ -201,12 +233,15 @@ export function PersonaEditor() {
     if (!personaId || !formData) return;
     setSaving(true);
     try {
-      const { altDescriptions, tags, ...rest } = formData;
+      const { altDescriptions, tags, avatarCrop, ...rest } = formData;
       await updatePersona.mutateAsync({
         id: personaId,
         ...rest,
         altDescriptions: JSON.stringify(altDescriptions),
         tags: JSON.stringify(tags),
+        // Persist as JSON string; empty string means "no crop" so the row keeps
+        // the legacy default in render sites.
+        avatarCrop: avatarCrop ? JSON.stringify(avatarCrop) : "",
       });
       setDirty(false);
     } finally {
@@ -339,7 +374,12 @@ export function PersonaEditor() {
           onClick={() => fileInputRef.current?.click()}
         >
           {avatarPreview ? (
-            <img src={avatarPreview} alt={formData.name} className="h-full w-full object-cover" />
+            <img
+              src={avatarPreview}
+              alt={formData.name}
+              className="h-full w-full object-cover"
+              style={getAvatarCropStyle(formData.avatarCrop)}
+            />
           ) : (
             <User size="1.375rem" className="text-white" />
           )}
@@ -481,7 +521,12 @@ export function PersonaEditor() {
         <div className="flex-1 overflow-y-auto p-6 @max-5xl:p-4">
           <div className="mx-auto max-w-2xl">
             {activeTab === "description" && (
-              <DescriptionTab formData={formData} updateField={updateField} setDirty={setDirty} />
+              <DescriptionTab
+                formData={formData}
+                updateField={updateField}
+                setDirty={setDirty}
+                avatarPreview={avatarPreview}
+              />
             )}
             {activeTab === "personality" && (
               <TextareaTab
@@ -1743,10 +1788,12 @@ function DescriptionTab({
   formData,
   updateField,
   setDirty: _setDirty,
+  avatarPreview,
 }: {
   formData: PersonaFormData;
   updateField: <K extends keyof PersonaFormData>(key: K, value: PersonaFormData[K]) => void;
   setDirty: (v: boolean) => void;
+  avatarPreview: string | null;
 }) {
   const altDescs = formData.altDescriptions;
   const [expandedField, setExpandedField] = useState<"description" | string | null>(null);
@@ -1787,8 +1834,19 @@ function DescriptionTab({
     updateAltDescs(altDescs.filter((d) => d.id !== id));
   };
 
+  const avatarCrop: AvatarCrop = formData.avatarCrop ?? { zoom: 1, offsetX: 0, offsetY: 0 };
+
   return (
     <div className="space-y-6">
+      {/* Avatar Crop / Zoom */}
+      {avatarPreview && (
+        <AvatarCropWidget
+          src={avatarPreview}
+          alt={formData.name}
+          crop={avatarCrop}
+          onChange={(next) => updateField("avatarCrop", next)}
+        />
+      )}
       {/* Main description */}
       <div>
         <div className="flex items-center justify-between mb-4">

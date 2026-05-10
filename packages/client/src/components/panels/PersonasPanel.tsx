@@ -40,7 +40,7 @@ import {
   Tag,
 } from "lucide-react";
 import { showConfirmDialog } from "../../lib/app-dialogs";
-import { cn } from "../../lib/utils";
+import { cn, getAvatarCropStyle, type AvatarCrop } from "../../lib/utils";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { api } from "../../lib/api-client";
 import { ExportFormatDialog, type ExportFormatChoice } from "../ui/ExportFormatDialog";
@@ -55,10 +55,38 @@ type PersonaRow = {
   backstory: string;
   appearance: string;
   avatarPath: string | null;
+  /** JSON-encoded AvatarCrop, or empty string when unset. */
+  avatarCrop?: string;
   isActive: string | boolean;
   createdAt: string;
   tags?: string;
 };
+
+/** Parses the persona row's JSON-encoded avatarCrop field with defensive shape
+ *  validation, so a malformed cell doesn't break rendering with NaN transforms. */
+function parsePersonaAvatarCrop(raw: string | undefined): AvatarCrop | null {
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(raw);
+    if (
+      obj &&
+      typeof obj === "object" &&
+      typeof obj.zoom === "number" &&
+      typeof obj.offsetX === "number" &&
+      typeof obj.offsetY === "number"
+    ) {
+      return {
+        zoom: obj.zoom,
+        offsetX: obj.offsetX,
+        offsetY: obj.offsetY,
+        ...(obj.fullImage ? { fullImage: true } : {}),
+      };
+    }
+  } catch {
+    /* fall through to null */
+  }
+  return null;
+}
 
 type PersonaGroupRow = { id: string; name: string; description: string; personaIds: string };
 
@@ -685,7 +713,12 @@ export function PersonasPanel() {
                               <div key={pid} className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs">
                                 <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 text-white">
                                   {p.avatarPath ? (
-                                    <img src={p.avatarPath} alt="" className="h-full w-full rounded-lg object-cover" />
+                                    <img
+                                      src={p.avatarPath}
+                                      alt=""
+                                      className="h-full w-full rounded-lg object-cover"
+                                      style={getAvatarCropStyle(parsePersonaAvatarCrop(p.avatarCrop))}
+                                    />
                                   ) : (
                                     <User size="0.625rem" />
                                   )}
@@ -804,6 +837,7 @@ export function PersonasPanel() {
                     alt=""
                     loading="lazy"
                     className="h-full w-full rounded-xl object-cover"
+                    style={getAvatarCropStyle(parsePersonaAvatarCrop(persona.avatarCrop))}
                   />
                 ) : (
                   <User size="1rem" />
