@@ -69,6 +69,7 @@ import {
 } from "../services/game/skill-check.service.js";
 import { applyAllSegmentEdits, stripGmCommandTags } from "../services/game/segment-edits.js";
 import { processLorebooks } from "../services/lorebook/index.js";
+import { GAME_LOREBOOK_KEEPER_SOURCE_ID } from "../services/lorebook/game-lorebook-scope.js";
 import {
   applyMoraleEvent,
   getMoraleTier,
@@ -1385,7 +1386,6 @@ const SESSION_SUMMARY_MIN_TRANSCRIPT_CHARS = 256;
 const SESSION_CONCLUSION_MIN_OUTPUT_TOKENS = 8192;
 const CAMPAIGN_PROGRESSION_MIN_OUTPUT_TOKENS = SESSION_CONCLUSION_MIN_OUTPUT_TOKENS;
 const GAME_LOREBOOK_KEEPER_MIN_OUTPUT_TOKENS = 16_384;
-const GAME_LOREBOOK_KEEPER_SOURCE_ID = "game-lorebook-keeper";
 const GAME_LOREBOOK_KEEPER_MAX_ENTRIES = 32;
 const SESSION_SUMMARY_TRUNCATION_MARKER = "\n\n[Middle of session transcript truncated to fit context window]\n\n";
 
@@ -2936,10 +2936,7 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!sessionChat) throw new Error("Failed to create game session chat");
 
     const sessionMeta = parseMeta(sessionChat.metadata);
-    const setupActiveAgentIds = [
-      ...(setupConfig.enableSpotifyDj ? ["spotify"] : []),
-      ...(setupConfig.enableLorebookKeeper ? ["lorebook-keeper"] : []),
-    ];
+    const setupActiveAgentIds = [...(setupConfig.enableSpotifyDj ? ["spotify"] : [])];
     const spotifySourceType = setupConfig.spotifySourceType ?? "liked";
     const gameChatParameters = mergeStoredGenerationParameters(
       defaultGenerationParameters,
@@ -5890,6 +5887,7 @@ export async function gameRoutes(app: FastifyInstance) {
       currentBackground: z.string().nullable(),
       currentMusic: z.string().nullable(),
       recentMusic: z.array(z.string().max(500)).max(20).optional().default([]),
+      useSpotifyMusic: z.boolean().optional().default(false),
       availableSpotifyTracks: z.array(spotifySceneTrackCandidateSchema).max(50).optional().default([]),
       currentAmbient: z.string().nullable().optional().default(null),
       currentWeather: z.string().nullable(),
@@ -6045,6 +6043,7 @@ export async function gameRoutes(app: FastifyInstance) {
       const ppCtx: PostProcessContext = {
         availableBackgrounds: input.context.availableBackgrounds,
         availableSfx: input.context.availableSfx,
+        useSpotifyMusic: input.context.useSpotifyMusic,
         availableSpotifyTracks: input.context.availableSpotifyTracks,
         canGenerateBackgrounds: !!sceneCtx.canGenerateBackgrounds,
         validWidgetIds: new Set(
@@ -6066,20 +6065,24 @@ export async function gameRoutes(app: FastifyInstance) {
       const serverMusicTags = allAssetKeys.filter((k) => k.startsWith("music:"));
       const serverAmbientTags = allAssetKeys.filter((k) => k.startsWith("ambient:"));
 
-      const scoredMusic = scoreMusic({
-        state: (input.context.currentState as GameActiveState) ?? "exploration",
-        weather: parsed.weather ?? input.context.currentWeather,
-        timeOfDay: parsed.timeOfDay ?? input.context.currentTimeOfDay,
-        musicGenre: parsed.musicGenre,
-        musicIntensity: parsed.musicIntensity,
-        currentMusic: input.context.currentMusic,
-        recentMusic: input.context.recentMusic,
-        availableMusic: serverMusicTags,
-      });
-      if (scoredMusic) {
-        parsed.music = scoredMusic;
-      } else if (parsed.music) {
+      if (input.context.useSpotifyMusic) {
         parsed.music = null;
+      } else {
+        const scoredMusic = scoreMusic({
+          state: (input.context.currentState as GameActiveState) ?? "exploration",
+          weather: parsed.weather ?? input.context.currentWeather,
+          timeOfDay: parsed.timeOfDay ?? input.context.currentTimeOfDay,
+          musicGenre: parsed.musicGenre,
+          musicIntensity: parsed.musicIntensity,
+          currentMusic: input.context.currentMusic,
+          recentMusic: input.context.recentMusic,
+          availableMusic: serverMusicTags,
+        });
+        if (scoredMusic) {
+          parsed.music = scoredMusic;
+        } else if (parsed.music) {
+          parsed.music = null;
+        }
       }
 
       const scoredAmbient = scoreAmbient({

@@ -43,6 +43,8 @@ type LorebookFilters = {
   characterIds?: string[];
   personaId?: string | null;
   activeLorebookIds?: string[];
+  excludedLorebookIds?: string[];
+  excludedSourceAgentIds?: string[];
 };
 
 type RelevantLorebook = Pick<
@@ -59,6 +61,7 @@ type RelevantLorebook = Pick<
   | "personaId"
   | "personaIds"
   | "chatId"
+  | "sourceAgentId"
 >;
 
 type LorebookMatchingContext = {
@@ -157,7 +160,12 @@ export function filterRelevantLorebooks(lorebooks: RelevantLorebook[], filters?:
   const enabledBooks = lorebooks.filter((book) => book.enabled);
   if (!filters) return enabledBooks;
 
+  const excludedLorebookIds = new Set(filters.excludedLorebookIds ?? []);
+  const excludedSourceAgentIds = new Set(filters.excludedSourceAgentIds ?? []);
+
   return enabledBooks.filter((book) => {
+    if (excludedLorebookIds.has(book.id)) return false;
+    if (book.sourceAgentId && excludedSourceAgentIds.has(book.sourceAgentId)) return false;
     if (book.isGlobal) return true;
     if (filters.activeLorebookIds?.includes(book.id)) return true;
     if ((book.characterIds ?? []).some((id) => filters.characterIds?.includes(id))) return true;
@@ -270,6 +278,8 @@ export async function processLorebooks(
     characterIds?: string[];
     personaId?: string | null;
     activeLorebookIds?: string[];
+    excludedLorebookIds?: string[];
+    excludedSourceAgentIds?: string[];
     tokenBudget?: number;
     enableRecursive?: boolean;
     /** Pre-computed embedding of the chat context for semantic matching. */
@@ -299,6 +309,8 @@ export async function processLorebooks(
         characterIds: options.characterIds,
         personaId: options.personaId,
         activeLorebookIds: options.activeLorebookIds,
+        excludedLorebookIds: options.excludedLorebookIds,
+        excludedSourceAgentIds: options.excludedSourceAgentIds,
       }
     : undefined;
 

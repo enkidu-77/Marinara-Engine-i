@@ -19,6 +19,7 @@ import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
 import { processLorebooks } from "../services/lorebook/index.js";
+import { resolveGameLorebookScopeExclusions } from "../services/lorebook/game-lorebook-scope.js";
 import {
   syncCharacterBookFromLorebook,
   clearCharacterEmbeddedLorebook,
@@ -569,6 +570,7 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       }
     }
 
+    const lorebookScopeExclusions = resolveGameLorebookScopeExclusions(chat?.mode, chatMeta);
     const scanSourceMessages = selectMessagesForLastGenerationScan(chatMessages);
     const scanMessages = scanSourceMessages.map((m) => ({
       role: (m.role === "narrator" ? "system" : m.role) as string,
@@ -580,6 +582,8 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       characterIds,
       personaId,
       activeLorebookIds,
+      excludedLorebookIds: lorebookScopeExclusions.excludedLorebookIds,
+      excludedSourceAgentIds: lorebookScopeExclusions.excludedSourceAgentIds,
       tokenBudget: typeof chatMeta.lorebookTokenBudget === "number" ? chatMeta.lorebookTokenBudget : undefined,
       entryStateOverrides:
         (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&

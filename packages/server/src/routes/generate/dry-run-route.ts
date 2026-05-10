@@ -15,6 +15,7 @@ import { createLorebooksStorage } from "../../services/storage/lorebooks.storage
 import { createRegexScriptsStorage } from "../../services/storage/regex-scripts.storage.js";
 import { buildImpersonateInstruction } from "../../services/conversation/impersonate-prompt.js";
 import { processLorebooks } from "../../services/lorebook/index.js";
+import { resolveGameLorebookScopeExclusions } from "../../services/lorebook/game-lorebook-scope.js";
 import { injectAtDepth } from "../../services/lorebook/prompt-injector.js";
 import { createLLMProvider } from "../../services/llm/provider-registry.js";
 import { getLocalSidecarProvider } from "../../services/llm/local-sidecar.js";
@@ -664,6 +665,7 @@ export async function registerDryRunRoute(app: FastifyInstance) {
       },
       chatMode,
     );
+    const lorebookScopeExclusions = resolveGameLorebookScopeExclusions(chatMode, chatMeta);
     const lorebookTokenBudget = resolveDryRunLorebookTokenBudget(chatMeta);
     if (!impersonate && userMessage.trim()) {
       chatMessages = [
@@ -1028,6 +1030,8 @@ export async function registerDryRunRoute(app: FastifyInstance) {
               characterIds,
               personaId,
               activeLorebookIds,
+              excludedLorebookIds: lorebookScopeExclusions.excludedLorebookIds,
+              excludedSourceAgentIds: lorebookScopeExclusions.excludedSourceAgentIds,
               tokenBudget: lorebookTokenBudget,
               chatEmbedding: null,
               entryStateOverrides:
@@ -1229,6 +1233,8 @@ export async function registerDryRunRoute(app: FastifyInstance) {
               ? (chatMeta.activeLorebookIds as string[])
               : []
             : [],
+          excludedLorebookIds: lorebookScopeExclusions.excludedLorebookIds,
+          excludedLorebookSourceAgentIds: lorebookScopeExclusions.excludedSourceAgentIds,
           chatEmbedding: null,
           entryStateOverrides:
             (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
@@ -1325,6 +1331,8 @@ export async function registerDryRunRoute(app: FastifyInstance) {
         characterIds,
         personaId,
         activeLorebookIds,
+        excludedLorebookIds: lorebookScopeExclusions.excludedLorebookIds,
+        excludedSourceAgentIds: lorebookScopeExclusions.excludedSourceAgentIds,
         tokenBudget: lorebookTokenBudget,
         chatEmbedding: null,
         entryStateOverrides:

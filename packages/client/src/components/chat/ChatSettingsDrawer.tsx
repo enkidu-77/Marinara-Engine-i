@@ -338,11 +338,22 @@ export function ChatSettingsDrawer({
     () => (Array.isArray(metadata.activeLorebookIds) ? metadata.activeLorebookIds : []),
     [metadata.activeLorebookIds],
   );
+  const gameLorebookKeeperEnabled = metadata.gameLorebookKeeperEnabled === true;
+  const gameLorebookKeeperLorebookId =
+    typeof metadata.gameLorebookKeeperLorebookId === "string" ? metadata.gameLorebookKeeperLorebookId : null;
   const activeLorebooks = useMemo<ActiveLorebookView[]>(() => {
     const pinnedIds = new Set(activeLorebookIds);
     const lorebookList = (lorebooks ?? []) as Lorebook[];
 
     return lorebookList.flatMap((lorebook) => {
+      if (
+        isGame &&
+        !gameLorebookKeeperEnabled &&
+        (lorebook.id === gameLorebookKeeperLorebookId || lorebook.sourceAgentId === "game-lorebook-keeper")
+      ) {
+        return [];
+      }
+
       const reasons: LorebookActiveReason[] = [];
       const isPinned = pinnedIds.has(lorebook.id);
 
@@ -366,7 +377,16 @@ export function ChatSettingsDrawer({
 
       return reasons.length > 0 ? [{ ...lorebook, activeReasons: reasons, isPinned }] : [];
     });
-  }, [activeLorebookIds, chat.id, chat.personaId, chatCharIds, lorebooks]);
+  }, [
+    activeLorebookIds,
+    chat.id,
+    chat.personaId,
+    chatCharIds,
+    gameLorebookKeeperEnabled,
+    gameLorebookKeeperLorebookId,
+    isGame,
+    lorebooks,
+  ]);
   const activeLorebookIdSet = useMemo(() => new Set(activeLorebooks.map((lorebook) => lorebook.id)), [activeLorebooks]);
   const lorebookTokenBudget =
     typeof metadata.lorebookTokenBudget === "number" && Number.isFinite(metadata.lorebookTokenBudget)
@@ -374,9 +394,6 @@ export function ChatSettingsDrawer({
       : LIMITS.DEFAULT_LOREBOOK_TOKEN_BUDGET;
   const activeAgentIds = useMemo<string[]>(() => metadata.activeAgentIds ?? [], [metadata.activeAgentIds]);
   const activeToolIds: string[] = metadata.activeToolIds ?? [];
-  const gameLorebookKeeperEnabled = metadata.gameLorebookKeeperEnabled === true;
-  const gameLorebookKeeperLorebookId =
-    typeof metadata.gameLorebookKeeperLorebookId === "string" ? metadata.gameLorebookKeeperLorebookId : null;
   const gameLorebookKeeperLorebook = gameLorebookKeeperLorebookId
     ? ((lorebooks ?? []) as Array<{ id: string; name: string }>).find(
         (book) => book.id === gameLorebookKeeperLorebookId,
@@ -945,10 +962,16 @@ export function ChatSettingsDrawer({
         personaId?: string | null;
         personaIds?: string[];
         chatId?: string | null;
+        sourceAgentId?: string | null;
       }>
     ).some(
       (lorebook) =>
         lorebook.enabled !== false &&
+        !(
+          isGame &&
+          !gameLorebookKeeperEnabled &&
+          (lorebook.id === gameLorebookKeeperLorebookId || lorebook.sourceAgentId === "game-lorebook-keeper")
+        ) &&
         (lorebook.isGlobal ||
           activeLorebookIds.includes(lorebook.id) ||
           lorebook.characterIds?.some((id) => chatCharIds.includes(id)) ||
@@ -957,7 +980,16 @@ export function ChatSettingsDrawer({
           (lorebook.personaId && lorebook.personaId === chat.personaId) ||
           (lorebook.chatId && lorebook.chatId === chat.id)),
     );
-  }, [activeLorebookIds, chat.id, chat.personaId, chatCharIds, lorebooks]);
+  }, [
+    activeLorebookIds,
+    chat.id,
+    chat.personaId,
+    chatCharIds,
+    gameLorebookKeeperEnabled,
+    gameLorebookKeeperLorebookId,
+    isGame,
+    lorebooks,
+  ]);
   const showLorebookMarkerWarning =
     !!chat.promptPresetId && hasScopedOrGlobalLorebooks && !currentPromptPresetHasLorebookMarker;
 
@@ -1050,7 +1082,7 @@ export function ChatSettingsDrawer({
   const [groupScenarioDraft, setGroupScenarioDraft] = useState((metadata.groupScenarioText as string) ?? "");
   const [groupScenarioExpanded, setGroupScenarioExpanded] = useState(false);
   const gameAgentPool = useMemo(
-    () => Array.from(new Set(activeAgentIds.filter((id) => id !== "spotify"))),
+    () => Array.from(new Set(activeAgentIds.filter((id) => id !== "spotify" && id !== "lorebook-keeper"))),
     [activeAgentIds],
   );
   const [extraPromptDraft, setExtraPromptDraft] = useState((metadata.gameExtraPrompt as string) ?? "");
@@ -1230,6 +1262,39 @@ export function ChatSettingsDrawer({
       });
     }
   }, [activeAgentIds, chat.id, ensureSpotifyAgent, gameSpotifySourceType, gameUseSpotifyMusic, updateMeta]);
+
+  const toggleGameLorebookKeeper = useCallback(() => {
+    const nextActiveAgentIds = activeAgentIds.filter((id) => id !== "lorebook-keeper");
+    if (gameLorebookKeeperEnabled) {
+      const keeperLorebookIds = new Set(
+        ((lorebooks ?? []) as Lorebook[])
+          .filter((lorebook) => lorebook.sourceAgentId === "game-lorebook-keeper")
+          .map((lorebook) => lorebook.id),
+      );
+      if (gameLorebookKeeperLorebookId) keeperLorebookIds.add(gameLorebookKeeperLorebookId);
+      updateMeta.mutate({
+        id: chat.id,
+        gameLorebookKeeperEnabled: false,
+        activeAgentIds: nextActiveAgentIds,
+        activeLorebookIds: activeLorebookIds.filter((id) => !keeperLorebookIds.has(id)),
+      });
+      return;
+    }
+
+    updateMeta.mutate({
+      id: chat.id,
+      gameLorebookKeeperEnabled: true,
+      activeAgentIds: nextActiveAgentIds,
+    });
+  }, [
+    activeAgentIds,
+    activeLorebookIds,
+    chat.id,
+    gameLorebookKeeperEnabled,
+    gameLorebookKeeperLorebookId,
+    lorebooks,
+    updateMeta,
+  ]);
 
   const agentAddIntervalMeta = agentAddPreview
     ? getAgentRunIntervalMeta(agentAddPreview.agent.id, agentAddPreview.agent.builtIn)
@@ -3483,12 +3548,7 @@ export function ChatSettingsDrawer({
 
                 {isGame && (
                   <button
-                    onClick={() => {
-                      updateMeta.mutate({
-                        id: chat.id,
-                        gameLorebookKeeperEnabled: !gameLorebookKeeperEnabled,
-                      });
-                    }}
+                    onClick={toggleGameLorebookKeeper}
                     className={cn(
                       "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left transition-all",
                       gameLorebookKeeperEnabled

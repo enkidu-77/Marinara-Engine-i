@@ -3549,6 +3549,7 @@ export function GameSurface({
       currentBackground: currentBackground,
       currentMusic: useGameAssetStore.getState().currentMusic,
       recentMusic: recentMusicHistoryRef.current,
+      useSpotifyMusic: useSpotifyGameMusic,
       availableSpotifyTracks: [] as SceneSpotifyTrackCandidate[],
       currentAmbient: useGameAssetStore.getState().currentAmbient,
       currentWeather: gameSnapshot?.weather ?? null,
@@ -3634,7 +3635,6 @@ export function GameSurface({
               name: fallback.name,
               artist: fallback.artist,
               album: fallback.album ?? null,
-              reason: "Best mechanical match",
             });
           });
         }
@@ -4346,6 +4346,7 @@ export function GameSurface({
       currentBackground: currentBackground,
       currentMusic: useGameAssetStore.getState().currentMusic,
       recentMusic: recentMusicHistoryRef.current,
+      useSpotifyMusic: useSpotifyGameMusic,
       availableSpotifyTracks: [] as SceneSpotifyTrackCandidate[],
       currentAmbient: useGameAssetStore.getState().currentAmbient,
       currentWeather: gameSnapshot?.weather ?? null,
@@ -4390,7 +4391,6 @@ export function GameSurface({
           name: fallback.name,
           artist: fallback.artist,
           album: fallback.album ?? null,
-          reason: "Best mechanical match",
         };
       }
 

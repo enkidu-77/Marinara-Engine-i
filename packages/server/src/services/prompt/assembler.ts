@@ -106,6 +106,10 @@ export interface AssemblerInput {
   activeAgentIds?: string[];
   /** Per-chat list of manually activated lorebook IDs from chat settings */
   activeLorebookIds?: string[];
+  /** Lorebook IDs that should be excluded even if otherwise scoped to the chat. */
+  excludedLorebookIds?: string[];
+  /** Source agent IDs whose generated lorebooks should be excluded from scanning. */
+  excludedLorebookSourceAgentIds?: string[];
   /** When true, lorebook markers expand to empty content without scanning global or scoped lorebooks. */
   disableLorebooks?: boolean;
   /** Pre-computed embedding of chat context for semantic lorebook matching. */
@@ -230,6 +234,8 @@ export async function assemblePrompt(input: AssemblerInput): Promise<AssemblerOu
     enableAgents: input.enableAgents ?? true,
     activeAgentIds: input.activeAgentIds ?? [],
     activeLorebookIds: input.activeLorebookIds ?? [],
+    excludedLorebookIds: input.excludedLorebookIds ?? [],
+    excludedLorebookSourceAgentIds: input.excludedLorebookSourceAgentIds ?? [],
     disableLorebooks: input.disableLorebooks === true,
     chatEmbedding: input.chatEmbedding ?? null,
     entryStateOverrides: input.entryStateOverrides,

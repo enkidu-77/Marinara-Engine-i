@@ -38,6 +38,10 @@ import { createRegexScriptsStorage } from "../services/storage/regex-scripts.sto
 import { createPromptOverridesStorage } from "../services/storage/prompt-overrides.storage.js";
 import { loadPrompt, CONVERSATION_SELFIE } from "../services/prompt-overrides/index.js";
 import { processLorebooks } from "../services/lorebook/index.js";
+import {
+  filterGameInternalAgentIds,
+  resolveGameLorebookScopeExclusions,
+} from "../services/lorebook/game-lorebook-scope.js";
 import { lorebookEntryPassesContextFilters } from "../services/lorebook/keyword-scanner.js";
 import { injectAtDepth } from "../services/lorebook/prompt-injector.js";
 import { createLLMProvider } from "../services/llm/provider-registry.js";
@@ -1102,12 +1106,13 @@ export async function generateRoutes(app: FastifyInstance) {
       const persistedChatActiveAgentIds: string[] = Array.isArray(chatMeta.activeAgentIds)
         ? (chatMeta.activeAgentIds as string[])
         : [];
-      const chatActiveAgentIds: string[] = gameSpotifyMusicEnabled
-        ? persistedChatActiveAgentIds.filter((agentId) => agentId !== "spotify")
-        : persistedChatActiveAgentIds;
+      const chatActiveAgentIds: string[] = filterGameInternalAgentIds(chatMode, persistedChatActiveAgentIds).filter(
+        (agentId) => !(gameSpotifyMusicEnabled && agentId === "spotify"),
+      );
       const chatActiveLorebookIds: string[] = Array.isArray(chatMeta.activeLorebookIds)
         ? (chatMeta.activeLorebookIds as string[])
         : [];
+      const gameLorebookScopeExclusions = resolveGameLorebookScopeExclusions(chatMode, chatMeta);
       let presetHandledLorebooks = false;
       const presetHasLorebookMarker = (sections: Array<{ isMarker: string; markerConfig: string | null }>) =>
         sections.some((section) => {
@@ -1153,6 +1158,8 @@ export async function generateRoutes(app: FastifyInstance) {
           characterIds: promptCharacterIds,
           personaId,
           activeLorebookIds: chatActiveLorebookIds,
+          excludedLorebookIds: gameLorebookScopeExclusions.excludedLorebookIds,
+          excludedSourceAgentIds: gameLorebookScopeExclusions.excludedSourceAgentIds,
         });
         const hasVectorizedEntries = (activeEntries as Array<Record<string, unknown>>).some((e) => e.embedding != null);
         if (hasVectorizedEntries) {
@@ -1239,6 +1246,8 @@ export async function generateRoutes(app: FastifyInstance) {
           enableAgents: chatEnableAgents,
           activeAgentIds: chatActiveAgentIds,
           activeLorebookIds: chatActiveLorebookIds,
+          excludedLorebookIds: gameLorebookScopeExclusions.excludedLorebookIds,
+          excludedLorebookSourceAgentIds: gameLorebookScopeExclusions.excludedSourceAgentIds,
           lorebookTokenBudget: resolveLorebookTokenBudget(chatMeta),
           chatEmbedding: chatContextEmbedding,
           entryStateOverrides:
@@ -2333,6 +2342,8 @@ export async function generateRoutes(app: FastifyInstance) {
             characterIds,
             personaId,
             activeLorebookIds: chatActiveLorebookIds,
+            excludedLorebookIds: gameLorebookScopeExclusions.excludedLorebookIds,
+            excludedSourceAgentIds: gameLorebookScopeExclusions.excludedSourceAgentIds,
             tokenBudget: resolveLorebookTokenBudget(chatMeta),
             chatEmbedding: chatContextEmbedding,
             entryStateOverrides:
@@ -2390,6 +2401,8 @@ export async function generateRoutes(app: FastifyInstance) {
           characterIds,
           personaId,
           activeLorebookIds: chatActiveLorebookIds,
+          excludedLorebookIds: gameLorebookScopeExclusions.excludedLorebookIds,
+          excludedSourceAgentIds: gameLorebookScopeExclusions.excludedSourceAgentIds,
           tokenBudget: resolveLorebookTokenBudget(chatMeta),
           chatEmbedding: chatContextEmbedding,
           entryStateOverrides:
@@ -3465,6 +3478,8 @@ export async function generateRoutes(app: FastifyInstance) {
               characterIds,
               personaId,
               activeLorebookIds: chatActiveLorebookIds,
+              excludedLorebookIds: gameLorebookScopeExclusions.excludedLorebookIds,
+              excludedSourceAgentIds: gameLorebookScopeExclusions.excludedSourceAgentIds,
               tokenBudget: resolveLorebookTokenBudget(chatMeta),
               chatEmbedding: chatContextEmbedding,
               entryStateOverrides:
@@ -4600,6 +4615,8 @@ export async function generateRoutes(app: FastifyInstance) {
           characterIds,
           personaId,
           activeLorebookIds: chatActiveLorebookIds,
+          excludedLorebookIds: gameLorebookScopeExclusions.excludedLorebookIds,
+          excludedSourceAgentIds: gameLorebookScopeExclusions.excludedSourceAgentIds,
         });
         const q = query.toLowerCase();
         return entries

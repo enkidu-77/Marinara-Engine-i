@@ -44,6 +44,7 @@ import {
   persistLorebookKeeperUpdates,
   resolveLorebookKeeperTarget,
 } from "./lorebook-keeper-utils.js";
+import { filterGameInternalAgentIds } from "../../services/lorebook/game-lorebook-scope.js";
 import { sendSseEvent, startSseReply } from "./sse.js";
 import {
   buildDefaultAgentConnectionWarning,
@@ -268,25 +269,27 @@ async function buildRetryAgentContext(args: {
     memory: {},
   };
 
-  const lorebookKeeperSettings = getLorebookKeeperSettings(chatMeta);
-  const { writableLorebookIds, targetLorebookId, targetLorebookName } = await resolveLorebookKeeperTarget({
-    lorebooksStore,
-    chatId,
-    characterIds,
-    personaId: personaContext.personaId,
-    activeLorebookIds,
-    preferredTargetLorebookId: lorebookKeeperSettings.targetLorebookId,
-  });
-  agentContext.writableLorebookIds = writableLorebookIds;
-  if (targetLorebookId) {
-    agentContext.memory._lorebookKeeperTargetLorebookId = targetLorebookId;
-  }
-  if (targetLorebookName) {
-    agentContext.memory._lorebookKeeperTargetLorebookName = targetLorebookName;
-  }
-  const existingEntries = await loadLorebookKeeperExistingEntries(lorebooksStore, targetLorebookId);
-  if (existingEntries.length > 0) {
-    agentContext.memory._existingLorebookEntries = existingEntries;
+  if (resolvedAgentTypes.has("lorebook-keeper")) {
+    const lorebookKeeperSettings = getLorebookKeeperSettings(chatMeta);
+    const { writableLorebookIds, targetLorebookId, targetLorebookName } = await resolveLorebookKeeperTarget({
+      lorebooksStore,
+      chatId,
+      characterIds,
+      personaId: personaContext.personaId,
+      activeLorebookIds,
+      preferredTargetLorebookId: lorebookKeeperSettings.targetLorebookId,
+    });
+    agentContext.writableLorebookIds = writableLorebookIds;
+    if (targetLorebookId) {
+      agentContext.memory._lorebookKeeperTargetLorebookId = targetLorebookId;
+    }
+    if (targetLorebookName) {
+      agentContext.memory._lorebookKeeperTargetLorebookName = targetLorebookName;
+    }
+    const existingEntries = await loadLorebookKeeperExistingEntries(lorebooksStore, targetLorebookId);
+    if (existingEntries.length > 0) {
+      agentContext.memory._existingLorebookEntries = existingEntries;
+    }
   }
 
   if (historicalGameStateAnchor) {
@@ -402,7 +405,7 @@ async function resolveRetryAgents(args: {
   agentsStore: ReturnType<typeof createAgentsStorage>;
 }): Promise<ResolvedRetryAgents> {
   const { agentTypes, chat, conns, agentsStore } = args;
-  const agentTypeSet = new Set(agentTypes);
+  const agentTypeSet = new Set(filterGameInternalAgentIds((chat as any).mode, agentTypes));
   const configs = await agentsStore.list();
   const enabledConfigs = configs.filter((config: any) => agentTypeSet.has(config.type));
   const resolvedTypeSet = new Set(enabledConfigs.map((config: any) => config.type));

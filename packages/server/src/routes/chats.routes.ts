@@ -32,6 +32,10 @@ import { DATA_DIR } from "../utils/data-dir.js";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
 import { findLastIndex, parseExtra, shouldEnableAgentsForGeneration } from "./generate/generate-route-utils.js";
 import {
+  filterGameInternalAgentIds,
+  resolveGameLorebookScopeExclusions,
+} from "../services/lorebook/game-lorebook-scope.js";
+import {
   isMemoryRecallVectorizerAvailable,
   resolveMemoryRecallEmbeddingSource,
 } from "../services/memory-recall-embedding.js";
@@ -1119,6 +1123,11 @@ export async function chatsRoutes(app: FastifyInstance) {
           });
           const resolvePromptMacros = (value: string) => resolveMacros(value, promptMacroContext);
           const entryStateOverrides = resolveEntryStateOverrides(chatMeta.entryStateOverrides);
+          const chatMode = (chat.mode as string) ?? "roleplay";
+          const lorebookScopeExclusions = resolveGameLorebookScopeExclusions(chatMode, chatMeta);
+          const promptActiveAgentIds = Array.isArray(chatMeta.activeAgentIds)
+            ? (chatMeta.activeAgentIds as string[])
+            : [];
 
           const assembled = await assemblePrompt({
             db: app.db,
@@ -1137,10 +1146,12 @@ export async function chatsRoutes(app: FastifyInstance) {
             chatMessages: mappedMessages,
             chatSummary: (chatMeta.summary as string) ?? null,
             enableAgents: chatMeta.enableAgents === true,
-            activeAgentIds: Array.isArray(chatMeta.activeAgentIds) ? (chatMeta.activeAgentIds as string[]) : [],
+            activeAgentIds: filterGameInternalAgentIds(chatMode, promptActiveAgentIds),
             activeLorebookIds: Array.isArray(chatMeta.activeLorebookIds)
               ? (chatMeta.activeLorebookIds as string[])
               : [],
+            excludedLorebookIds: lorebookScopeExclusions.excludedLorebookIds,
+            excludedLorebookSourceAgentIds: lorebookScopeExclusions.excludedSourceAgentIds,
             entryStateOverrides:
               (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) &&
               typeof (chatMeta.entryStateOverrides ?? chatMeta.lorebookEntryStateOverrides) === "object"
@@ -1175,7 +1186,6 @@ export async function chatsRoutes(app: FastifyInstance) {
 
           // ── Strip <speaker> tags from chat history to save tokens (roleplay only) ──
           const isGroupChat = characterIds.length > 1;
-          const chatMode = (chat.mode as string) ?? "roleplay";
           if (isGroupChat && chatMode !== "conversation") {
             const speakerCloseRegex = /<\/speaker>/g;
             for (let i = 0; i < assembled.messages.length; i++) {

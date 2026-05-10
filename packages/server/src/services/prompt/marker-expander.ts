@@ -45,6 +45,10 @@ export interface MarkerContext {
   activeAgentIds: string[];
   /** Per-chat list of manually activated lorebook IDs from chat settings */
   activeLorebookIds: string[];
+  /** Lorebook IDs that should be excluded even if otherwise scoped to the chat. */
+  excludedLorebookIds?: string[];
+  /** Source agent IDs whose generated lorebooks should be excluded from scanning. */
+  excludedLorebookSourceAgentIds?: string[];
   /** When true, lorebook markers expand to empty content without scanning global or scoped lorebooks. */
   disableLorebooks?: boolean;
   /** Pre-computed embedding of the chat context for semantic lorebook matching. */
@@ -251,6 +255,8 @@ async function expandLorebook(config: MarkerConfig, ctx: MarkerContext): Promise
     characterIds: ctx.characterIds,
     personaId: ctx.personaId ?? null,
     activeLorebookIds: ctx.activeLorebookIds,
+    excludedLorebookIds: ctx.excludedLorebookIds,
+    excludedSourceAgentIds: ctx.excludedLorebookSourceAgentIds,
     tokenBudget: ctx.lorebookTokenBudget,
     chatEmbedding: ctx.chatEmbedding ?? null,
     entryStateOverrides: ctx.entryStateOverrides,

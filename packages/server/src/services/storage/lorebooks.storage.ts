@@ -342,6 +342,8 @@ export function createLorebooksStorage(db: DB) {
       characterIds?: string[];
       personaId?: string | null;
       chatId?: string;
+      excludedLorebookIds?: string[];
+      excludedSourceAgentIds?: string[];
     }) {
       const enabledBookRows = await db.select().from(lorebooks).where(eq(lorebooks.enabled, "true"));
       const enabledBooks = (await hydrateLorebookRows(db, enabledBookRows)) as unknown as Array<{
@@ -352,11 +354,16 @@ export function createLorebooksStorage(db: DB) {
         personaId?: string | null;
         personaIds?: string[];
         chatId?: string | null;
+        sourceAgentId?: string | null;
       }>;
 
       let relevantBooks = enabledBooks;
       if (filters) {
+        const excludedLorebookIds = new Set(filters.excludedLorebookIds ?? []);
+        const excludedSourceAgentIds = new Set(filters.excludedSourceAgentIds ?? []);
         relevantBooks = enabledBooks.filter((b) => {
+          if (excludedLorebookIds.has(b.id)) return false;
+          if (b.sourceAgentId && excludedSourceAgentIds.has(b.sourceAgentId)) return false;
           // Globally active lorebooks bypass all scope filters
           if (b.isGlobal) return true;
           // Explicitly added to this chat

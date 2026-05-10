@@ -38,6 +38,8 @@ export interface SceneAnalyzerContext {
   currentMusic: string | null;
   /** Recently played music tags, most recent first. */
   recentMusic?: string[];
+  /** Whether Game Mode is using Spotify instead of local music assets. */
+  useSpotifyMusic?: boolean;
   /** Spotify tracks preselected mechanically for the scene analyzer to choose from. */
   availableSpotifyTracks?: SceneSpotifyTrackCandidate[];
   /** Current ambient tag. */
@@ -175,6 +177,7 @@ export function buildSceneAnalyzerUserPrompt(
   const musicGenreOptions = [...MUSIC_GENRES, "null"].join(" | ");
   const musicIntensityOptions = [...MUSIC_INTENSITIES, "null"].join(" | ");
   const locationKindOptions = [...LOCATION_KINDS, "null"].join(" | ");
+  const useSpotifyMusic = !!ctx?.useSpotifyMusic;
   const spotifyOptions = (ctx?.availableSpotifyTracks ?? []).slice(0, 50);
 
   // ── 1. Narration (longest — furthest from generation) ──
@@ -216,12 +219,13 @@ export function buildSceneAnalyzerUserPrompt(
     ``,
     `TASK: You are the scene director for a visual novel game. Read the narration above and decide:`,
     `1. SCENE SETTING — Pick the BEST overall background, weather, and time of day that fit the narration. The top-level "background" is the DEFAULT background for this turn. Change it from the current state only if the scene warrants it (new location, mood shift). Use null to keep unchanged. For timeOfDay, use null unless the narration explicitly says time changed or a meaningful amount of time passed.`,
-    `2. AUDIO DIRECTION — Choose compact musicGenre/musicIntensity/locationKind hints. Do NOT choose music or ambient file tags; Marinara maps these hints to assets deterministically.`,
-    ...(spotifyOptions.length > 0
+    ...(useSpotifyMusic
       ? [
-          `   Also pick ONE Spotify track URI from SPOTIFY TRACK OPTIONS that best fits the just-finished turn. Use null only if none fit at all.`,
+          `2. AUDIO DIRECTION — Choose locationKind for ambient scoring, and set spotifyTrack to ONE Spotify URI from SPOTIFY TRACK OPTIONS that best fits the just-finished turn. Use null only if there are no suitable options. Do NOT output musicGenre or musicIntensity.`,
         ]
-      : []),
+      : [
+          `2. AUDIO DIRECTION — Choose compact musicGenre/musicIntensity/locationKind hints. Do NOT choose music or ambient file tags; Marinara maps these hints to assets deterministically. Do NOT output spotifyTrack.`,
+        ]),
     `3. REPUTATION — If an NPC relationship shifted, note it. Otherwise empty array.`,
     `4. PER-BEAT EFFECTS — Scan each narration beat [0]-[${lines.length - 1}]. For each beat you can optionally add:`,
     `   - "sfx": sound effects (door slam, explosion, footsteps, impact)`,
@@ -248,10 +252,15 @@ export function buildSceneAnalyzerUserPrompt(
     `RULES:`,
     `- Use ONLY the exact tags listed in the template below. If backgrounds:generated:<short-location-slug> is listed, replace <short-location-slug> with a short concrete location slug.`,
     `- Expressions and widget updates are handled by the GM model. Do NOT include them in your output.`,
-    `- musicGenre describes scene genre/vibe (fantasy, horror, romance, etc.), not weather. musicIntensity is calm for safe/rest/romance, tense for uncertainty/suspense, intense for combat/chase/climax.`,
-    ...(spotifyOptions.length > 0
-      ? [`- spotifyTrack.uri must be copied exactly from SPOTIFY TRACK OPTIONS. Never invent a Spotify URI.`]
-      : [`- spotifyTrack must be null.`]),
+    ...(useSpotifyMusic
+      ? [
+          `- spotifyTrack must be null or one URI string copied exactly from SPOTIFY TRACK OPTIONS. Never invent a Spotify URI. Do not wrap it in an object. Do not include a reason.`,
+          `- Do not include musicGenre or musicIntensity when Spotify music is enabled.`,
+        ]
+      : [
+          `- musicGenre describes scene genre/vibe (fantasy, horror, romance, etc.), not weather. musicIntensity is calm for safe/rest/romance, tense for uncertainty/suspense, intense for combat/chase/climax.`,
+          `- Do not include spotifyTrack when Spotify music is disabled.`,
+        ]),
     `- locationKind describes the physical space for ambience: interior, exterior, underground, urban, or nature. Use null if unclear.`,
     `- timeOfDay is calendar time, not lighting mood. Do NOT change it for indoor shadows, lamps, dark rooms, or atmosphere; keep null unless the story clearly moved to a new time of day.`,
     `- segmentEffects can be an EMPTY array [] when nothing changed.`,
@@ -316,10 +325,12 @@ export function buildSceneAnalyzerUserPrompt(
     `  "background": "<one BACKGROUND OPTIONS value | null>",`,
     `  "weather": "<clear | cloudy | foggy | rainy | stormy | snowy | windy | frost | null>",`,
     `  "timeOfDay": "<dawn | morning | noon | afternoon | evening | night | midnight | null>",`,
-    `  "musicGenre": "<${musicGenreOptions}>",`,
-    `  "musicIntensity": "<${musicIntensityOptions}>",`,
     `  "locationKind": "<${locationKindOptions}>",`,
-    `  "spotifyTrack": ${spotifyOptions.length > 0 ? `null OR {"uri":"<one Spotify URI from SPOTIFY TRACK OPTIONS>","reason":"<brief fit reason>"}` : "null"},`,
+    ...(useSpotifyMusic
+      ? [
+          `  "spotifyTrack": ${spotifyOptions.length > 0 ? `null OR "<one Spotify URI from SPOTIFY TRACK OPTIONS>"` : "null"},`,
+        ]
+      : [`  "musicGenre": "<${musicGenreOptions}>",`, `  "musicIntensity": "<${musicIntensityOptions}>",`]),
     `  "reputationChanges": ${reputationHint},`,
     `  "segmentEffects": [`,
     `    {`,
