@@ -740,10 +740,11 @@ export class OpenAIProvider extends BaseLLMProvider {
 
     if (!effectiveStream) {
       const json = await OpenAIProvider.parseJsonBody<{
-        choices: Array<{ message: Record<string, unknown> & { content: string | unknown[] } }>;
+        choices: Array<{ message: Record<string, unknown> & { content: string | unknown[] | null; refusal?: string } }>;
         usage?: ChatCompletionsUsagePayload;
       }>(response, "OpenAI chat() non-stream response");
       const msg = json.choices[0]?.message;
+      const refusal = typeof msg?.refusal === "string" && msg.refusal ? msg.refusal : "";
       const reasoningMetadata = OpenAIProvider.extractReasoningMetadata(msg);
       OpenAIProvider.emitChatCompletionsReasoning(options, reasoningMetadata);
       const reasoning = OpenAIProvider.extractReasoning(msg);
@@ -754,9 +755,9 @@ export class OpenAIProvider extends BaseLLMProvider {
       const blocks = OpenAIProvider.extractContentBlocks(msg?.content);
       if (blocks) {
         if (!reasoning && blocks.thinking && options.onThinking) options.onThinking(blocks.thinking);
-        yield blocks.text;
+        yield blocks.text || refusal;
       } else {
-        yield (msg?.content as string) ?? "";
+        yield (typeof msg?.content === "string" ? msg.content : "") || refusal;
       }
       return OpenAIProvider.extractChatCompletionsUsage(json.usage);
     }
@@ -1466,7 +1467,7 @@ export class OpenAIProvider extends BaseLLMProvider {
               const resp = parsed.response as Record<string, unknown> | undefined;
               const error = resp?.error as Record<string, unknown> | undefined;
               const msg = (error?.message as string) ?? "unknown error";
-              logger.warn("[OpenAI Responses] Stream ended with response.failed: %s", msg);
+              logger.error(new Error(msg), "[OpenAI Responses] Stream ended with response.failed");
               break;
             }
             case "response.incomplete": {
@@ -1717,7 +1718,7 @@ export class OpenAIProvider extends BaseLLMProvider {
               const resp = parsed.response as Record<string, unknown> | undefined;
               const error = resp?.error as Record<string, unknown> | undefined;
               const msg = (error?.message as string) ?? "unknown error";
-              logger.warn("[OpenAI Responses] chatCompleteResponses stream failed: %s", msg);
+              logger.error(new Error(msg), "[OpenAI Responses] chatCompleteResponses stream failed");
               break;
             }
             case "response.incomplete": {
