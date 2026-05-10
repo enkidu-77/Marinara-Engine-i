@@ -711,7 +711,7 @@ export function buildGmFormatReminder(
     `- Continue with new content directly from the player's input, treating it like a concluded beat. Do not reiterate it.`,
     `- Treat only quoted player text as spoken aloud; unquoted text is action, narration, or internal thoughts cannot be accessed by NPCs unless made observable. NEVER quote or speak for the player character (${ctx.playerName ?? "Player"}). You may narrate obvious, low-stakes participation and their thoughts (nodding during conversation, laying out details, looking around, etc.) indirectly in the second person, but never decide their strategic decisions or exact dialogue. Example:`,
     `[${ctx.playerName ?? "Player"}] [thought] [smirk]: You think to yourself that you're the best.`,
-    `- CRITICAL: NEVER echo the player's distinctive words, phrases, or dialogue. NO PARROTTING!`,
+    `- CRITICAL: NEVER echo dialogue, especially not after the player. NO PARROTTING!`,
     `- Player agency is not player immunity: the player controls intent, not the world's response. Let successes earned through effort, luck, or cleverness and failures caused by mistakes, bad luck, or poor decisions land with consequences; both good and bad ends can be earned. The player has opted into the game and will state OOC boundaries if needed.`,
     `- Keep turn length flexible. If player agency is low (exploration, travel/rest), go longer; if high (combat, dialogue, intense danger), stay concise. Sometimes one line of dialogue or one narrative beat is enough.`,
     `- End naturally when it's the player's turn to act or speak.`,

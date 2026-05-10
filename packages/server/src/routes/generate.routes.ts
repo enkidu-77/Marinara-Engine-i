@@ -95,6 +95,7 @@ import {
 } from "../services/conversation/character-commands.js";
 import {
   ConversationSpotifyCommandError,
+  isSilentConversationSpotifyCommandError,
   playConversationSpotifyCommand,
 } from "../services/spotify/conversation-spotify-command.service.js";
 import {
@@ -4575,12 +4576,24 @@ export async function generateRoutes(app: FastifyInstance) {
         ? await resolveSpotifyCredentials(agentsStore, { agentId: spotifyAgentId, refreshSkewMs: 60_000 })
         : null;
       if (spotifyCredentials && !("accessToken" in spotifyCredentials)) {
-        logger.warn("[spotify] credentials unavailable for tool execution: %s", spotifyCredentials.error);
+        logger.debug("[spotify] credentials unavailable for tool execution: %s", spotifyCredentials.error);
       }
       const spotifyCreds =
         spotifyCredentials && "accessToken" in spotifyCredentials
           ? { accessToken: spotifyCredentials.accessToken }
           : undefined;
+      const spotifyToolsAvailable = Boolean(
+        spotifyCredentials &&
+        "accessToken" in spotifyCredentials &&
+        spotifyHasScope(spotifyCredentials.scopes, "user-modify-playback-state"),
+      );
+      if (!spotifyToolsAvailable && toolDefs) {
+        const beforeCount = toolDefs.length;
+        toolDefs = toolDefs.filter((td) => !spotifyToolNames.has(td.function.name));
+        if (beforeCount !== toolDefs.length) {
+          logger.debug("[spotify] Omitted unavailable Spotify tools from main generation");
+        }
+      }
       const searchLorebookForTools = async (query: string, category?: string | null) => {
         const entries = await lorebooksStore.listActiveEntries({
           chatId: input.chatId,
@@ -4641,7 +4654,11 @@ export async function generateRoutes(app: FastifyInstance) {
           : [];
         if (agentEnabledNames.length === 0) continue;
 
-        const agentTools = allToolDefs.filter((td) => agentEnabledNames.includes(td.function.name));
+        const agentTools = allToolDefs.filter(
+          (td) =>
+            agentEnabledNames.includes(td.function.name) &&
+            (spotifyToolsAvailable || !spotifyToolNames.has(td.function.name)),
+        );
         if (agentTools.length === 0) continue;
         const allowedToolNames = new Set(agentTools.map((td) => td.function.name));
 
@@ -8263,6 +8280,15 @@ export async function generateRoutes(app: FastifyInstance) {
                     input.chatId,
                   );
                 } catch (err) {
+                  if (isSilentConversationSpotifyCommandError(err)) {
+                    logger.debug(
+                      '[spotify/conversation] Dropped unavailable song command: "%s" by "%s" - %s',
+                      spotifyCmd.title,
+                      spotifyCmd.artist,
+                      err.message,
+                    );
+                    continue;
+                  }
                   const message = err instanceof Error ? err.message : "Spotify song command failed.";
                   trySendSseEvent(reply, {
                     type: "spotify_command_error",

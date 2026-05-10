@@ -3078,7 +3078,7 @@ export function GameNarration({
 
         {/* Side remarks — small floating box shown with the dialogue they follow */}
         {activeSideLines.length > 0 && doneTyping && (
-          <div className="relative z-20 mb-2 flex max-h-[min(16rem,38vh)] w-full flex-col space-y-1.5 overflow-y-auto pr-1">
+          <div className="relative z-20 mb-2 flex max-h-[min(16rem,38vh)] w-full flex-col space-y-1.5 overflow-x-hidden overflow-y-auto pr-1">
             {activeSideLines.map((line, i) => {
               const expressionAvatar =
                 line.type === "side" || line.type === "extra"
