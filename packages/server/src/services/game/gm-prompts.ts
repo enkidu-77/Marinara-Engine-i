@@ -945,7 +945,7 @@ export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
     `<campaign_structure_rules>`,
     `Optional structure, not mandatory intensity: some games are cozy, romantic, slice-of-life, sandbox, or low-pressure. If rushing the plot would hurt the requested vibe, use empty arrays or soft social/environmental pressures instead of ticking doom.`,
     `Do not fill every optional campaignPlan list. Empty arrays are valid. Aim for 0-1 pressure clock, 0-2 factions, 0-3 quest seeds, and 0-2 encounter principles.`,
-    `Hard caps (non-negotiable, the schema rejects more): max 2 pressureClocks, max 2 factions, max 3 questSeeds, max 2 encounterPrinciples. For each pressureClock, steps MUST be an integer between 1 and 12 inclusive (typical: 4-8) and current MUST be 0-steps.`,
+    `Hard caps (non-negotiable, the schema rejects more): max 2 pressureClocks, max 2 factions, max 3 questSeeds, max 2 encounterPrinciples. For each pressureClock, steps MUST be an integer between 1 and 12 inclusive (typical: 4-8) and current MUST be an integer between 0 and steps (inclusive).`,
     `campaignPlan formats when used: pressureClocks objects {name, steps, current, failure}; factions objects {name, goal, method, secret}; questSeeds/principles short strings.`,
     `Keep all setup JSON compact: worldOverview 1-2 short paragraphs, map 3-6 regions, startingNpcs 2-5, artStylePrompt 20-30 words. No lore essays.`,
     `Structure should create choices and consequences, not force a railroad. Every hook should be easy for the GM to use later in one turn.`,
