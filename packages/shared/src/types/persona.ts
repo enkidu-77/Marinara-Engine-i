@@ -15,8 +15,10 @@ export interface Persona {
   appearance: string;
   /** Avatar image path */
   avatarPath: string | null;
-  /** Avatar zoom + position settings for the circle avatar (mirrors character `extensions.avatarCrop`). */
-  avatarCrop?: PersonaAvatarCrop | null;
+  /** Avatar crop settings for the circle avatar. Accepts both the current
+   *  source-rectangle shape and the legacy zoom+offset shape (kept readable so
+   *  previously saved crops display unchanged until the user re-edits). */
+  avatarCrop?: PersonaAvatarCrop | LegacyPersonaAvatarCrop | null;
   /** Whether this is the currently active persona */
   isActive: boolean;
   /** Name display color/gradient (CSS value) */
@@ -37,10 +39,21 @@ export interface Persona {
   updatedAt: string;
 }
 
-/** Avatar zoom + pan settings for a persona's circle avatar. Same shape as the
- *  client `AvatarCrop` used for characters (declared in `client/src/lib/utils.ts`)
- *  but duplicated here so the shared package doesn't depend on client code. */
+/** Avatar crop — current source-rectangle format. A square region of the source
+ *  image (`srcWidth * sourceW === srcHeight * sourceH` in editor-enforced data),
+ *  expressed in coordinates normalized to the source's intrinsic dimensions.
+ *  Mirror of the client `AvatarCrop` declared in `client/src/lib/utils.ts`,
+ *  duplicated here so the shared package doesn't depend on client code. */
 export interface PersonaAvatarCrop {
+  srcX: number;
+  srcY: number;
+  srcWidth: number;
+  srcHeight: number;
+}
+
+/** Avatar crop — legacy zoom + offset format. Render-only compatibility path so
+ *  previously saved crops display unchanged until the user re-edits them. */
+export interface LegacyPersonaAvatarCrop {
   zoom: number;
   offsetX: number;
   offsetY: number;

@@ -183,11 +183,20 @@ export function PersonaEditor() {
         // legacy zoom+offset shape. Anything else is silently dropped so a
         // malformed cell can't break the editor with NaN transforms.
         if (obj && typeof obj === "object") {
+          // Validate geometry — finite, positive, within normalized bounds.
+          // Anything malformed is dropped so the editor falls back to defaults
+          // instead of producing NaN transforms or an off-screen overlay.
           if (
-            typeof obj.srcX === "number" &&
-            typeof obj.srcY === "number" &&
-            typeof obj.srcWidth === "number" &&
-            typeof obj.srcHeight === "number"
+            Number.isFinite(obj.srcX) &&
+            Number.isFinite(obj.srcY) &&
+            Number.isFinite(obj.srcWidth) &&
+            Number.isFinite(obj.srcHeight) &&
+            obj.srcWidth > 0 &&
+            obj.srcHeight > 0 &&
+            obj.srcX >= 0 &&
+            obj.srcY >= 0 &&
+            obj.srcX + obj.srcWidth <= 1.001 &&
+            obj.srcY + obj.srcHeight <= 1.001
           ) {
             parsedAvatarCrop = {
               srcX: obj.srcX,
@@ -196,9 +205,10 @@ export function PersonaEditor() {
               srcHeight: obj.srcHeight,
             };
           } else if (
-            typeof obj.zoom === "number" &&
-            typeof obj.offsetX === "number" &&
-            typeof obj.offsetY === "number"
+            Number.isFinite(obj.zoom) &&
+            Number.isFinite(obj.offsetX) &&
+            Number.isFinite(obj.offsetY) &&
+            obj.zoom > 0
           ) {
             parsedAvatarCrop = {
               zoom: obj.zoom,
@@ -271,12 +281,18 @@ export function PersonaEditor() {
     const uploadToken = generateClientId();
     latestAvatarUploadTokenRef.current = uploadToken;
     const fallbackAvatarPath = rawPersona?.avatarPath ?? null;
+    // Capture the saved crop so we can revert if the upload fails. The new image
+    // almost certainly has different framing/dimensions, so the old normalized
+    // crop coords are meaningless for it — clear immediately on upload start
+    // and let the cropper re-init from default centered max-square.
+    const fallbackAvatarCrop = formData?.avatarCrop ?? null;
 
     const reader = new FileReader();
     reader.onload = async () => {
       if (latestAvatarUploadTokenRef.current !== uploadToken) return;
       const dataUrl = reader.result as string;
       setAvatarPreview(dataUrl);
+      updateField("avatarCrop", null);
       try {
         await uploadAvatar.mutateAsync({
           id: personaId,
@@ -286,6 +302,7 @@ export function PersonaEditor() {
       } catch {
         if (latestAvatarUploadTokenRef.current !== uploadToken) return;
         setAvatarPreview(fallbackAvatarPath);
+        updateField("avatarCrop", fallbackAvatarCrop);
       }
     };
     reader.readAsDataURL(file);
@@ -298,6 +315,9 @@ export function PersonaEditor() {
       const uploadToken = generateClientId();
       latestAvatarUploadTokenRef.current = uploadToken;
       setAvatarPreview(avatarDataUrl);
+      // Same rationale as handleAvatarUpload — a freshly generated avatar
+      // shouldn't inherit the prior image's crop coords.
+      updateField("avatarCrop", null);
       await uploadAvatar.mutateAsync({
         id: personaId,
         avatar: avatarDataUrl,
@@ -305,7 +325,7 @@ export function PersonaEditor() {
       });
       toast.success("Persona avatar generated.");
     },
-    [personaId, uploadAvatar],
+    [personaId, updateField, uploadAvatar],
   );
 
   const handleDelete = async () => {

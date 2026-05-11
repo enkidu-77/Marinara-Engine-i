@@ -70,11 +70,20 @@ function parsePersonaAvatarCrop(raw: string | undefined): AvatarCrop | LegacyAva
   try {
     const obj = JSON.parse(raw);
     if (!obj || typeof obj !== "object") return null;
+    // Validate geometry — finite, positive, within normalized bounds. Anything
+    // malformed is dropped so the panel falls back to the uncropped render
+    // instead of producing NaN transforms or an off-canvas image.
     if (
-      typeof obj.srcX === "number" &&
-      typeof obj.srcY === "number" &&
-      typeof obj.srcWidth === "number" &&
-      typeof obj.srcHeight === "number"
+      Number.isFinite(obj.srcX) &&
+      Number.isFinite(obj.srcY) &&
+      Number.isFinite(obj.srcWidth) &&
+      Number.isFinite(obj.srcHeight) &&
+      obj.srcWidth > 0 &&
+      obj.srcHeight > 0 &&
+      obj.srcX >= 0 &&
+      obj.srcY >= 0 &&
+      obj.srcX + obj.srcWidth <= 1.001 &&
+      obj.srcY + obj.srcHeight <= 1.001
     ) {
       return {
         srcX: obj.srcX,
@@ -84,9 +93,10 @@ function parsePersonaAvatarCrop(raw: string | undefined): AvatarCrop | LegacyAva
       };
     }
     if (
-      typeof obj.zoom === "number" &&
-      typeof obj.offsetX === "number" &&
-      typeof obj.offsetY === "number"
+      Number.isFinite(obj.zoom) &&
+      Number.isFinite(obj.offsetX) &&
+      Number.isFinite(obj.offsetY) &&
+      obj.zoom > 0
     ) {
       return {
         zoom: obj.zoom,

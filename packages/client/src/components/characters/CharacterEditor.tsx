@@ -230,6 +230,10 @@ export function CharacterEditor() {
     reader.onload = async () => {
       const dataUrl = reader.result as string;
       setAvatarPreview(dataUrl);
+      // Clear any saved avatarCrop — the new image almost certainly has different
+      // framing, so the prior normalized crop coords are meaningless and would
+      // produce a stale framing on the new file.
+      updateExtension("avatarCrop", undefined);
       try {
         await uploadAvatar.mutateAsync({ id: characterId, avatar: dataUrl });
       } catch {
@@ -243,10 +247,11 @@ export function CharacterEditor() {
     async (avatarDataUrl: string) => {
       if (!characterId) return;
       setAvatarPreview(avatarDataUrl);
+      updateExtension("avatarCrop", undefined);
       await uploadAvatar.mutateAsync({ id: characterId, avatar: avatarDataUrl });
       toast.success("Character avatar generated.");
     },
-    [characterId, uploadAvatar],
+    [characterId, updateExtension, uploadAvatar],
   );
 
   const handleDelete = async () => {

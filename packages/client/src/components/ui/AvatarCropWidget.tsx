@@ -77,6 +77,32 @@ export function AvatarCropWidget({ src, alt, crop, onChange }: AvatarCropWidgetP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   });
 
+  // Re-sync the local overlay when the parent's `crop` prop changes for the
+  // SAME source (e.g. parent reloaded form data, or the saved crop arrived
+  // late after initial mount). Without this, late-arriving crop data would be
+  // silently replaced by the default centered max-square on first interaction.
+  // Skip while a drag is in flight so the user's in-progress edit isn't wiped
+  // by their own onChange roundtrip — the drag handler keeps cropPx in sync
+  // during the drag, and the parent's crop already mirrors that.
+  useEffect(() => {
+    if (!imgRect || dragRef.current) return;
+    const { w, h } = imgRect;
+    if (crop && !isLegacyAvatarCrop(crop)) {
+      const size = clamp(crop.srcWidth * w, MIN_CROP_PX, Math.min(w, h));
+      setCropPx({
+        x: clamp(crop.srcX * w, 0, w - size),
+        y: clamp(crop.srcY * h, 0, h - size),
+        size,
+      });
+      return;
+    }
+    // Legacy crop OR null → default to centered max-square. Legacy data still
+    // renders correctly via getAvatarCropStyle's transform path; the cropper
+    // overlay just shows a fresh selection the user can adjust.
+    const size = Math.min(w, h);
+    setCropPx({ x: (w - size) / 2, y: (h - size) / 2, size });
+  }, [crop, imgRect]);
+
   const emitFromPx = (px: CropPx, w: number, h: number) => {
     onChange({
       srcX: px.x / w,
