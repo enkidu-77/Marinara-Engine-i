@@ -215,7 +215,14 @@ export function AvatarCropWidget({ src, alt, crop, onChange }: AvatarCropWidgetP
             height: imgRect?.h ?? MAX_DISPLAY_H,
           }}
         >
+          {/* key={src} forces remount when the source changes (e.g. switching
+              between personas/characters in the editor). Without this, only the
+              `src` attribute updates on the existing element, and if the new
+              image is already in browser cache the `load` event never fires for
+              React's onLoad listener — so `handleImgLoad` doesn't run and the
+              crop overlay never initializes. */}
           <img
+            key={src}
             ref={imgRef}
             src={src}
             alt={alt}
