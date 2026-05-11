@@ -333,12 +333,23 @@ async function fetchSpotifyTrackIndex(
 
   while (offset < SPOTIFY_TRACK_INDEX_MAX_TRACKS) {
     const pageSize = Math.min(batchSize, SPOTIFY_TRACK_INDEX_MAX_TRACKS - offset);
+    // Use /playlists/{id}/items (the supported endpoint) rather than the deprecated
+    // /tracks variant. After Spotify's 2026-03 Web API migration, /tracks returns
+    // 403 for Development Mode apps and only the /items path works.
     const endpoint =
       sourceKey === "liked"
         ? `/me/tracks?${new URLSearchParams({ limit: String(pageSize), offset: String(offset) })}`
-        : `/playlists/${encodeURIComponent(sourceKey)}/tracks?${new URLSearchParams({ limit: String(pageSize), offset: String(offset) })}`;
+        : `/playlists/${encodeURIComponent(sourceKey)}/items?${new URLSearchParams({ limit: String(pageSize), offset: String(offset) })}`;
     const res = await fetchSpotifyApi(credentials, endpoint, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) {
+      // Development Mode apps without Extended Quota can only read playlists owned
+      // by the connected Spotify user; followed/editorial playlists 403.
+      if (res.status === 403 && sourceKey !== "liked") {
+        spotifyError(
+          403,
+          "Spotify denied access to this playlist's contents. Spotify only allows reading playlists owned by the connected account; followed or editorial playlists are blocked for Development Mode apps. Pick a playlist you own, switch to Liked Songs, or use Any Spotify.",
+        );
+      }
       const body = await res.text();
       spotifyError(res.status, `Spotify track index failed (${res.status}): ${body.slice(0, 200)}`);
     }
