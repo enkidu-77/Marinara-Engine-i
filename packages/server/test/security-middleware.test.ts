@@ -150,6 +150,74 @@ test("Basic Auth credentials satisfy non-loopback access", async () =>
     },
   ));
 
+test("Docker bridge traffic keeps the trusted-interface bypass by default", async () =>
+  withEnv(
+    {
+      BASIC_AUTH_USER: "admin",
+      BASIC_AUTH_PASS: "secret",
+      BYPASS_AUTH_DOCKER: undefined,
+      REQUIRE_AUTH_FOR_DOCKER_PROXY: undefined,
+      IP_ALLOWLIST: undefined,
+    },
+    async () => {
+      const app = await buildHookApp();
+      try {
+        const direct = await app.inject({
+          method: "GET",
+          url: "/api/headers",
+          remoteAddress: "172.17.0.2",
+        });
+        assert.equal(direct.statusCode, 200);
+
+        const forwarded = await app.inject({
+          method: "GET",
+          url: "/api/headers",
+          remoteAddress: "172.17.0.2",
+          headers: { "x-forwarded-for": "203.0.113.10" },
+        });
+        assert.equal(forwarded.statusCode, 200);
+      } finally {
+        await app.close();
+      }
+    },
+  ));
+
+test("proxy-forwarded Docker bridge traffic requires Basic Auth when proxy auth handling is enabled", async () =>
+  withEnv(
+    {
+      BASIC_AUTH_USER: "admin",
+      BASIC_AUTH_PASS: "secret",
+      BYPASS_AUTH_DOCKER: undefined,
+      REQUIRE_AUTH_FOR_DOCKER_PROXY: "true",
+      IP_ALLOWLIST: undefined,
+    },
+    async () => {
+      const app = await buildHookApp();
+      try {
+        const missingAuth = await app.inject({
+          method: "GET",
+          url: "/api/headers",
+          remoteAddress: "172.17.0.2",
+          headers: { "x-forwarded-for": "203.0.113.10" },
+        });
+        assert.equal(missingAuth.statusCode, 401);
+
+        const validAuth = await app.inject({
+          method: "GET",
+          url: "/api/headers",
+          remoteAddress: "172.17.0.2",
+          headers: {
+            "x-forwarded-for": "203.0.113.10",
+            authorization: `Basic ${Buffer.from("admin:secret").toString("base64")}`,
+          },
+        });
+        assert.equal(validAuth.statusCode, 200);
+      } finally {
+        await app.close();
+      }
+    },
+  ));
+
 test("CSRF protection blocks cross-site unsafe API requests", async () =>
   withEnv({}, async () => {
     const app = await buildHookApp();

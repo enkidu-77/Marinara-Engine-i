@@ -137,6 +137,8 @@ BYPASS_AUTH_DOCKER=true      # trusts 172.16.0.0/12 (Docker bridge)
 - **Your non-Docker LAN uses `172.16.x.x` / `172.20.x.x` addresses.** `BYPASS_AUTH_DOCKER=true` trusts the entire `172.16.0.0/12` block; non-Docker callers in that range would also bypass auth. Set `BYPASS_AUTH_DOCKER=false` and add the specific containers to `IP_ALLOWLIST` instead.
 - **You genuinely want a password from your Tailnet / containers too** — set the corresponding flag to `false`.
 
+If Marinara is behind a Docker reverse proxy or tunnel container and you expect Marinara's own Basic Auth/IP allowlist to protect forwarded clients, set `REQUIRE_AUTH_FOR_DOCKER_PROXY=true`. That setup can be valid; just choose one auth boundary: the proxy enforces access, or Marinara does.
+
 The server logs an `[auth-bypass]` warning the first time a request actually exercises one of these flags, so you can confirm in the log when the bypass goes live.
 
 ## Serving over HTTPS
@@ -150,7 +152,7 @@ For sensitive deployments, consider Tailscale or Cloudflare Access — they avoi
 
 ## When a restart is required
 
-The server watches `.env` for changes and applies most updates within a couple of seconds — no restart needed. That includes `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` / `BASIC_AUTH_REALM`, `IP_ALLOWLIST` / `IP_ALLOWLIST_ENABLED`, `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK`, `ALLOW_UNAUTHENTICATED_REMOTE`, `TRUSTED_PRIVATE_NETWORKS`, `ADMIN_SECRET`, `CSRF_TRUSTED_ORIGINS`, `LOG_LEVEL`, and the various `*_LOCAL_URLS_ENABLED` / privileged-feature flags.
+The server watches `.env` for changes and applies most updates within a couple of seconds — no restart needed. That includes `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` / `BASIC_AUTH_REALM`, `IP_ALLOWLIST` / `IP_ALLOWLIST_ENABLED`, `ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK`, `ALLOW_UNAUTHENTICATED_REMOTE`, `TRUSTED_PRIVATE_NETWORKS`, `BYPASS_AUTH_*`, `REQUIRE_AUTH_FOR_DOCKER_PROXY`, `ADMIN_SECRET`, `CSRF_TRUSTED_ORIGINS`, `LOG_LEVEL`, and the various `*_LOCAL_URLS_ENABLED` / privileged-feature flags.
 
 Changes to these still need a restart because they're bound at startup: `PORT`, `HOST`, `SSL_CERT`, `SSL_KEY`, `DATA_DIR`, `STORAGE_BACKEND`, `FILE_STORAGE_DIR`, `DATABASE_URL`, `ENCRYPTION_KEY`, `TZ`, `AUTO_OPEN_BROWSER`, `AUTO_CREATE_DEFAULT_CONNECTION`. The server logs a warning when one of these changes so you don't wonder why it didn't take effect. (Note: `CORS_ORIGINS` _is_ hot-reloadable for adding/removing origins; only switching between an explicit list and `*` still needs a restart.)
 
