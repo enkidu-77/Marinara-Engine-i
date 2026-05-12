@@ -17,7 +17,7 @@ cd "$(dirname "$0")"
 for pkg_name in git; do
     if ! dpkg -s "$pkg_name" &> /dev/null; then
         echo "  [..] Installing $pkg_name..."
-        pkg install -y "$pkg_name" 2>/dev/null || true
+        pkg install -y -o Dpkg::Options::="--force-confold" "$pkg_name" 2>/dev/null || true
     fi
 done
 
@@ -43,12 +43,17 @@ if [ "$NODE_PLAT" = "android" ]; then
         # Force pnpm to re-resolve optional deps on next install
         TERMUX_FORCE_INSTALL=1
     fi
+    # Ensure wasm32 is supported (required for sharp fallback on some Android devices)
+    if ! grep -q "supportedArchitectures.cpu\[\]=wasm32" .npmrc 2>/dev/null; then
+        echo "supportedArchitectures.cpu[]=wasm32" >> .npmrc
+        TERMUX_FORCE_INSTALL=1
+    fi
 fi
 
 # ── Check Node.js ──
 if ! command -v node &> /dev/null || ! node -v &> /dev/null; then
     echo "  [..] Node.js not found or broken — installing via pkg..."
-    pkg install -y nodejs-lts
+    pkg install -y -o Dpkg::Options::="--force-confold" nodejs-lts
 fi
 
 if ! NODE_VERSION=$(node -v 2>/dev/null | cut -d'.' -f1 | tr -d 'v'); then
@@ -67,7 +72,7 @@ echo "  [OK] Node.js $(node -v) found"
 
 if [ "$NODE_VERSION" -lt 24 ]; then
     echo "  [..] Node.js 24 LTS or newer is required. You have v${NODE_VERSION}; upgrading nodejs-lts..."
-    pkg upgrade -y nodejs-lts || pkg install -y nodejs-lts
+    pkg upgrade -y -o Dpkg::Options::="--force-confold" nodejs-lts || pkg install -y -o Dpkg::Options::="--force-confold" nodejs-lts
     if ! NODE_VERSION=$(node -v 2>/dev/null | cut -d'.' -f1 | tr -d 'v'); then
         echo "  [ERR] Node.js is still not working after upgrade."
         echo "        Try:  pkg upgrade && pkg install nodejs-lts"
